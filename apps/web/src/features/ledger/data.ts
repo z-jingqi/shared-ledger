@@ -19,6 +19,7 @@ export const mainNavigation = [
 ];
 
 export const settingsLinks = [
+  { label: "AI Provider", to: "/settings/ai-provider", Icon: SparkleIcon },
   { label: "成员管理", to: "/members", Icon: UsersIcon },
   { label: "分类管理", to: "/settings/categories", Icon: ListBulletsIcon },
   { label: "标签管理", to: "/settings/tags", Icon: SparkleIcon },

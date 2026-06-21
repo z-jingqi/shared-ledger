@@ -21,6 +21,7 @@
     "@shared-ledger/ai": "workspace:*",
     "@shared-ledger/import": "workspace:*",
     "@shared-ledger/shared": "workspace:*",
+    "ai": "^6.0.208",
     "hono": "^4.7.7",
     "zod": "^3.24.3"
   },

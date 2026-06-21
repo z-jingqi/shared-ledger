@@ -1,69 +1,92 @@
+import { createAnthropic } from "@ai-sdk/anthropic";
+import { createOpenAI } from "@ai-sdk/openai";
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { generateText, Output, streamText, type LanguageModel, type ModelMessage } from "ai";
+import { createWorkersAI } from "workers-ai-provider";
 import { aiImportRecordSchema } from "@shared-ledger/shared";
 import { z } from "zod";
 
 export type AiContext = { bookId: string; userId: string; page?: string; text: string };
 export type WorkersAiBinding = { run(model: string, input: unknown): Promise<unknown> };
-
+export type LedgerAiConfig = {
+  provider: "workers-ai" | "openai" | "anthropic" | "openrouter";
+  model: string;
+  apiKeyRef?: string;
+  baseUrl?: string;
+};
+export type LedgerAiEnvironment = {
+  ai?: WorkersAiBinding;
+  providerKeys?: Record<string, string | undefined>;
+};
 export interface AiProvider {
   structureImport(input: AiContext): Promise<z.infer<typeof aiImportRecordSchema>[]>;
   chat(input: AiContext): Promise<string>;
 }
+export const defaultAiConfig: LedgerAiConfig = {
+  provider: "workers-ai",
+  model: "@cf/meta/llama-3.1-8b-instruct",
+};
 
-const importSystemPrompt = `You are a bookkeeping extraction service. Return JSON only, matching this schema:
-[{"type":"income|expense","amount":number,"occurredAt":"ISO date","note":"string","categoryName":"string","confidence":0..1,"warnings":["string"]}].
-Infer nothing that is not supported by the supplied parsed text.`;
+const importSystemPrompt =
+  "You extract bookkeeping entries. Return only records supported by the supplied text.";
+const chatSystemPrompt = "你是一起记的账本助手。回答基于用户当前账本上下文，简洁、明确、不得编造数据。";
 
-function extractJson(value: unknown) {
-  if (typeof value === "object" && value && "response" in value && typeof value.response === "string") {
-    const response = value.response
-      .trim()
-      .replace(/^```json\s*/i, "")
-      .replace(/```$/i, "");
-    return JSON.parse(response);
-  }
-  throw new Error("Workers AI 未返回可解析的结构化结果");
+function keyFor(config: LedgerAiConfig, keys: Record<string, string | undefined>) {
+  const key = keys[config.apiKeyRef ?? config.provider];
+  if (!key) throw new Error(`${config.provider} 尚未配置密钥引用 ${config.apiKeyRef ?? config.provider}`);
+  return key;
 }
 
-export class WorkersAiProvider implements AiProvider {
-  constructor(
-    private readonly ai: WorkersAiBinding,
-    private readonly model = "@cf/meta/llama-3.1-8b-instruct",
-  ) {}
-
-  async structureImport(input: AiContext) {
-    const result = await this.ai.run(this.model, {
-      messages: [
-        { role: "system", content: importSystemPrompt },
-        { role: "user", content: input.text },
-      ],
-      response_format: { type: "json_object" },
-    });
-    const parsed = extractJson(result);
-    const records = Array.isArray(parsed) ? parsed : parsed.records;
-    if (!Array.isArray(records)) throw new Error("AI 输出不包含记录数组");
-    return records.map((record) => aiImportRecordSchema.parse(record));
-  }
-
-  async chat(input: AiContext) {
-    const result = await this.ai.run(this.model, {
-      messages: [
-        {
-          role: "system",
-          content: "你是一起记的账本助手。回答基于用户当前账本上下文，简洁、明确、不得编造数据。",
-        },
-        {
-          role: "user",
-          content: `页面：${input.page ?? "账本"}\n账本：${input.bookId}\n问题：${input.text}`,
-        },
-      ],
-    });
-    if (typeof result === "object" && result && "response" in result && typeof result.response === "string")
-      return result.response;
-    throw new Error("Workers AI 未返回文本回复");
+export function resolveModel(config: LedgerAiConfig, environment: LedgerAiEnvironment): LanguageModel {
+  switch (config.provider) {
+    case "workers-ai":
+      if (!environment.ai) throw new Error("Workers AI binding 未配置");
+      return createWorkersAI({ binding: environment.ai as any })(config.model);
+    case "openai":
+      return createOpenAI({
+        apiKey: keyFor(config, environment.providerKeys ?? {}),
+        baseURL: config.baseUrl,
+      })(config.model);
+    case "anthropic":
+      return createAnthropic({
+        apiKey: keyFor(config, environment.providerKeys ?? {}),
+        baseURL: config.baseUrl,
+      })(config.model);
+    case "openrouter":
+      return createOpenRouter({
+        apiKey: keyFor(config, environment.providerKeys ?? {}),
+        baseURL: config.baseUrl,
+      })(config.model);
   }
 }
 
-export function createAiProvider(ai?: WorkersAiBinding): AiProvider {
-  if (!ai) throw new Error("Workers AI binding 未配置");
-  return new WorkersAiProvider(ai);
+export function createAiProvider(config: LedgerAiConfig, environment: LedgerAiEnvironment) {
+  const model = resolveModel(config, environment);
+  return {
+    config,
+    streamChat(messages: ModelMessage[], context: Pick<AiContext, "bookId" | "page">) {
+      return streamText({
+        model,
+        system: `${chatSystemPrompt}\n页面：${context.page ?? "账本"}\n账本：${context.bookId}`,
+        messages,
+      });
+    },
+    async chat(input: AiContext) {
+      const result = await generateText({
+        model,
+        system: `${chatSystemPrompt}\n页面：${input.page ?? "账本"}\n账本：${input.bookId}`,
+        prompt: input.text,
+      });
+      return result.text;
+    },
+    async structureImport(input: AiContext): Promise<z.infer<typeof aiImportRecordSchema>[]> {
+      const result = await generateText({
+        model,
+        system: importSystemPrompt,
+        prompt: input.text,
+        output: Output.array({ element: aiImportRecordSchema }),
+      });
+      return result.output.map((record) => aiImportRecordSchema.parse(record));
+    },
+  };
 }

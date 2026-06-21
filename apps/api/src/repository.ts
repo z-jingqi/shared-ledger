@@ -1,3 +1,4 @@
+import type { AiProviderName } from "@shared-ledger/shared";
 import type { Book, Member, Transaction } from "./types";
 import type { ImportedRecord, ImportJob, Invitation, SimpleEntity } from "./store";
 
@@ -74,6 +75,51 @@ const mapRecord = (row: Row): ImportedRecord => ({
  */
 export class D1LedgerRepository {
   constructor(private readonly db: D1Database) {}
+
+  async getAiProviderConfig(userId: string) {
+    const row = await this.db
+      .prepare(
+        "SELECT provider,model,api_key_ref AS apiKeyRef,base_url AS baseUrl FROM ai_provider_configs WHERE user_id = ?",
+      )
+      .bind(userId)
+      .first<{ provider: AiProviderName; model: string; apiKeyRef: string | null; baseUrl: string | null }>();
+    return row ? { ...row, apiKeyRef: row.apiKeyRef ?? undefined, baseUrl: row.baseUrl ?? undefined } : null;
+  }
+
+  async ensureAiProviderConfig(userId: string) {
+    const timestamp = now();
+    await this.db
+      .prepare(
+        "INSERT OR IGNORE INTO ai_provider_configs (user_id,provider,model,created_at,updated_at) VALUES (?,?,?,?,?)",
+      )
+      .bind(userId, "workers-ai", "@cf/meta/llama-3.1-8b-instruct", timestamp, timestamp)
+      .run();
+    return this.getAiProviderConfig(userId);
+  }
+
+  async setAiProviderConfig(
+    userId: string,
+    config: { provider: AiProviderName; model: string; apiKeyRef?: string; baseUrl?: string },
+  ) {
+    const timestamp = now();
+    await this.db
+      .prepare(
+        `INSERT INTO ai_provider_configs (user_id,provider,model,api_key_ref,base_url,created_at,updated_at)
+         VALUES (?,?,?,?,?,?,?)
+         ON CONFLICT(user_id) DO UPDATE SET provider=excluded.provider,model=excluded.model,api_key_ref=excluded.api_key_ref,base_url=excluded.base_url,updated_at=excluded.updated_at`,
+      )
+      .bind(
+        userId,
+        config.provider,
+        config.model,
+        config.apiKeyRef ?? null,
+        config.baseUrl ?? null,
+        timestamp,
+        timestamp,
+      )
+      .run();
+    return this.getAiProviderConfig(userId);
+  }
 
   async role(bookId: string, userId: string) {
     const result = await this.db

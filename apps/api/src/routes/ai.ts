@@ -1,44 +1,93 @@
-import { createAiProvider } from "@shared-ledger/ai";
-import { canUseAi } from "@shared-ledger/shared";
+import { convertToModelMessages, type UIMessage } from "ai";
+import { aiProviderConfigSchema, aiProviders, canUseAi } from "@shared-ledger/shared";
 import type { Hono } from "hono";
 import { jsonError } from "../lib/http";
 import { D1LedgerRepository } from "../repository";
 import { requireUser } from "../services/access";
+import { runtimeAiProvider } from "../services/ai";
 import type { MemoryLedgerStore } from "../store";
 import type { Env } from "../types";
 
+const messageText = (message?: UIMessage) =>
+  message?.parts
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
+    .join("\n") ?? "";
+
 export function registerAiRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryLedgerStore) {
+  app.get("/ai/providers", async (context) => {
+    const user = await requireUser(context, store);
+    if (user instanceof Response) return user;
+    if (!context.env.DB) return jsonError(context, "AI 配置需要 D1 运行时", 503);
+    const config = await new D1LedgerRepository(context.env.DB).ensureAiProviderConfig(user.id);
+    return context.json({ config, providers: aiProviders });
+  });
+
+  app.put("/ai/providers", async (context) => {
+    const user = await requireUser(context, store);
+    if (user instanceof Response) return user;
+    if (!canUseAi(user.plan)) return jsonError(context, "AI Provider 配置仅对订阅用户开放", 403);
+    if (!context.env.DB) return jsonError(context, "AI 配置需要 D1 运行时", 503);
+    const parsed = aiProviderConfigSchema.safeParse(await context.req.json());
+    if (!parsed.success) return jsonError(context, "Provider 配置不合法");
+    try {
+      runtimeAiProvider(context.env, parsed.data);
+      const config = await new D1LedgerRepository(context.env.DB).setAiProviderConfig(user.id, parsed.data);
+      return context.json({ config });
+    } catch (error) {
+      return jsonError(context, error instanceof Error ? error.message : "Provider 配置不可用");
+    }
+  });
+
   app.post("/ai/chat", async (context) => {
     const user = await requireUser(context, store);
     if (user instanceof Response) return user;
     if (!canUseAi(user.plan)) return jsonError(context, "AI 助手仅对订阅用户开放", 403);
     if (!context.env.DB) return jsonError(context, "AI 对话需要 D1 运行时", 503);
     const body = await context.req.json<{
+      messages?: UIMessage[];
       message?: string;
       bookId?: string;
       page?: string;
       conversationId?: string;
     }>();
-    if (!body.message?.trim()) return jsonError(context, "请输入问题");
+    const messages =
+      body.messages ??
+      (body.message
+        ? [
+            {
+              id: crypto.randomUUID(),
+              role: "user" as const,
+              parts: [{ type: "text" as const, text: body.message }],
+            },
+          ]
+        : []);
+    const prompt = messageText(messages.at(-1));
+    if (!prompt.trim()) return jsonError(context, "请输入问题");
     const repository = new D1LedgerRepository(context.env.DB);
     const conversationId = body.conversationId
       ? (await repository.getConversation(user.id, body.conversationId))?.id
-      : (await repository.createConversation(user.id, body.bookId, body.message.trim().slice(0, 60))).id;
+      : (await repository.createConversation(user.id, body.bookId, prompt.slice(0, 60))).id;
     if (!conversationId) return jsonError(context, "对话不存在", 404);
     try {
-      await repository.appendMessage(conversationId, "user", body.message.trim());
-      const message = await createAiProvider(context.env.AI).chat({
-        userId: user.id,
-        bookId: body.bookId ?? "",
-        page: body.page,
-        text: body.message.trim(),
+      await repository.appendMessage(conversationId, "user", prompt);
+      const config = await repository.ensureAiProviderConfig(user.id);
+      const result = runtimeAiProvider(context.env, config ?? undefined).streamChat(
+        await convertToModelMessages(messages),
+        { bookId: body.bookId ?? "", page: body.page },
+      );
+      return result.toUIMessageStreamResponse({
+        originalMessages: messages,
+        onFinish: async ({ responseMessage }) => {
+          const text = messageText(responseMessage);
+          if (text) await repository.appendMessage(conversationId, "assistant", text);
+        },
       });
-      await repository.appendMessage(conversationId, "assistant", message);
-      return context.json({ conversationId, message });
     } catch (error) {
       return jsonError(context, error instanceof Error ? error.message : "AI 服务暂时不可用", 503);
     }
   });
+
   app.get("/ai/conversations", async (context) => {
     const user = await requireUser(context, store);
     if (user instanceof Response) return user;

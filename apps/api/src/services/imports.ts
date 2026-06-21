@@ -1,7 +1,7 @@
-import { createAiProvider } from "@shared-ledger/ai";
 import { normalizeFile, structureForConfirmation } from "@shared-ledger/import";
 import { PaddleOcrContainerAdapter } from "../ocr";
 import { D1LedgerRepository } from "../repository";
+import { runtimeAiProvider } from "./ai";
 import type { Env } from "../types";
 
 export type ImportQueueMessage = { jobId: string };
@@ -30,7 +30,7 @@ export async function processImportJob(env: Env, jobId: string) {
       bookId: job.bookId,
       userId: job.userId,
       normalized,
-      ai: createAiProvider(env.AI),
+      ai: runtimeAiProvider(env, (await repository.ensureAiProviderConfig(job.userId)) ?? undefined),
     });
     const records = await repository.createImportedRecords(job.id, suggestions);
     await repository.updateImportJob(job.id, records.length ? "pending_confirmation" : "completed");

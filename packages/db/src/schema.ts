@@ -159,3 +159,11 @@ export const aiMessages = sqliteTable("ai_messages", {
   metadata: text("metadata"),
   createdAt: text("created_at").notNull(),
 });
+export const aiProviderConfigs = sqliteTable("ai_provider_configs", {
+  userId: text("user_id").primaryKey(),
+  provider: text("provider").notNull(),
+  model: text("model").notNull(),
+  apiKeyRef: text("api_key_ref"),
+  baseUrl: text("base_url"),
+  ...timestamps,
+});

@@ -6,6 +6,7 @@ export type Env = {
   IMPORT_QUEUE?: Queue;
   OCR?: DurableObjectNamespace<PaddleOcrContainer>;
   AI?: { run(model: string, input: unknown): Promise<unknown> };
+  AI_PROVIDER_KEYS?: string;
   APP_ENV?: string;
   WEB_ORIGIN?: string;
   GOOGLE_CLIENT_ID?: string;

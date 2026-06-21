@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AccountSettingsPage, AuthPage, SubscriptionPage } from "../pages/AccountPages";
 import { AiPage } from "../pages/AiPage";
+import { AiProviderPage } from "../pages/AiProviderPage";
 import { BookHomePage, BooksPage, CreateBookPage } from "../pages/BookPages";
 import { AnalysisPage } from "../pages/AnalysisPage";
 import { ImportHistoryPage, ImportsPage, PendingImportsPage } from "../pages/ImportPages";
@@ -38,6 +39,7 @@ export function AppRoutes() {
       <Route path="/invitations/sent" element={<SentInvitationsPage />} />
       <Route path="/settings" element={<SettingsPage />} />
       <Route path="/settings/:tab" element={<ManagementSettingsPage />} />
+      <Route path="/settings/ai-provider" element={<AiProviderPage />} />
       <Route path="/account" element={<AccountSettingsPage />} />
       <Route path="/subscription" element={<SubscriptionPage />} />
       <Route path="/ai" element={plan === "pro" ? <AiPage /> : <Navigate to="/subscription" replace />} />

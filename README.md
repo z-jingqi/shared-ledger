@@ -87,7 +87,7 @@ pnpm cf:deploy:containers:prod
 
 相应模板位于 `apps/api/wrangler.container.template.jsonc`，本地全链路配置为 `wrangler.container.local.jsonc`。
 
-免费用户没有 AI 对话入口；Pro 用户可使用全局抽屉与完整对话页。Provider、模型和 key 仅由服务端环境配置。
+免费用户没有 AI 对话入口；Pro 用户可使用全局抽屉与完整对话页。Provider 与模型保存在每位用户的 D1 配置中，切换会在下一次对话立即生效。密钥不写入 D1：通过 Worker secret `AI_PROVIDER_KEYS` 提供 JSON 映射，例如 `{"openai":"...","anthropic":"...","openrouter":"..."}`；配置中的“密钥引用”选择映射的键名。
 
 ## CI/CD
 
