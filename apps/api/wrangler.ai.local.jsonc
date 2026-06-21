@@ -1,0 +1,13 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "shared-ledger-local-ai",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-21",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "vars": { "APP_ENV": "local", "WEB_ORIGIN": "http://localhost:5173" },
+  "ai": { "binding": "AI" },
+  "d1_databases": [{ "binding": "DB", "database_name": "shared-ledger-local", "database_id": "local", "migrations_dir": "../../packages/db/migrations" }],
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "shared-ledger-local-files" }],
+  "queues": { "producers": [{ "binding": "IMPORT_QUEUE", "queue": "shared-ledger-local-imports" }], "consumers": [{ "queue": "shared-ledger-local-imports", "max_batch_size": 5, "max_batch_timeout": 10 }] }
+}

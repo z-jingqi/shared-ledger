@@ -1,13 +1,14 @@
 import { RobotIcon } from "@phosphor-icons/react";
-import type { SubscriptionPlan } from "@shared-ledger/shared";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { AiDrawer } from "../components/ai/AiDrawer";
 import { mainNavigation } from "../features/ledger/data";
+import { useAuth } from "../features/auth/AuthProvider";
 
-export function AppFrame({ children, plan }: { children: ReactNode; plan: SubscriptionPlan }) {
+export function AppFrame({ children }: { children: ReactNode }) {
   const location = useLocation();
+  const { user } = useAuth();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const isAuthPage = ["/login", "/register"].includes(location.pathname);
 
@@ -16,7 +17,7 @@ export function AppFrame({ children, plan }: { children: ReactNode; plan: Subscr
   return (
     <main className="phone">
       <div className="content">{children}</div>
-      {plan === "pro" && (
+      {user?.plan === "pro" && (
         <>
           <button className="ai-fab" aria-label="打开 AI 助手" onClick={() => setDrawerOpen(true)}>
             <RobotIcon size={25} weight="fill" />

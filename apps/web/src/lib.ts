@@ -1,7 +1,9 @@
 export const API = import.meta.env.VITE_API_URL || "/api";
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const isFormData = init?.body instanceof FormData;
   const response = await fetch(`${API}${path}`, {
-    headers: { "Content-Type": "application/json", ...init?.headers },
+    credentials: "include",
+    headers: { ...(isFormData ? {} : { "Content-Type": "application/json" }), ...init?.headers },
     ...init,
   });
   if (!response.ok) throw new Error((await response.json().catch(() => ({ error: "请求失败" }))).error);

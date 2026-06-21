@@ -1,28 +1,49 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
+
+let plan: "free" | "pro" = "free";
+const json = (data: unknown) =>
+  new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/json" } });
 describe("shared ledger mobile UI", () => {
   beforeEach(() => {
-    localStorage.clear();
+    plan = "free";
     window.history.pushState({}, "", "/");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | Request) => {
+        const path = typeof input === "string" ? input : input.url;
+        if (path.includes("/auth/me"))
+          return Promise.resolve(
+            json({ user: { id: "user_test", name: "测试用户", email: "test@example.com", plan } }),
+          );
+        if (path.includes("/books/book_test/transactions"))
+          return Promise.resolve(json({ transactions: [] }));
+        if (path.includes("/books/book_test/imports")) return Promise.resolve(json({ imports: [] }));
+        if (path.includes("/books/book_test"))
+          return Promise.resolve(json({ book: { id: "book_test", name: "家庭账本", currency: "CNY" } }));
+        if (path.includes("/books"))
+          return Promise.resolve(json({ books: [{ id: "book_test", name: "家庭账本", currency: "CNY" }] }));
+        return Promise.resolve(json({}));
+      }),
+    );
   });
-  it("shows the book home and hides AI for a free user", () => {
+  it("loads a real book response and hides AI for a free user", async () => {
     render(<App />);
-    expect(screen.getByRole("heading", { name: "家庭账本" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "我的账本" })).toBeInTheDocument();
     expect(screen.queryByLabelText("打开 AI 助手")).not.toBeInTheDocument();
   });
-  it("shows AI controls after the demo user upgrades", async () => {
-    const user = userEvent.setup();
+  it("shows AI controls for a pro session", async () => {
+    plan = "pro";
     render(<App />);
-    await user.click(screen.getByRole("link", { name: "我的" }));
-    await user.click(screen.getByRole("button", { name: /切换为 Pro/ }));
-    expect(screen.getByLabelText("打开 AI 助手")).toBeInTheDocument();
+    expect(await screen.findByLabelText("打开 AI 助手")).toBeInTheDocument();
   });
-  it("navigates to the add record form", async () => {
+  it("navigates from a live book to the add record form", async () => {
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getAllByText("记一笔")[0]);
-    expect(screen.getByRole("heading", { name: "记一笔" })).toBeInTheDocument();
+    await user.click(await screen.findByText("家庭账本"));
+    await user.click(await screen.findByText("记一笔"));
+    expect(await screen.findByRole("heading", { name: "记一笔" })).toBeInTheDocument();
   });
 });

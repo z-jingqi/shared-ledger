@@ -1,10 +1,19 @@
 import { CaretRightIcon, RobotIcon, SparkleIcon } from "@phosphor-icons/react";
 import { useState } from "react";
-
+import { useActiveBook } from "../../hooks/useActiveBook";
+import { api } from "../../lib";
 export function AiDrawer({ close }: { close: () => void }) {
   const [message, setMessage] = useState("");
   const [answer, setAnswer] = useState("");
-
+  const { book } = useActiveBook();
+  const ask = async () => {
+    if (!message.trim()) return;
+    const result = await api<{ message: string }>("/ai/chat", {
+      method: "POST",
+      body: JSON.stringify({ message, bookId: book?.id, page: "浮窗" }),
+    });
+    setAnswer(result.message);
+  };
   return (
     <aside className="ai-drawer">
       <header>
@@ -28,7 +37,7 @@ export function AiDrawer({ close }: { close: () => void }) {
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          setAnswer(`关于“${message}”，本月餐饮支出占比最高，建议先确认 3 笔待入账记录。`);
+          void ask();
         }}
       >
         <input

@@ -1,10 +1,18 @@
+import type { PaddleOcrContainer } from "./ocr";
+
 export type Env = {
   DB?: D1Database;
   FILES?: R2Bucket;
   IMPORT_QUEUE?: Queue;
+  OCR?: DurableObjectNamespace<PaddleOcrContainer>;
+  AI?: { run(model: string, input: unknown): Promise<unknown> };
   APP_ENV?: string;
   WEB_ORIGIN?: string;
-  AI_PROVIDER?: string;
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  WECHAT_APP_ID?: string;
+  WECHAT_APP_SECRET?: string;
+  AUTH_COOKIE_SECRET?: string;
 };
 export type LedgerUser = { id: string; name: string; email: string; plan: "free" | "pro" };
 export type Book = {

@@ -25,6 +25,19 @@ export const createBookSchema = z.object({
   currency: z.string().trim().length(3).default("CNY"),
   note: z.string().max(300).optional(),
 });
+export const registerSchema = z.object({
+  name: z.string().trim().min(1).max(60),
+  password: z.string().min(10).max(128),
+  email: z.string().email().optional(),
+  phone: z.string().trim().min(6).max(30).optional(),
+});
+export const loginSchema = z.object({
+  identifier: z.string().trim().min(1),
+  password: z.string().min(1).max(128),
+});
+export const subscriptionContactSchema = z
+  .object({ email: z.string().email().optional(), phone: z.string().trim().min(6).max(30).optional() })
+  .refine((value) => value.email || value.phone, "订阅前请补充邮箱或手机号");
 export const createTransactionSchema = z
   .object({
     type: z.enum(transactionTypes),

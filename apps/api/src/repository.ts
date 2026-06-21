@@ -1,241 +1,680 @@
-import type { MemoryLedgerStore } from "./store";
+import type { Book, Member, Transaction } from "./types";
+import type { ImportedRecord, ImportJob, Invitation, SimpleEntity } from "./store";
 
-const iso = () => new Date().toISOString();
-const quote = (value: unknown) => (value === undefined ? null : value);
+type Row = Record<string, any>;
+const now = () => new Date().toISOString();
+const id = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
+
+const mapBook = (row: Row): Book => ({
+  id: row.id,
+  name: row.name,
+  currency: row.currency,
+  createdByUserId: row.createdByUserId,
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
+});
+
+const mapMember = (row: Row): Member => ({
+  id: row.id,
+  bookId: row.bookId,
+  userId: row.userId,
+  name: row.name,
+  role: row.role,
+  joinedAt: row.joinedAt,
+});
+
+const mapSimple = (row: Row): SimpleEntity => ({
+  id: row.id,
+  bookId: row.bookId,
+  name: row.name,
+  ...(row.type ? { type: row.type } : {}),
+  ...(row.icon ? { icon: row.icon } : {}),
+  ...(row.color ? { color: row.color } : {}),
+  ...(row.sortOrder !== undefined ? { sortOrder: row.sortOrder } : {}),
+});
+
+const mapInvitation = (row: Row): Invitation => ({
+  id: row.id,
+  bookId: row.bookId,
+  inviterUserId: row.inviterUserId,
+  ...(row.inviteeEmail ? { inviteeEmail: row.inviteeEmail } : {}),
+  ...(row.inviteePhone ? { inviteePhone: row.inviteePhone } : {}),
+  ...(row.inviteeUserId ? { inviteeUserId: row.inviteeUserId } : {}),
+  role: row.role,
+  status: row.status,
+  expiresAt: row.expiresAt,
+  ...(row.lastRemindedAt ? { lastRemindedAt: row.lastRemindedAt } : {}),
+});
+
+const mapImportJob = (row: Row): ImportJob => ({
+  id: row.id,
+  bookId: row.bookId,
+  userId: row.userId,
+  fileName: row.fileName,
+  fileType: row.fileType,
+  r2Key: row.r2Key,
+  status: row.status,
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
+});
+
+const mapRecord = (row: Row): ImportedRecord => ({
+  id: row.id,
+  importJobId: row.importJobId,
+  suggestedTransaction: JSON.parse(row.suggestedTransaction),
+  status: row.status,
+  confidence: row.confidence / 100,
+  warnings: JSON.parse(row.warnings),
+});
 
 /**
- * D1-backed repository boundary. MemoryLedgerStore remains the deterministic
- * test/local adapter; this repository hydrates and writes the Worker snapshot
- * using the normalized D1 tables declared in packages/db/migrations.
+ * The production repository talks to D1 directly. It deliberately does not
+ * cache a request snapshot: that pattern loses concurrent writes and lets
+ * test fixtures escape into production data.
  */
 export class D1LedgerRepository {
   constructor(private readonly db: D1Database) {}
 
-  async hydrate(store: MemoryLedgerStore) {
-    const [users, books, members, transactions, categories, tags, accounts, invitations, jobs, records] =
-      await this.db.batch([
-        this.db.prepare("SELECT id,name,email FROM users"),
-        this.db.prepare(
-          "SELECT id,name,currency,created_by_user_id AS createdByUserId,created_at AS createdAt,updated_at AS updatedAt FROM books WHERE deleted_at IS NULL",
-        ),
-        this.db.prepare(
-          "SELECT bm.id,bm.book_id AS bookId,bm.user_id AS userId,u.name,bm.role,bm.joined_at AS joinedAt FROM book_members bm JOIN users u ON u.id=bm.user_id",
-        ),
-        this.db.prepare(
-          "SELECT id,book_id AS bookId,type,amount_cents / 100.0 AS amount,category_id AS categoryId,account_id AS accountId,member_id AS memberId,created_by_user_id AS createdByUserId,note,occurred_at AS occurredAt FROM transactions WHERE deleted_at IS NULL",
-        ),
-        this.db.prepare("SELECT id,book_id AS bookId,name,type,icon,sort_order AS sortOrder FROM categories"),
-        this.db.prepare("SELECT id,book_id AS bookId,name,color FROM tags"),
-        this.db.prepare("SELECT id,book_id AS bookId,name,type FROM accounts"),
-        this.db.prepare(
-          "SELECT id,book_id AS bookId,inviter_user_id AS inviterUserId,invitee_email AS inviteeEmail,invitee_phone AS inviteePhone,invitee_user_id AS inviteeUserId,role,status,expires_at AS expiresAt,last_reminded_at AS lastRemindedAt FROM invitations",
-        ),
-        this.db.prepare(
-          "SELECT id,book_id AS bookId,user_id AS userId,file_name AS fileName,file_type AS fileType,r2_key AS r2Key,status,created_at AS createdAt,updated_at AS updatedAt FROM import_jobs",
-        ),
-        this.db.prepare(
-          "SELECT id,import_job_id AS importJobId,suggested_transaction AS suggestedTransaction,status,confidence,warnings FROM imported_records",
-        ),
-      ]);
-    if (!users.results.length) return;
-    const subscriptions = await this.db
-      .prepare("SELECT user_id AS userId,plan FROM subscriptions WHERE status='active'")
-      .all<{ userId: string; plan: "free" | "pro" }>();
-    const plans = new Map(subscriptions.results.map((row) => [row.userId, row.plan]));
-    store.users = users.results.map((row: any) => ({
-      id: row.id,
-      name: row.name,
-      email: row.email ?? "",
-      plan: plans.get(row.id) ?? "free",
-    }));
-    store.books = books.results as any;
-    store.members = members.results as any;
-    store.transactions = transactions.results.map((row: any) => ({ ...row, tagIds: [], items: [] }));
-    store.categories = categories.results as any;
-    store.tags = tags.results as any;
-    store.accounts = accounts.results as any;
-    store.invitations = invitations.results as any;
-    store.imports = jobs.results as any;
-    store.records = records.results.map((row: any) => ({
-      ...row,
-      suggestedTransaction: JSON.parse(row.suggestedTransaction),
-      warnings: JSON.parse(row.warnings),
-    }));
+  async role(bookId: string, userId: string) {
+    const result = await this.db
+      .prepare("SELECT role FROM book_members WHERE book_id = ? AND user_id = ?")
+      .bind(bookId, userId)
+      .first<{ role: Member["role"] }>();
+    return result?.role;
   }
 
-  async persist(store: MemoryLedgerStore) {
-    const timestamp = iso();
+  async listBooks(userId: string) {
+    const result = await this.db
+      .prepare(
+        `SELECT b.id,b.name,b.currency,b.created_by_user_id AS createdByUserId,b.created_at AS createdAt,b.updated_at AS updatedAt
+         FROM books b JOIN book_members bm ON bm.book_id = b.id
+         WHERE bm.user_id = ? AND b.deleted_at IS NULL ORDER BY b.updated_at DESC`,
+      )
+      .bind(userId)
+      .all<Row>();
+    return result.results.map(mapBook);
+  }
+
+  async getBook(bookId: string) {
+    const result = await this.db
+      .prepare(
+        "SELECT id,name,currency,created_by_user_id AS createdByUserId,created_at AS createdAt,updated_at AS updatedAt FROM books WHERE id = ? AND deleted_at IS NULL",
+      )
+      .bind(bookId)
+      .first<Row>();
+    return result ? mapBook(result) : null;
+  }
+
+  async createBook(userId: string, name: string, currency: string) {
+    const timestamp = now();
+    const book: Book = {
+      id: id("book"),
+      name,
+      currency,
+      createdByUserId: userId,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    await this.db.batch([
+      this.db
+        .prepare(
+          "INSERT INTO books (id,name,currency,created_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?)",
+        )
+        .bind(book.id, book.name, book.currency, userId, timestamp, timestamp),
+      this.db
+        .prepare(
+          "INSERT INTO book_members (id,book_id,user_id,role,joined_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
+        )
+        .bind(id("member"), book.id, userId, "creator", timestamp, timestamp, timestamp),
+    ]);
+    return book;
+  }
+
+  async updateBook(bookId: string, input: Partial<Pick<Book, "name" | "currency">>) {
+    const book = await this.getBook(bookId);
+    if (!book) return null;
+    const timestamp = now();
+    const updated = {
+      ...book,
+      name: input.name ?? book.name,
+      currency: input.currency ?? book.currency,
+      updatedAt: timestamp,
+    };
+    await this.db
+      .prepare("UPDATE books SET name = ?, currency = ?, updated_at = ? WHERE id = ?")
+      .bind(updated.name, updated.currency, timestamp, bookId)
+      .run();
+    return updated;
+  }
+
+  async deleteBook(bookId: string) {
+    await this.db
+      .prepare("UPDATE books SET deleted_at = ?, updated_at = ? WHERE id = ?")
+      .bind(now(), now(), bookId)
+      .run();
+  }
+
+  async exportBook(bookId: string) {
+    const book = await this.getBook(bookId);
+    if (!book) return null;
+    const [members, transactions, categories, tags, accounts, invitations] = await Promise.all([
+      this.listMembers(bookId),
+      this.listTransactions(bookId),
+      this.listSimple("categories", bookId),
+      this.listSimple("tags", bookId),
+      this.listSimple("accounts", bookId),
+      this.listInvitations(bookId),
+    ]);
+    return { exportedAt: now(), book, members, transactions, categories, tags, accounts, invitations };
+  }
+
+  async listMembers(bookId: string) {
+    const result = await this.db
+      .prepare(
+        `SELECT bm.id,bm.book_id AS bookId,bm.user_id AS userId,u.name,bm.role,bm.joined_at AS joinedAt
+         FROM book_members bm JOIN users u ON u.id = bm.user_id WHERE bm.book_id = ? ORDER BY bm.joined_at`,
+      )
+      .bind(bookId)
+      .all<Row>();
+    return result.results.map(mapMember);
+  }
+
+  async updateMemberRole(bookId: string, memberId: string, role: "admin" | "member") {
+    const row = await this.db
+      .prepare(
+        `SELECT bm.id,bm.book_id AS bookId,bm.user_id AS userId,u.name,bm.role,bm.joined_at AS joinedAt
+         FROM book_members bm JOIN users u ON u.id = bm.user_id WHERE bm.id = ? AND bm.book_id = ?`,
+      )
+      .bind(memberId, bookId)
+      .first<Row>();
+    if (!row || row.role === "creator") return null;
+    await this.db
+      .prepare("UPDATE book_members SET role = ?, updated_at = ? WHERE id = ?")
+      .bind(role, now(), memberId)
+      .run();
+    return mapMember({ ...row, role });
+  }
+
+  private async mapTransaction(row: Row): Promise<Transaction> {
+    const [tags, items] = await this.db.batch([
+      this.db.prepare("SELECT tag_id AS id FROM transaction_tags WHERE transaction_id = ?").bind(row.id),
+      this.db
+        .prepare(
+          "SELECT id,name,amount_cents / 100.0 AS amount,category_id AS categoryId,note FROM transaction_items WHERE transaction_id = ? ORDER BY created_at",
+        )
+        .bind(row.id),
+    ]);
+    return {
+      id: row.id,
+      bookId: row.bookId,
+      type: row.type,
+      amount: row.amount,
+      ...(row.categoryId ? { categoryId: row.categoryId } : {}),
+      ...(row.accountId ? { accountId: row.accountId } : {}),
+      ...(row.memberId ? { memberId: row.memberId } : {}),
+      createdByUserId: row.createdByUserId,
+      ...(row.note ? { note: row.note } : {}),
+      occurredAt: row.occurredAt,
+      tagIds: (tags.results as Row[]).map((tag) => tag.id),
+      items: items.results as Transaction["items"],
+    };
+  }
+
+  private transactionSelect = `SELECT id,book_id AS bookId,type,amount_cents / 100.0 AS amount,category_id AS categoryId,account_id AS accountId,member_id AS memberId,created_by_user_id AS createdByUserId,note,occurred_at AS occurredAt FROM transactions`;
+
+  async listTransactions(bookId: string) {
+    const result = await this.db
+      .prepare(
+        `${this.transactionSelect} WHERE book_id = ? AND deleted_at IS NULL ORDER BY occurred_at DESC, created_at DESC`,
+      )
+      .bind(bookId)
+      .all<Row>();
+    return Promise.all(result.results.map((row) => this.mapTransaction(row)));
+  }
+
+  async getTransaction(transactionId: string) {
+    const row = await this.db
+      .prepare(`${this.transactionSelect} WHERE id = ? AND deleted_at IS NULL`)
+      .bind(transactionId)
+      .first<Row>();
+    return row ? this.mapTransaction(row) : null;
+  }
+
+  async createTransaction(
+    bookId: string,
+    userId: string,
+    input: Omit<Transaction, "id" | "bookId" | "createdByUserId">,
+  ) {
+    const timestamp = now();
+    const transaction: Transaction = {
+      ...input,
+      id: id("transaction"),
+      bookId,
+      createdByUserId: userId,
+      items: input.items.map((item) => ({ ...item, id: id("item") })),
+    };
     const statements: D1PreparedStatement[] = [
-      this.db.prepare("DELETE FROM transaction_tags"),
-      this.db.prepare("DELETE FROM transaction_items"),
-      this.db.prepare("DELETE FROM imported_records"),
-      this.db.prepare("DELETE FROM import_jobs"),
-      this.db.prepare("DELETE FROM invitations"),
-      this.db.prepare("DELETE FROM transactions"),
-      this.db.prepare("DELETE FROM categories"),
-      this.db.prepare("DELETE FROM tags"),
-      this.db.prepare("DELETE FROM accounts"),
-      this.db.prepare("DELETE FROM book_members"),
-      this.db.prepare("DELETE FROM subscriptions"),
-      this.db.prepare("DELETE FROM books"),
-      this.db.prepare("DELETE FROM users"),
+      this.db
+        .prepare(
+          "INSERT INTO transactions (id,book_id,type,amount_cents,category_id,account_id,member_id,created_by_user_id,note,occurred_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        )
+        .bind(
+          transaction.id,
+          bookId,
+          transaction.type,
+          Math.round(transaction.amount * 100),
+          transaction.categoryId ?? null,
+          transaction.accountId ?? null,
+          transaction.memberId ?? null,
+          userId,
+          transaction.note ?? null,
+          transaction.occurredAt,
+          timestamp,
+          timestamp,
+        ),
     ];
-    for (const user of store.users)
+    for (const tagId of transaction.tagIds)
       statements.push(
         this.db
-          .prepare(
-            "INSERT INTO users (id,name,email,password_hash,created_at,updated_at) VALUES (?,?,?,?,?,?)",
-          )
-          .bind(user.id, user.name, user.email || null, "managed-by-auth-adapter", timestamp, timestamp),
+          .prepare("INSERT INTO transaction_tags (transaction_id,tag_id) VALUES (?,?)")
+          .bind(transaction.id, tagId),
       );
-    for (const book of store.books)
+    for (const item of transaction.items)
       statements.push(
         this.db
           .prepare(
-            "INSERT INTO books (id,name,currency,created_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?)",
-          )
-          .bind(book.id, book.name, book.currency, book.createdByUserId, book.createdAt, book.updatedAt),
-      );
-    for (const member of store.members)
-      statements.push(
-        this.db
-          .prepare(
-            "INSERT INTO book_members (id,book_id,user_id,role,joined_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
-          )
-          .bind(member.id, member.bookId, member.userId, member.role, member.joinedAt, timestamp, timestamp),
-      );
-    for (const category of store.categories)
-      statements.push(
-        this.db
-          .prepare(
-            "INSERT INTO categories (id,book_id,name,type,icon,sort_order,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
+            "INSERT INTO transaction_items (id,transaction_id,name,amount_cents,category_id,note,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
           )
           .bind(
-            category.id,
-            category.bookId,
-            category.name,
-            category.type,
-            category.icon ?? "tag",
-            category.sortOrder ?? 0,
-            timestamp,
-            timestamp,
-          ),
-      );
-    for (const tag of store.tags)
-      statements.push(
-        this.db
-          .prepare("INSERT INTO tags (id,book_id,name,color,created_at,updated_at) VALUES (?,?,?,?,?,?)")
-          .bind(tag.id, tag.bookId, tag.name, tag.color ?? "#ff681c", timestamp, timestamp),
-      );
-    for (const account of store.accounts)
-      statements.push(
-        this.db
-          .prepare(
-            "INSERT INTO accounts (id,book_id,name,type,created_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
-          )
-          .bind(
-            account.id,
-            account.bookId,
-            account.name,
-            account.type ?? "other",
-            store.books.find((book) => book.id === account.bookId)?.createdByUserId ?? store.users[0]?.id,
-            timestamp,
-            timestamp,
-          ),
-      );
-    for (const transaction of store.transactions) {
-      statements.push(
-        this.db
-          .prepare(
-            "INSERT INTO transactions (id,book_id,type,amount_cents,category_id,account_id,member_id,created_by_user_id,note,occurred_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-          )
-          .bind(
+            item.id,
             transaction.id,
-            transaction.bookId,
-            transaction.type,
-            Math.round(transaction.amount * 100),
-            quote(transaction.categoryId),
-            quote(transaction.accountId),
-            quote(transaction.memberId),
-            transaction.createdByUserId,
-            quote(transaction.note),
-            transaction.occurredAt,
+            item.name,
+            Math.round(item.amount * 100),
+            item.categoryId ?? null,
+            item.note ?? null,
             timestamp,
             timestamp,
           ),
       );
-      for (const tagId of transaction.tagIds)
-        statements.push(
-          this.db
-            .prepare("INSERT INTO transaction_tags (transaction_id,tag_id) VALUES (?,?)")
-            .bind(transaction.id, tagId),
-        );
-      for (const item of transaction.items)
-        statements.push(
-          this.db
-            .prepare(
-              "INSERT INTO transaction_items (id,transaction_id,name,amount_cents,category_id,note,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
-            )
-            .bind(
-              item.id,
-              transaction.id,
-              item.name,
-              Math.round(item.amount * 100),
-              quote(item.categoryId),
-              quote(item.note),
-              timestamp,
-              timestamp,
-            ),
-        );
-    }
-    for (const invitation of store.invitations)
+    await this.db.batch(statements);
+    return transaction;
+  }
+
+  async updateTransaction(
+    transactionId: string,
+    input: Omit<Transaction, "id" | "bookId" | "createdByUserId">,
+  ) {
+    const current = await this.getTransaction(transactionId);
+    if (!current) return null;
+    const timestamp = now();
+    const transaction: Transaction = {
+      ...current,
+      ...input,
+      id: current.id,
+      bookId: current.bookId,
+      createdByUserId: current.createdByUserId,
+      items: input.items.map((item) => ({ ...item, id: item.id || id("item") })),
+    };
+    const statements: D1PreparedStatement[] = [
+      this.db
+        .prepare(
+          "UPDATE transactions SET type=?,amount_cents=?,category_id=?,account_id=?,member_id=?,note=?,occurred_at=?,updated_at=? WHERE id=?",
+        )
+        .bind(
+          transaction.type,
+          Math.round(transaction.amount * 100),
+          transaction.categoryId ?? null,
+          transaction.accountId ?? null,
+          transaction.memberId ?? null,
+          transaction.note ?? null,
+          transaction.occurredAt,
+          timestamp,
+          transactionId,
+        ),
+      this.db.prepare("DELETE FROM transaction_tags WHERE transaction_id = ?").bind(transactionId),
+      this.db.prepare("DELETE FROM transaction_items WHERE transaction_id = ?").bind(transactionId),
+    ];
+    for (const tagId of transaction.tagIds)
+      statements.push(
+        this.db
+          .prepare("INSERT INTO transaction_tags (transaction_id,tag_id) VALUES (?,?)")
+          .bind(transactionId, tagId),
+      );
+    for (const item of transaction.items)
       statements.push(
         this.db
           .prepare(
-            "INSERT INTO invitations (id,book_id,inviter_user_id,invitee_email,invitee_phone,invitee_user_id,role,status,expires_at,last_reminded_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO transaction_items (id,transaction_id,name,amount_cents,category_id,note,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
           )
           .bind(
-            invitation.id,
-            invitation.bookId,
-            invitation.inviterUserId,
-            quote(invitation.inviteeEmail),
-            quote(invitation.inviteePhone),
-            quote(invitation.inviteeUserId),
-            invitation.role,
-            invitation.status,
-            invitation.expiresAt,
-            quote(invitation.lastRemindedAt),
+            item.id,
+            transactionId,
+            item.name,
+            Math.round(item.amount * 100),
+            item.categoryId ?? null,
+            item.note ?? null,
             timestamp,
             timestamp,
           ),
       );
-    for (const job of store.imports)
-      statements.push(
-        this.db
-          .prepare(
-            "INSERT INTO import_jobs (id,book_id,user_id,file_name,file_type,r2_key,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
-          )
-          .bind(
-            job.id,
-            job.bookId,
-            job.userId,
-            job.fileName,
-            job.fileType,
-            job.r2Key,
-            job.status,
-            job.createdAt,
-            job.updatedAt,
-          ),
-      );
-    for (const record of store.records)
-      statements.push(
+    await this.db.batch(statements);
+    return transaction;
+  }
+
+  async deleteTransaction(transactionId: string) {
+    await this.db
+      .prepare("UPDATE transactions SET deleted_at = ?, updated_at = ? WHERE id = ?")
+      .bind(now(), now(), transactionId)
+      .run();
+  }
+
+  private tableFor(kind: "categories" | "tags" | "accounts") {
+    return kind;
+  }
+
+  async listSimple(kind: "categories" | "tags" | "accounts", bookId: string) {
+    const columns =
+      kind === "categories"
+        ? "id,book_id AS bookId,name,type,icon,sort_order AS sortOrder"
+        : kind === "tags"
+          ? "id,book_id AS bookId,name,color"
+          : "id,book_id AS bookId,name,type";
+    const result = await this.db
+      .prepare(`SELECT ${columns} FROM ${this.tableFor(kind)} WHERE book_id = ? ORDER BY created_at`)
+      .bind(bookId)
+      .all<Row>();
+    return result.results.map(mapSimple);
+  }
+
+  async findCategoryByName(bookId: string, name?: string) {
+    if (!name) return null;
+    const row = await this.db
+      .prepare(
+        "SELECT id,book_id AS bookId,name,type,icon,sort_order AS sortOrder FROM categories WHERE book_id = ? AND name = ? LIMIT 1",
+      )
+      .bind(bookId, name)
+      .first<Row>();
+    return row ? mapSimple(row) : null;
+  }
+
+  async findMember(bookId: string, userId: string) {
+    const row = await this.db
+      .prepare(
+        "SELECT id,book_id AS bookId,user_id AS userId FROM book_members WHERE book_id = ? AND user_id = ?",
+      )
+      .bind(bookId, userId)
+      .first<Row>();
+    return row;
+  }
+
+  async getSimple(kind: "categories" | "tags" | "accounts", entityId: string) {
+    const columns =
+      kind === "categories"
+        ? "id,book_id AS bookId,name,type,icon,sort_order AS sortOrder"
+        : kind === "tags"
+          ? "id,book_id AS bookId,name,color"
+          : "id,book_id AS bookId,name,type";
+    const result = await this.db
+      .prepare(`SELECT ${columns} FROM ${this.tableFor(kind)} WHERE id = ?`)
+      .bind(entityId)
+      .first<Row>();
+    return result ? mapSimple(result) : null;
+  }
+
+  async createSimple(
+    kind: "categories" | "tags" | "accounts",
+    bookId: string,
+    userId: string,
+    data: Omit<SimpleEntity, "id" | "bookId">,
+  ) {
+    const timestamp = now();
+    const entity: SimpleEntity = { ...data, id: id(kind.slice(0, -1)), bookId };
+    if (kind === "categories")
+      await this.db
+        .prepare(
+          "INSERT INTO categories (id,book_id,name,type,icon,sort_order,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
+        )
+        .bind(
+          entity.id,
+          bookId,
+          entity.name,
+          entity.type,
+          entity.icon,
+          entity.sortOrder ?? 0,
+          timestamp,
+          timestamp,
+        )
+        .run();
+    else if (kind === "tags")
+      await this.db
+        .prepare("INSERT INTO tags (id,book_id,name,color,created_at,updated_at) VALUES (?,?,?,?,?,?)")
+        .bind(entity.id, bookId, entity.name, entity.color, timestamp, timestamp)
+        .run();
+    else
+      await this.db
+        .prepare(
+          "INSERT INTO accounts (id,book_id,name,type,created_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
+        )
+        .bind(entity.id, bookId, entity.name, entity.type, userId, timestamp, timestamp)
+        .run();
+    return entity;
+  }
+
+  async updateSimple(
+    kind: "categories" | "tags" | "accounts",
+    entityId: string,
+    data: Omit<SimpleEntity, "id" | "bookId">,
+  ) {
+    const current = await this.getSimple(kind, entityId);
+    if (!current) return null;
+    const entity = { ...current, ...data };
+    if (kind === "categories")
+      await this.db
+        .prepare("UPDATE categories SET name=?,type=?,icon=?,sort_order=?,updated_at=? WHERE id=?")
+        .bind(entity.name, entity.type, entity.icon, entity.sortOrder ?? 0, now(), entityId)
+        .run();
+    else if (kind === "tags")
+      await this.db
+        .prepare("UPDATE tags SET name=?,color=?,updated_at=? WHERE id=?")
+        .bind(entity.name, entity.color, now(), entityId)
+        .run();
+    else
+      await this.db
+        .prepare("UPDATE accounts SET name=?,type=?,updated_at=? WHERE id=?")
+        .bind(entity.name, entity.type, now(), entityId)
+        .run();
+    return entity;
+  }
+
+  async deleteSimple(kind: "categories" | "tags" | "accounts", entityId: string) {
+    await this.db
+      .prepare(`DELETE FROM ${this.tableFor(kind)} WHERE id = ?`)
+      .bind(entityId)
+      .run();
+  }
+
+  async listInvitations(bookId: string) {
+    const result = await this.db
+      .prepare(
+        "SELECT id,book_id AS bookId,inviter_user_id AS inviterUserId,invitee_email AS inviteeEmail,invitee_phone AS inviteePhone,invitee_user_id AS inviteeUserId,role,status,expires_at AS expiresAt,last_reminded_at AS lastRemindedAt FROM invitations WHERE book_id=? ORDER BY created_at DESC",
+      )
+      .bind(bookId)
+      .all<Row>();
+    return result.results.map(mapInvitation);
+  }
+
+  async listReceivedInvitations(userId: string) {
+    const user = await this.db
+      .prepare("SELECT email,phone FROM users WHERE id = ?")
+      .bind(userId)
+      .first<{ email: string | null; phone: string | null }>();
+    const result = await this.db
+      .prepare(
+        "SELECT id,book_id AS bookId,inviter_user_id AS inviterUserId,invitee_email AS inviteeEmail,invitee_phone AS inviteePhone,invitee_user_id AS inviteeUserId,role,status,expires_at AS expiresAt,last_reminded_at AS lastRemindedAt FROM invitations WHERE invitee_user_id=? OR (invitee_email IS NOT NULL AND invitee_email=?) OR (invitee_phone IS NOT NULL AND invitee_phone=?) ORDER BY created_at DESC",
+      )
+      .bind(userId, user?.email ?? "", user?.phone ?? "")
+      .all<Row>();
+    return result.results.map(mapInvitation);
+  }
+
+  async getInvitation(invitationId: string) {
+    const row = await this.db
+      .prepare(
+        "SELECT id,book_id AS bookId,inviter_user_id AS inviterUserId,invitee_email AS inviteeEmail,invitee_phone AS inviteePhone,invitee_user_id AS inviteeUserId,role,status,expires_at AS expiresAt,last_reminded_at AS lastRemindedAt FROM invitations WHERE id=?",
+      )
+      .bind(invitationId)
+      .first<Row>();
+    return row ? mapInvitation(row) : null;
+  }
+
+  async createInvitation(input: Omit<Invitation, "id" | "status" | "expiresAt">) {
+    const timestamp = now();
+    const invitation: Invitation = {
+      ...input,
+      id: id("invitation"),
+      status: "pending",
+      expiresAt: new Date(Date.now() + 7 * 86400000).toISOString(),
+    };
+    await this.db
+      .prepare(
+        "INSERT INTO invitations (id,book_id,inviter_user_id,invitee_email,invitee_phone,invitee_user_id,role,status,expires_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+      )
+      .bind(
+        invitation.id,
+        invitation.bookId,
+        invitation.inviterUserId,
+        invitation.inviteeEmail ?? null,
+        invitation.inviteePhone ?? null,
+        null,
+        invitation.role,
+        invitation.status,
+        invitation.expiresAt,
+        timestamp,
+        timestamp,
+      )
+      .run();
+    return invitation;
+  }
+
+  async findPendingInvitation(bookId: string, email?: string, phone?: string) {
+    return this.db
+      .prepare(
+        "SELECT id FROM invitations WHERE book_id=? AND status='pending' AND (invitee_email=? OR invitee_phone=?) LIMIT 1",
+      )
+      .bind(bookId, email ?? "", phone ?? "")
+      .first();
+  }
+  async updateInvitation(
+    invitationId: string,
+    fields: Partial<Pick<Invitation, "status" | "inviteeUserId" | "lastRemindedAt">>,
+  ) {
+    const invitation = await this.getInvitation(invitationId);
+    if (!invitation) return null;
+    const changed = { ...invitation, ...fields };
+    await this.db
+      .prepare("UPDATE invitations SET status=?,invitee_user_id=?,last_reminded_at=?,updated_at=? WHERE id=?")
+      .bind(
+        changed.status,
+        changed.inviteeUserId ?? null,
+        changed.lastRemindedAt ?? null,
+        now(),
+        invitationId,
+      )
+      .run();
+    return changed;
+  }
+  async addMember(bookId: string, userId: string, role: "admin" | "member") {
+    const timestamp = now();
+    await this.db
+      .prepare(
+        "INSERT OR IGNORE INTO book_members (id,book_id,user_id,role,joined_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
+      )
+      .bind(id("member"), bookId, userId, role, timestamp, timestamp, timestamp)
+      .run();
+  }
+
+  async createImportJob(input: Omit<ImportJob, "id" | "status" | "createdAt" | "updatedAt">) {
+    const timestamp = now();
+    const job: ImportJob = {
+      ...input,
+      id: id("import"),
+      status: "uploaded",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    await this.db
+      .prepare(
+        "INSERT INTO import_jobs (id,book_id,user_id,file_name,file_type,r2_key,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+      )
+      .bind(
+        job.id,
+        job.bookId,
+        job.userId,
+        job.fileName,
+        job.fileType,
+        job.r2Key,
+        job.status,
+        timestamp,
+        timestamp,
+      )
+      .run();
+    return job;
+  }
+  async listImportJobs(bookId: string) {
+    const result = await this.db
+      .prepare(
+        "SELECT id,book_id AS bookId,user_id AS userId,file_name AS fileName,file_type AS fileType,r2_key AS r2Key,status,created_at AS createdAt,updated_at AS updatedAt FROM import_jobs WHERE book_id=? ORDER BY created_at DESC",
+      )
+      .bind(bookId)
+      .all<Row>();
+    return result.results.map(mapImportJob);
+  }
+  async getImportJob(jobId: string) {
+    const row = await this.db
+      .prepare(
+        "SELECT id,book_id AS bookId,user_id AS userId,file_name AS fileName,file_type AS fileType,r2_key AS r2Key,status,created_at AS createdAt,updated_at AS updatedAt FROM import_jobs WHERE id=?",
+      )
+      .bind(jobId)
+      .first<Row>();
+    return row ? mapImportJob(row) : null;
+  }
+  async updateImportJob(jobId: string, status: string, errorMessage?: string) {
+    await this.db
+      .prepare("UPDATE import_jobs SET status=?,error_message=?,updated_at=? WHERE id=?")
+      .bind(status, errorMessage ?? null, now(), jobId)
+      .run();
+    return this.getImportJob(jobId);
+  }
+  async createImportedRecords(
+    jobId: string,
+    suggestions: Array<{
+      type: string;
+      amount: number;
+      occurredAt: string;
+      note?: string;
+      categoryName?: string;
+      confidence: number;
+      warnings: string[];
+    }>,
+  ) {
+    const timestamp = now();
+    const records: ImportedRecord[] = suggestions.map((suggestedTransaction) => ({
+      id: id("import_record"),
+      importJobId: jobId,
+      suggestedTransaction,
+      status: "pending",
+      confidence: suggestedTransaction.confidence,
+      warnings: suggestedTransaction.warnings,
+    }));
+    await this.db.batch(
+      records.map((record) =>
         this.db
           .prepare(
             "INSERT INTO imported_records (id,import_job_id,raw_data,suggested_transaction,status,confidence,warnings,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
           )
           .bind(
             record.id,
-            record.importJobId,
+            jobId,
             "{}",
             JSON.stringify(record.suggestedTransaction),
             record.status,
@@ -244,15 +683,93 @@ export class D1LedgerRepository {
             timestamp,
             timestamp,
           ),
-      );
-    for (const user of store.users)
-      statements.push(
-        this.db
-          .prepare(
-            "INSERT INTO subscriptions (id,user_id,plan,status,started_at,expires_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
-          )
-          .bind(`sub_${user.id}`, user.id, user.plan, "active", timestamp, null, timestamp, timestamp),
-      );
-    await this.db.batch(statements);
+      ),
+    );
+    return records;
+  }
+  async listImportedRecords(jobId: string) {
+    const result = await this.db
+      .prepare(
+        "SELECT id,import_job_id AS importJobId,suggested_transaction AS suggestedTransaction,status,confidence,warnings FROM imported_records WHERE import_job_id=? ORDER BY created_at",
+      )
+      .bind(jobId)
+      .all<Row>();
+    return result.results.map(mapRecord);
+  }
+  async getImportedRecord(recordId: string) {
+    const row = await this.db
+      .prepare(
+        "SELECT id,import_job_id AS importJobId,suggested_transaction AS suggestedTransaction,status,confidence,warnings FROM imported_records WHERE id=?",
+      )
+      .bind(recordId)
+      .first<Row>();
+    return row ? mapRecord(row) : null;
+  }
+  async updateImportedRecord(
+    recordId: string,
+    suggestion: Record<string, unknown>,
+    status?: ImportedRecord["status"],
+  ) {
+    const record = await this.getImportedRecord(recordId);
+    if (!record) return null;
+    const updated = { ...record, suggestedTransaction: suggestion, status: status ?? record.status };
+    await this.db
+      .prepare("UPDATE imported_records SET suggested_transaction=?,status=?,updated_at=? WHERE id=?")
+      .bind(JSON.stringify(updated.suggestedTransaction), updated.status, now(), recordId)
+      .run();
+    return updated;
+  }
+
+  async createConversation(userId: string, bookId: string | undefined, title: string) {
+    const timestamp = now();
+    const conversation = {
+      id: id("conversation"),
+      userId,
+      bookId,
+      title,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    await this.db
+      .prepare(
+        "INSERT INTO ai_conversations (id,user_id,book_id,title,created_at,updated_at) VALUES (?,?,?,?,?,?)",
+      )
+      .bind(conversation.id, userId, bookId ?? null, title, timestamp, timestamp)
+      .run();
+    return conversation;
+  }
+  async appendMessage(conversationId: string, role: "user" | "assistant" | "system", content: string) {
+    const timestamp = now();
+    await this.db.batch([
+      this.db
+        .prepare("INSERT INTO ai_messages (id,conversation_id,role,content,created_at) VALUES (?,?,?,?,?)")
+        .bind(id("ai_message"), conversationId, role, content, timestamp),
+      this.db.prepare("UPDATE ai_conversations SET updated_at=? WHERE id=?").bind(timestamp, conversationId),
+    ]);
+  }
+  async listConversations(userId: string) {
+    const result = await this.db
+      .prepare(
+        "SELECT id,user_id AS userId,book_id AS bookId,title,created_at AS createdAt,updated_at AS updatedAt FROM ai_conversations WHERE user_id=? ORDER BY updated_at DESC",
+      )
+      .bind(userId)
+      .all<Row>();
+    return result.results;
+  }
+  async getConversation(userId: string, conversationId: string): Promise<(Row & { messages: Row[] }) | null> {
+    const conversation = await this.db
+      .prepare(
+        "SELECT id,user_id AS userId,book_id AS bookId,title,created_at AS createdAt,updated_at AS updatedAt FROM ai_conversations WHERE id=? AND user_id=?",
+      )
+      .bind(conversationId, userId)
+      .first<Row>();
+    if (!conversation) return null;
+    const messages = await this.db
+      .prepare(
+        "SELECT id,role,content,metadata,created_at AS createdAt FROM ai_messages WHERE conversation_id=? ORDER BY created_at",
+      )
+      .bind(conversationId)
+      .all<Row>();
+    return { ...conversation, messages: messages.results as Row[] };
   }
 }

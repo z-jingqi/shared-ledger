@@ -22,7 +22,9 @@
     "db:migrate:local": "pnpm --filter @shared-ledger/api d1:migrate:local",
     "cf:dev": "pnpm --filter @shared-ledger/api dev",
     "cf:deploy:dev": "node scripts/prepare-wrangler-config.mjs api dev && pnpm --filter @shared-ledger/api exec wrangler deploy --config wrangler.generated-api-dev.json",
-    "cf:deploy:prod": "node scripts/prepare-wrangler-config.mjs api prod && pnpm --filter @shared-ledger/api exec wrangler deploy --config wrangler.generated-api-prod.json"
+    "cf:deploy:prod": "node scripts/prepare-wrangler-config.mjs api prod && pnpm --filter @shared-ledger/api exec wrangler deploy --config wrangler.generated-api-prod.json",
+    "cf:deploy:containers:dev": "node scripts/prepare-wrangler-config.mjs api-containers dev && pnpm --filter @shared-ledger/api exec wrangler deploy --config wrangler.generated-api-containers-dev.json",
+    "cf:deploy:containers:prod": "node scripts/prepare-wrangler-config.mjs api-containers prod && pnpm --filter @shared-ledger/api exec wrangler deploy --config wrangler.generated-api-containers-prod.json"
   },
   "devDependencies": {
     "@eslint/js": "^9.25.1",

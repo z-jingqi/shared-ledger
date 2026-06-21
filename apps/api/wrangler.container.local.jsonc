@@ -1,11 +1,12 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "shared-ledger-local",
+  "name": "shared-ledger-local-containers",
   "main": "src/index.ts",
   "compatibility_date": "2026-06-21",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "vars": { "APP_ENV": "local", "WEB_ORIGIN": "http://localhost:5173" },
+  "ai": { "binding": "AI" },
   "d1_databases": [
     {
       "binding": "DB",
@@ -19,4 +20,15 @@
     "producers": [{ "binding": "IMPORT_QUEUE", "queue": "shared-ledger-local-imports" }],
     "consumers": [{ "queue": "shared-ledger-local-imports", "max_batch_size": 5, "max_batch_timeout": 10 }],
   },
+  "durable_objects": { "bindings": [{ "name": "OCR", "class_name": "PaddleOcrContainer" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PaddleOcrContainer"] }],
+  "containers": [
+    {
+      "class_name": "PaddleOcrContainer",
+      "image": "./ocr/Dockerfile",
+      "image_build_context": "./ocr",
+      "max_instances": 1,
+      "instance_type": "lite",
+    },
+  ],
 }

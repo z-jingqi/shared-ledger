@@ -1,4 +1,3 @@
-import type { SubscriptionPlan } from "@shared-ledger/shared";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AccountSettingsPage, AuthPage, SubscriptionPage } from "../pages/AccountPages";
 import { AiPage } from "../pages/AiPage";
@@ -8,17 +7,15 @@ import { ImportHistoryPage, ImportsPage, PendingImportsPage } from "../pages/Imp
 import { InviteMemberPage, MemberRolePage, MembersPage } from "../pages/MemberPages";
 import { RecordDetailPage, RecordsPage, TransactionFormPage } from "../pages/RecordPages";
 import { ManagementSettingsPage, SettingsPage } from "../pages/SettingsPages";
+import { ReceivedInvitationsPage, SentInvitationsPage } from "../pages/InvitationPages";
+import { useAuth } from "../features/auth/AuthProvider";
 
-export function AppRoutes({
-  plan,
-  setPlan,
-}: {
-  plan: SubscriptionPlan;
-  setPlan: (plan: SubscriptionPlan) => void;
-}) {
+export function AppRoutes() {
+  const { user } = useAuth();
+  const plan = user?.plan ?? "free";
   return (
     <Routes>
-      <Route path="/" element={<Navigate to="/books/book_home" replace />} />
+      <Route path="/" element={<Navigate to="/books" replace />} />
       <Route path="/login" element={<AuthPage />} />
       <Route path="/register" element={<AuthPage register />} />
       <Route path="/books" element={<BooksPage />} />
@@ -37,12 +34,12 @@ export function AppRoutes({
       <Route path="/members" element={<MembersPage />} />
       <Route path="/members/invite" element={<InviteMemberPage />} />
       <Route path="/members/role" element={<MemberRolePage />} />
-      <Route path="/invitations/received" element={<ManagementSettingsPage />} />
-      <Route path="/invitations/sent" element={<ManagementSettingsPage />} />
-      <Route path="/settings" element={<SettingsPage plan={plan} setPlan={setPlan} />} />
+      <Route path="/invitations/received" element={<ReceivedInvitationsPage />} />
+      <Route path="/invitations/sent" element={<SentInvitationsPage />} />
+      <Route path="/settings" element={<SettingsPage />} />
       <Route path="/settings/:tab" element={<ManagementSettingsPage />} />
       <Route path="/account" element={<AccountSettingsPage />} />
-      <Route path="/subscription" element={<SubscriptionPage setPlan={setPlan} />} />
+      <Route path="/subscription" element={<SubscriptionPage />} />
       <Route path="/ai" element={plan === "pro" ? <AiPage /> : <Navigate to="/subscription" replace />} />
     </Routes>
   );

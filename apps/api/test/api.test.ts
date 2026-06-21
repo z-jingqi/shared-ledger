@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createApp } from "../src/index";
 import { MemoryLedgerStore } from "../src/store";
 const request = (path: string, init?: RequestInit) =>
-  createApp(new MemoryLedgerStore()).request(path, init, { APP_ENV: "test", AI_PROVIDER: "mock" });
+  createApp(new MemoryLedgerStore()).request(path, init, { APP_ENV: "test" });
 describe("Hono REST API", () => {
   it("creates a book and restricts deletion to creator", async () => {
     const response = await request("/books", {
@@ -25,7 +25,7 @@ describe("Hono REST API", () => {
     });
     expect(response.status).toBe(400);
   });
-  it("hides AI chat from free users and exposes it to pro users", async () => {
+  it("hides AI chat from free users and requires persistent runtime for pro users", async () => {
     const free = await request("/ai/chat", {
       method: "POST",
       body: JSON.stringify({ message: "分析" }),
@@ -37,7 +37,7 @@ describe("Hono REST API", () => {
       headers: { "Content-Type": "application/json", "X-Plan": "pro" },
     });
     expect(free.status).toBe(403);
-    expect(pro.status).toBe(200);
+    expect(pro.status).toBe(503);
   });
   it("prevents duplicate pending invitations", async () => {
     const store = new MemoryLedgerStore();
@@ -47,7 +47,7 @@ describe("Hono REST API", () => {
       body: JSON.stringify({ email: "new@example.com", role: "member" }),
       headers: { "Content-Type": "application/json" },
     };
-    expect((await app.request("/books/book_home/invitations", init)).status).toBe(201);
-    expect((await app.request("/books/book_home/invitations", init)).status).toBe(409);
+    expect((await app.request("/books/book_home/invitations", init, { APP_ENV: "test" })).status).toBe(201);
+    expect((await app.request("/books/book_home/invitations", init, { APP_ENV: "test" })).status).toBe(409);
   });
 });

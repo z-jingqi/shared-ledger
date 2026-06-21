@@ -1,6 +1,5 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { persistStore } from "./middleware/persistence";
 import { registerAiRoutes } from "./routes/ai";
 import { registerAuthRoutes } from "./routes/auth";
 import { registerBookRoutes } from "./routes/books";
@@ -9,17 +8,17 @@ import { registerInvitationRoutes } from "./routes/invitations";
 import { registerMemberRoutes } from "./routes/members";
 import { registerResourceRoutes } from "./routes/resources";
 import { registerTransactionRoutes } from "./routes/transactions";
-import { MemoryLedgerStore } from "./store";
+import type { MemoryLedgerStore } from "./store";
 import type { Env } from "./types";
 
-export function createApp(store = new MemoryLedgerStore()) {
+export function createApp(store?: MemoryLedgerStore) {
   const app = new Hono<{ Bindings: Env }>();
 
-  app.use("/*", persistStore(store));
   app.use(
     "/*",
     cors({
       origin: (origin, context) => origin || context.env?.WEB_ORIGIN || "*",
+      exposeHeaders: ["Content-Disposition"],
       allowHeaders: ["Content-Type", "X-User-Id", "X-Plan"],
       allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     }),

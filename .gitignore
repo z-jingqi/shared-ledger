@@ -8,4 +8,5 @@ apps/*/wrangler.generated-*.json
 .env
 .env.*
 !.env.example
+apps/api/.dev.vars
 *.log

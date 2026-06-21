@@ -1,6 +1,7 @@
 import type { AiProvider } from "@shared-ledger/ai";
 import { aiImportRecordSchema } from "@shared-ledger/shared";
 import Papa from "papaparse";
+import * as XLSX from "xlsx";
 import { z } from "zod";
 
 export const supportedFileTypes = [
@@ -17,16 +18,6 @@ export type OcrResult = { text: string; confidence: number; pages?: number };
 export interface OcrAdapter {
   recognize(input: { bytes: ArrayBuffer; mimeType: string }): Promise<OcrResult>;
 }
-export class UnavailablePaddleOcrAdapter implements OcrAdapter {
-  async recognize(_input: { bytes: ArrayBuffer; mimeType: string }): Promise<OcrResult> {
-    throw new Error("PaddleOCR Container 尚未启用；请配置 OCR_ADAPTER_ENDPOINT。");
-  }
-}
-export class MockOcrAdapter implements OcrAdapter {
-  async recognize() {
-    return { text: "超市购物 ¥38.50", confidence: 0.94 };
-  }
-}
 export type NormalizedImport = { rawText: string; warnings: string[] };
 export function parseCsv(content: string): NormalizedImport {
   const parsed = Papa.parse<string[]>(content, { skipEmptyLines: true });
@@ -42,8 +33,14 @@ export async function normalizeFile(
     const result = await ocr.recognize(file);
     return { rawText: result.text, warnings: result.confidence < 0.8 ? ["OCR 置信度较低"] : [] };
   }
-  if (file.mimeType.includes("sheet") || file.mimeType.includes("excel"))
-    return { rawText: "Excel 文件等待解析 adapter", warnings: ["当前开发环境使用 Excel adapter 占位实现"] };
+  if (file.mimeType.includes("sheet") || file.mimeType.includes("excel")) {
+    const workbook = XLSX.read(file.bytes, { type: "array", cellText: true, cellDates: true });
+    const rawText = workbook.SheetNames.map((name) => XLSX.utils.sheet_to_csv(workbook.Sheets[name]))
+      .filter(Boolean)
+      .join("\n");
+    if (!rawText.trim()) throw new Error("Excel 文件中没有可导入的数据");
+    return { rawText, warnings: [] };
+  }
   throw new Error("不支持的文件类型");
 }
 export async function structureForConfirmation(input: {

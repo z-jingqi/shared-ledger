@@ -1,0 +1,5 @@
+# Local-only OAuth secrets. Copy to .dev.vars; do not commit the copy.
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+WECHAT_APP_ID=
+WECHAT_APP_SECRET=
