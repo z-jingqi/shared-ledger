@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@10.15.0",
-  "engines": { "node": ">=22.0.0" },
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
     "dev": "pnpm --parallel --filter @shared-ledger/web --filter @shared-ledger/api dev",
     "build": "pnpm -r --if-present build",
@@ -13,6 +15,8 @@
     "test:e2e": "pnpm --filter @shared-ledger/web test:e2e",
     "test:coverage": "pnpm --filter @shared-ledger/web test:coverage && pnpm --filter @shared-ledger/api test:coverage",
     "lint": "pnpm -r --if-present lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "typecheck": "pnpm -r --if-present typecheck",
     "db:generate": "pnpm --filter @shared-ledger/db generate",
     "db:migrate:local": "pnpm --filter @shared-ledger/api d1:migrate:local",
@@ -23,6 +27,7 @@
   "devDependencies": {
     "@eslint/js": "^9.25.1",
     "@types/node": "^22.15.3",
+    "prettier": "^3.5.3",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.30.1"
   }

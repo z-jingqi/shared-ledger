@@ -8,13 +8,13 @@ if (!target || !["web", "api"].includes(target) || !["dev", "prod"].includes(env
 
 const suffix = environment.toUpperCase();
 const values = {
-  "__ENV__": environment,
-  "__WEB_DOMAIN__": environment === "prod" ? "leger.aleph-cat.com" : "dev.leger.aleph-cat.com",
-  "__API_DOMAIN__": environment === "prod" ? "api.leger.aleph-cat.com" : "api.dev.leger.aleph-cat.com",
-  "__WEB_ORIGIN__": environment === "prod" ? "https://leger.aleph-cat.com" : "https://dev.leger.aleph-cat.com",
-  "__D1_DATABASE_ID__": process.env[`CLOUDFLARE_D1_DATABASE_ID_${suffix}`] ?? "__D1_DATABASE_ID__",
-  "__R2_BUCKET__": process.env[`CLOUDFLARE_R2_BUCKET_${suffix}`] ?? `shared-ledger-files-${environment}`,
-  "__QUEUE__": process.env[`CLOUDFLARE_QUEUE_${suffix}`] ?? `shared-ledger-imports-${environment}`
+  __ENV__: environment,
+  __WEB_DOMAIN__: environment === "prod" ? "leger.aleph-cat.com" : "dev.leger.aleph-cat.com",
+  __API_DOMAIN__: environment === "prod" ? "api.leger.aleph-cat.com" : "api.dev.leger.aleph-cat.com",
+  __WEB_ORIGIN__: environment === "prod" ? "https://leger.aleph-cat.com" : "https://dev.leger.aleph-cat.com",
+  __D1_DATABASE_ID__: process.env[`CLOUDFLARE_D1_DATABASE_ID_${suffix}`] ?? "__D1_DATABASE_ID__",
+  __R2_BUCKET__: process.env[`CLOUDFLARE_R2_BUCKET_${suffix}`] ?? `shared-ledger-files-${environment}`,
+  __QUEUE__: process.env[`CLOUDFLARE_QUEUE_${suffix}`] ?? `shared-ledger-imports-${environment}`,
 };
 if (target === "api" && values.__D1_DATABASE_ID__ === "__D1_DATABASE_ID__") {
   throw new Error(`CLOUDFLARE_D1_DATABASE_ID_${suffix} is required to deploy the API.`);

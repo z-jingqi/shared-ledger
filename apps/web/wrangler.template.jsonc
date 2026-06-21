@@ -3,8 +3,11 @@
   "name": "shared-ledger-web-__ENV__",
   "compatibility_date": "2026-06-21",
   "workers_dev": true,
-  "assets": { "directory": "./dist", "html_handling": "auto-trailing-slash", "not_found_handling": "single-page-application" },
+  "assets": {
+    "directory": "./dist",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "single-page-application",
+  },
   "vars": { "APP_ENV": "__ENV__" },
-  "routes": [{ "pattern": "__WEB_DOMAIN__", "custom_domain": true }]
+  "routes": [{ "pattern": "__WEB_DOMAIN__", "custom_domain": true }],
 }
-

@@ -5,6 +5,12 @@
   "compatibility_date": "2026-06-21",
   "workers_dev": true,
   "vars": { "APP_ENV": "local", "WEB_ORIGIN": "http://localhost:5173", "AI_PROVIDER": "mock" },
-  "d1_databases": [{ "binding": "DB", "database_name": "shared-ledger-local", "database_id": "local", "migrations_dir": "../../packages/db/migrations" }]
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "shared-ledger-local",
+      "database_id": "local",
+      "migrations_dir": "../../packages/db/migrations",
+    },
+  ],
 }
-

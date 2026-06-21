@@ -9,7 +9,12 @@
     "lint": "eslint src test --max-warnings=0",
     "typecheck": "tsc -p tsconfig.json"
   },
-  "dependencies": { "zod": "^3.24.3" },
-  "devDependencies": { "eslint": "^9.25.1", "typescript": "^5.8.3", "vitest": "^3.1.2" }
+  "dependencies": {
+    "zod": "^3.24.3"
+  },
+  "devDependencies": {
+    "eslint": "^9.25.1",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.2"
+  }
 }
-

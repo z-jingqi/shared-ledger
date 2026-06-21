@@ -1,73 +1,13 @@
-import { Hono } from "hono";
-import { cors } from "hono/cors";
-import { createAiProvider } from "@shared-ledger/ai";
-import { MockOcrAdapter, normalizeFile, structureForConfirmation } from "@shared-ledger/import";
-import { accountSchema, canDeleteBook, canInvite, canManageMembers, canMutateTransaction, canUseAi, categorySchema, createBookSchema, createTransactionSchema, inviteSchema, tagSchema } from "@shared-ledger/shared";
-import { MemoryLedgerStore } from "./store";
-import { D1LedgerRepository } from "./repository";
-import type { Env, LedgerUser } from "./types";
+import { createApp } from "./app";
+import type { Env } from "./types";
 
-const jsonError = (c: any, message: string, status = 400) => c.json({ error: message }, status);
-const parse = async (c: any, schema: any) => { const result = schema.safeParse(await c.req.json()); return result.success ? result.data : null; };
-export function createApp(store = new MemoryLedgerStore()) {
-  const app = new Hono<{ Bindings: Env }>();
-  app.use("/*", async (c, next) => { const repository = c.env?.DB ? new D1LedgerRepository(c.env.DB) : undefined; if (repository) await repository.hydrate(store); await next(); if (repository && c.req.method !== "GET" && c.req.method !== "OPTIONS") await repository.persist(store); });
-  app.use("/*", cors({ origin: (origin, c) => origin || c.env?.WEB_ORIGIN || "*", allowHeaders: ["Content-Type", "X-User-Id", "X-Plan"], allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"] }));
-  const user = (c: any): LedgerUser => { const found = store.users.find((u) => u.id === c.req.header("x-user-id")); return found ?? { ...store.users[0], plan: c.req.header("x-plan") === "pro" ? "pro" : store.users[0].plan }; };
-  const role = (c: any, bookId: string) => store.role(bookId, user(c).id);
-  const memberGuard = (c: any, bookId: string) => role(c, bookId) ? null : jsonError(c, "你不是该账本成员", 403);
-
-  app.get("/health", (c) => c.json({ ok: true, environment: c.env.APP_ENV ?? "test" }));
-  app.post("/auth/register", async (c) => { const body = await c.req.json<{ name?: string; email?: string }>(); if (!body.name || !body.email) return jsonError(c, "姓名和邮箱不能为空"); const created = store.createUser(body.name, body.email); return c.json({ user: created, token: created.id }, 201); });
-  app.post("/auth/login", async (c) => { const body = await c.req.json<{ email?: string }>(); const found = store.users.find((u) => u.email === body.email) ?? store.users[0]; return c.json({ user: found, token: found.id }); });
-  app.post("/auth/logout", (c) => c.body(null, 204));
-  app.get("/auth/me", (c) => c.json({ user: user(c) }));
-
-  app.get("/books", (c) => { const current = user(c); return c.json({ books: store.books.filter((book) => store.role(book.id, current.id)) }); });
-  app.post("/books", async (c) => { const body = await parse(c, createBookSchema); if (!body) return jsonError(c, "账本数据不合法"); return c.json({ book: store.createBook(user(c), body.name, body.currency) }, 201); });
-  app.get("/books/:id", (c) => { const book = store.books.find((item) => item.id === c.req.param("id")); if (!book) return jsonError(c, "账本不存在", 404); const denied = memberGuard(c, book.id); return denied ?? c.json({ book, role: role(c, book.id) }); });
-  app.patch("/books/:id", async (c) => { const book = store.books.find((item) => item.id === c.req.param("id")); if (!book) return jsonError(c, "账本不存在", 404); if (!canManageMembers(role(c, book.id) ?? "member")) return jsonError(c, "没有修改账本的权限", 403); const body = await c.req.json<Partial<typeof book>>(); Object.assign(book, { name: body.name ?? book.name, currency: body.currency ?? book.currency, updatedAt: new Date().toISOString() }); return c.json({ book }); });
-  app.delete("/books/:id", (c) => { const book = store.books.find((item) => item.id === c.req.param("id")); if (!book) return jsonError(c, "账本不存在", 404); if (!canDeleteBook(role(c, book.id) ?? "member")) return jsonError(c, "只有创建者可以删除账本", 403); store.books = store.books.filter((item) => item.id !== book.id); return c.body(null, 204); });
-
-  app.get("/books/:bookId/members", (c) => { const denied = memberGuard(c, c.req.param("bookId")); return denied ?? c.json({ members: store.members.filter((item) => item.bookId === c.req.param("bookId")) }); });
-  app.patch("/books/:bookId/members/:memberId/role", async (c) => { const bookId = c.req.param("bookId"); if (!canManageMembers(role(c, bookId) ?? "member")) return jsonError(c, "没有管理成员的权限", 403); const body = await c.req.json<{ role?: "admin" | "member" }>(); const member = store.members.find((item) => item.id === c.req.param("memberId") && item.bookId === bookId); if (!member || member.role === "creator") return jsonError(c, "成员不存在或不能修改创建者", 404); member.role = body.role ?? member.role; return c.json({ member }); });
-
-  app.get("/invitations/received", (c) => { const current = user(c); return c.json({ invitations: store.invitations.filter((item) => item.inviteeUserId === current.id || item.inviteeEmail === current.email) }); });
-  app.get("/books/:bookId/invitations", (c) => { const denied = memberGuard(c, c.req.param("bookId")); return denied ?? c.json({ invitations: store.invitations.filter((item) => item.bookId === c.req.param("bookId")) }); });
-  app.post("/books/:bookId/invitations", async (c) => { const bookId = c.req.param("bookId"); if (!canInvite(role(c, bookId) ?? "member")) return jsonError(c, "没有邀请成员的权限", 403); const body = await parse(c, inviteSchema); if (!body) return jsonError(c, "邀请数据不合法"); const duplicate = store.invitations.find((item) => item.bookId === bookId && item.status === "pending" && (item.inviteeEmail === body.email || item.inviteePhone === body.phone)); if (duplicate) return jsonError(c, "该成员已有待处理邀请", 409); const invitation = { id: crypto.randomUUID(), bookId, inviterUserId: user(c).id, inviteeEmail: body.email, inviteePhone: body.phone, role: body.role, status: "pending" as const, expiresAt: new Date(Date.now() + 7 * 86400000).toISOString() }; store.invitations.push(invitation); return c.json({ invitation }, 201); });
-  app.post("/invitations/:id/accept", (c) => { const invitation = store.invitations.find((item) => item.id === c.req.param("id")); if (!invitation || invitation.status !== "pending" || new Date(invitation.expiresAt) < new Date()) return jsonError(c, "邀请不可接受", 400); const current = user(c); invitation.status = "accepted"; invitation.inviteeUserId = current.id; if (!store.role(invitation.bookId, current.id)) store.members.push({ id: crypto.randomUUID(), bookId: invitation.bookId, userId: current.id, name: current.name, role: invitation.role, joinedAt: new Date().toISOString() }); return c.json({ invitation }); });
-  app.post("/invitations/:id/decline", (c) => { const invitation = store.invitations.find((item) => item.id === c.req.param("id")); if (!invitation || invitation.status !== "pending") return jsonError(c, "邀请不可拒绝", 400); invitation.status = "declined"; return c.json({ invitation }); });
-  app.post("/invitations/:id/remind", (c) => { const invitation = store.invitations.find((item) => item.id === c.req.param("id")); if (!invitation || invitation.status !== "pending") return jsonError(c, "邀请不可提醒", 400); if (invitation.lastRemindedAt && Date.now() - new Date(invitation.lastRemindedAt).getTime() < 86400000) return jsonError(c, "提醒过于频繁", 429); invitation.lastRemindedAt = new Date().toISOString(); return c.json({ invitation }); });
-  app.post("/invitations/:id/revoke", (c) => { const invitation = store.invitations.find((item) => item.id === c.req.param("id")); if (!invitation || invitation.inviterUserId !== user(c).id || invitation.status !== "pending") return jsonError(c, "邀请不可撤回", 400); invitation.status = "revoked"; return c.json({ invitation }); });
-
-  app.get("/books/:bookId/transactions", (c) => { const bookId = c.req.param("bookId"); const denied = memberGuard(c, bookId); if (denied) return denied; return c.json({ transactions: store.transactions.filter((item) => item.bookId === bookId) }); });
-  app.post("/books/:bookId/transactions", async (c) => { const bookId = c.req.param("bookId"); const denied = memberGuard(c, bookId); if (denied) return denied; const body = await parse(c, createTransactionSchema); if (!body) return jsonError(c, "记录数据不合法，检查金额与明细总额"); return c.json({ transaction: store.createTransaction(bookId, user(c).id, body) }, 201); });
-  app.get("/transactions/:id", (c) => { const transaction = store.transactions.find((item) => item.id === c.req.param("id")); if (!transaction) return jsonError(c, "记录不存在", 404); const denied = memberGuard(c, transaction.bookId); return denied ?? c.json({ transaction }); });
-  app.patch("/transactions/:id", async (c) => { const transaction = store.transactions.find((item) => item.id === c.req.param("id")); if (!transaction) return jsonError(c, "记录不存在", 404); if (!canMutateTransaction(user(c).id, transaction.createdByUserId)) return jsonError(c, "只能修改自己创建的记录", 403); const body = await c.req.json<Record<string, unknown>>(); if (body.items || body.amount || body.type || body.occurredAt) { const candidate = createTransactionSchema.safeParse({ ...transaction, ...body }); if (!candidate.success) return jsonError(c, "记录数据不合法"); Object.assign(transaction, candidate.data); } else Object.assign(transaction, body); return c.json({ transaction }); });
-  app.delete("/transactions/:id", (c) => { const transaction = store.transactions.find((item) => item.id === c.req.param("id")); if (!transaction) return jsonError(c, "记录不存在", 404); if (!canMutateTransaction(user(c).id, transaction.createdByUserId)) return jsonError(c, "只能删除自己创建的记录", 403); store.transactions = store.transactions.filter((item) => item.id !== transaction.id); return c.body(null, 204); });
-
-  const resourceRoutes = (path: "categories" | "tags" | "accounts", schema: any) => {
-    app.get(`/books/:bookId/${path}`, (c) => { const denied = memberGuard(c, c.req.param("bookId")); return denied ?? c.json({ [path]: store[path].filter((item) => item.bookId === c.req.param("bookId")) }); });
-    app.post(`/books/:bookId/${path}`, async (c) => { const bookId = c.req.param("bookId"); const denied = memberGuard(c, bookId); if (denied) return denied; const body = await parse(c, schema); if (!body) return jsonError(c, "数据不合法"); return c.json({ [path.slice(0, -1)]: store.createSimple(path, bookId, body) }, 201); });
-    app.patch(`/${path}/:id`, async (c) => { const entity = store[path].find((item) => item.id === c.req.param("id")); if (!entity) return jsonError(c, "资源不存在", 404); const denied = memberGuard(c, entity.bookId); if (denied) return denied; Object.assign(entity, await c.req.json()); return c.json({ [path.slice(0, -1)]: entity }); });
-    app.delete(`/${path}/:id`, (c) => { const index = store[path].findIndex((item) => item.id === c.req.param("id")); if (index < 0) return jsonError(c, "资源不存在", 404); const entity = store[path][index]; const denied = memberGuard(c, entity.bookId); if (denied) return denied; store[path].splice(index, 1); return c.body(null, 204); });
-  };
-  resourceRoutes("categories", categorySchema); resourceRoutes("tags", tagSchema); resourceRoutes("accounts", accountSchema);
-
-  app.post("/books/:bookId/imports", async (c) => { const bookId = c.req.param("bookId"); const denied = memberGuard(c, bookId); if (denied) return denied; const body = await c.req.json<{ fileName?: string; fileType?: string; content?: string }>(); if (!body.fileName || !body.fileType) return jsonError(c, "文件信息不完整"); const current = user(c); const job = { id: crypto.randomUUID(), bookId, userId: current.id, fileName: body.fileName, fileType: body.fileType, r2Key: `${bookId}/${crypto.randomUUID()}-${body.fileName}`, status: "ai_processing", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }; store.imports.unshift(job); const ai = createAiProvider(c.env.AI_PROVIDER); const normalized = await normalizeFile({ mimeType: body.fileType, bytes: new TextEncoder().encode(body.content ?? "超市购物 ¥38.50").buffer, text: body.content }, new MockOcrAdapter()); const suggestions = await structureForConfirmation({ bookId, userId: current.id, normalized, ai }); const records = suggestions.map((suggestion) => ({ id: crypto.randomUUID(), importJobId: job.id, suggestedTransaction: suggestion, status: "pending" as const, confidence: suggestion.confidence, warnings: suggestion.warnings })); store.records.push(...records); job.status = "pending_confirmation"; return c.json({ job, records }, 201); });
-  app.get("/books/:bookId/imports", (c) => { const denied = memberGuard(c, c.req.param("bookId")); return denied ?? c.json({ imports: store.imports.filter((item) => item.bookId === c.req.param("bookId")) }); });
-  app.get("/imports/:id", (c) => { const job = store.imports.find((item) => item.id === c.req.param("id")); return job ? c.json({ job }) : jsonError(c, "导入任务不存在", 404); });
-  app.get("/imports/:id/records", (c) => c.json({ records: store.records.filter((item) => item.importJobId === c.req.param("id")) }));
-  app.patch("/imported-records/:id", async (c) => { const record = store.records.find((item) => item.id === c.req.param("id")); if (!record) return jsonError(c, "待确认记录不存在", 404); Object.assign(record.suggestedTransaction, await c.req.json()); return c.json({ record }); });
-  const confirmRecord = (recordId: string) => { const record = store.records.find((item) => item.id === recordId); if (!record || record.status !== "pending") return { error: "记录不可确认" as const }; const job = store.imports.find((item) => item.id === record.importJobId); if (!job) return { error: "导入任务不存在" as const }; const candidate = record.suggestedTransaction as any; const transaction = store.createTransaction(job.bookId, job.userId, { type: candidate.type, amount: candidate.amount, categoryId: undefined, accountId: undefined, memberId: store.members.find((member) => member.userId === job.userId && member.bookId === job.bookId)?.id, note: candidate.note, occurredAt: candidate.occurredAt, tagIds: [], items: [] }); record.status = "confirmed"; return { record, transaction }; };
-  app.post("/imported-records/:id/confirm", (c) => { const recordId = c.req.param("id"); if (!recordId) return jsonError(c, "待确认记录不存在", 404); const result = confirmRecord(recordId); return "error" in result ? jsonError(c, result.error ?? "记录不可确认", 400) : c.json(result); });
-  app.post("/imports/:id/confirm-all", (c) => { const pending = store.records.filter((record) => record.importJobId === c.req.param("id") && record.status === "pending"); const results = pending.map((record) => confirmRecord(record.id)); return c.json({ confirmed: results.filter((result) => !("error" in result)).length }); });
-
-  app.post("/ai/chat", async (c) => { const current = user(c); if (!canUseAi(current.plan)) return jsonError(c, "AI 助手仅对订阅用户开放", 403); const body = await c.req.json<{ message?: string; bookId?: string; page?: string }>(); if (!body.message) return jsonError(c, "请输入问题"); const provider = createAiProvider(c.env.AI_PROVIDER); return c.json({ message: await provider.chat({ userId: current.id, bookId: body.bookId ?? "book_home", page: body.page, text: body.message }) }); });
-  app.get("/ai/conversations", (c) => { if (!canUseAi(user(c).plan)) return jsonError(c, "AI 助手仅对订阅用户开放", 403); return c.json({ conversations: [] }); });
-  app.get("/ai/conversations/:id", (c) => { if (!canUseAi(user(c).plan)) return jsonError(c, "AI 助手仅对订阅用户开放", 403); return c.json({ conversation: { id: c.req.param("id"), messages: [] } }); });
-  return app;
-}
+export { createApp } from "./app";
 
 const app = createApp();
-export default { fetch: app.fetch, async queue(batch: MessageBatch<unknown>) { batch.ackAll(); } } satisfies ExportedHandler<Env>;
+
+export default {
+  fetch: app.fetch,
+  async queue(batch: MessageBatch<unknown>) {
+    batch.ackAll();
+  },
+} satisfies ExportedHandler<Env>;

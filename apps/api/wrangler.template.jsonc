@@ -5,9 +5,18 @@
   "compatibility_date": "2026-06-21",
   "workers_dev": true,
   "vars": { "APP_ENV": "__ENV__", "WEB_ORIGIN": "__WEB_ORIGIN__", "AI_PROVIDER": "mock" },
-  "d1_databases": [{ "binding": "DB", "database_name": "shared-ledger-__ENV__", "database_id": "__D1_DATABASE_ID__", "migrations_dir": "../../packages/db/migrations" }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "shared-ledger-__ENV__",
+      "database_id": "__D1_DATABASE_ID__",
+      "migrations_dir": "../../packages/db/migrations",
+    },
+  ],
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "__R2_BUCKET__" }],
-  "queues": { "producers": [{ "binding": "IMPORT_QUEUE", "queue": "__QUEUE__" }], "consumers": [{ "queue": "__QUEUE__", "max_batch_size": 5, "max_batch_timeout": 10 }] },
-  "routes": [{ "pattern": "__API_DOMAIN__", "custom_domain": true }]
+  "queues": {
+    "producers": [{ "binding": "IMPORT_QUEUE", "queue": "__QUEUE__" }],
+    "consumers": [{ "queue": "__QUEUE__", "max_batch_size": 5, "max_batch_timeout": 10 }],
+  },
+  "routes": [{ "pattern": "__API_DOMAIN__", "custom_domain": true }],
 }
-
