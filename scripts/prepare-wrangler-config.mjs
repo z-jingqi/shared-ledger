@@ -1,5 +1,8 @@
 import { readFile, mkdir, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const [target, environment] = process.argv.slice(2);
 if (!target || !["web", "api"].includes(target) || !["dev", "prod"].includes(environment)) {
@@ -19,7 +22,7 @@ const values = {
 if (target === "api" && values.__D1_DATABASE_ID__ === "__D1_DATABASE_ID__") {
   throw new Error(`CLOUDFLARE_D1_DATABASE_ID_${suffix} is required to deploy the API.`);
 }
-const appDir = resolve("apps", target);
+const appDir = resolve(repoRoot, "apps", target);
 let config = await readFile(resolve(appDir, "wrangler.template.jsonc"), "utf8");
 for (const [token, value] of Object.entries(values)) config = config.replaceAll(token, value);
 await mkdir(appDir, { recursive: true });
