@@ -1,0 +1,21 @@
+PRAGMA foreign_keys = ON;
+CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE, phone TEXT UNIQUE, avatar_url TEXT, password_hash TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE books (id TEXT PRIMARY KEY, name TEXT NOT NULL, currency TEXT NOT NULL DEFAULT 'CNY', created_by_user_id TEXT NOT NULL, deleted_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE book_members (id TEXT PRIMARY KEY, book_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('creator','admin','member')), joined_at TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(book_id,user_id));
+CREATE TABLE invitations (id TEXT PRIMARY KEY, book_id TEXT NOT NULL, inviter_user_id TEXT NOT NULL, invitee_email TEXT, invitee_phone TEXT, invitee_user_id TEXT, role TEXT NOT NULL CHECK(role IN ('admin','member')), status TEXT NOT NULL CHECK(status IN ('pending','accepted','declined','expired','revoked')), expires_at TEXT NOT NULL, last_reminded_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE accounts (id TEXT PRIMARY KEY, book_id TEXT NOT NULL, name TEXT NOT NULL, type TEXT NOT NULL, created_by_user_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE categories (id TEXT PRIMARY KEY, book_id TEXT NOT NULL, name TEXT NOT NULL, type TEXT NOT NULL CHECK(type IN ('income','expense')), icon TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE tags (id TEXT PRIMARY KEY, book_id TEXT NOT NULL, name TEXT NOT NULL, color TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE transactions (id TEXT PRIMARY KEY, book_id TEXT NOT NULL, type TEXT NOT NULL CHECK(type IN ('income','expense')), amount_cents INTEGER NOT NULL, category_id TEXT, account_id TEXT, member_id TEXT, created_by_user_id TEXT NOT NULL, note TEXT, occurred_at TEXT NOT NULL, deleted_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE transaction_items (id TEXT PRIMARY KEY, transaction_id TEXT NOT NULL, name TEXT NOT NULL, amount_cents INTEGER NOT NULL, category_id TEXT, note TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE transaction_tags (transaction_id TEXT NOT NULL, tag_id TEXT NOT NULL, UNIQUE(transaction_id,tag_id));
+CREATE TABLE attachments (id TEXT PRIMARY KEY, book_id TEXT NOT NULL, transaction_id TEXT, import_job_id TEXT, file_name TEXT NOT NULL, file_type TEXT NOT NULL, r2_key TEXT NOT NULL, size INTEGER NOT NULL, created_by_user_id TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE import_jobs (id TEXT PRIMARY KEY, book_id TEXT NOT NULL, user_id TEXT NOT NULL, file_name TEXT NOT NULL, file_type TEXT NOT NULL, r2_key TEXT NOT NULL, status TEXT NOT NULL, error_message TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE imported_records (id TEXT PRIMARY KEY, import_job_id TEXT NOT NULL, raw_data TEXT NOT NULL, suggested_transaction TEXT NOT NULL, status TEXT NOT NULL, confidence INTEGER NOT NULL, warnings TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE subscriptions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, plan TEXT NOT NULL CHECK(plan IN ('free','pro')), status TEXT NOT NULL, started_at TEXT NOT NULL, expires_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE ai_conversations (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, book_id TEXT, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE ai_messages (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('user','assistant','system')), content TEXT NOT NULL, metadata TEXT, created_at TEXT NOT NULL);
+CREATE INDEX transactions_book_date ON transactions(book_id, occurred_at);
+CREATE INDEX book_members_user ON book_members(user_id);
+CREATE INDEX imported_records_job ON imported_records(import_job_id);
+

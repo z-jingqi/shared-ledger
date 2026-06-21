@@ -1,0 +1,12 @@
+{
+  "name": "@shared-ledger/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.tsx",
+  "scripts": { "lint": "eslint src --max-warnings=0", "typecheck": "tsc -p tsconfig.json" },
+  "peerDependencies": { "react": "^19.0.0", "react-dom": "^19.0.0" },
+  "dependencies": { "@phosphor-icons/react": "^2.1.10" },
+  "devDependencies": { "@types/react": "^19.1.2", "@types/react-dom": "^19.1.2", "eslint": "^9.25.1", "typescript": "^5.8.3" }
+}
+

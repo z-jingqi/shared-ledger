@@ -1,0 +1,275 @@
+{
+  "screens": [
+    {
+      "title": "登录",
+      "file": "screens/01-account/01-login.png",
+      "description": "账号登录页，支持邮箱密码登录与第三方图标登录。",
+      "size": {
+        "width": 863,
+        "height": 1822
+      }
+    },
+    {
+      "title": "注册",
+      "file": "screens/01-account/02-register.png",
+      "description": "创建新账号，包含邮箱、密码、确认密码与协议确认。",
+      "size": {
+        "width": 863,
+        "height": 1822
+      }
+    },
+    {
+      "title": "账号设置",
+      "file": "screens/01-account/03-account-settings.png",
+      "description": "用户资料、安全、通知、语言、主题、订阅与退出登录入口。",
+      "size": {
+        "width": 863,
+        "height": 1822
+      }
+    },
+    {
+      "title": "订阅与套餐",
+      "file": "screens/01-account/04-subscription.png",
+      "description": "订阅升级页，展示年度/月度套餐和高级版权益。",
+      "size": {
+        "width": 863,
+        "height": 1822
+      }
+    },
+    {
+      "title": "账本列表",
+      "file": "screens/02-books/01-book-list.png",
+      "description": "展示用户创建或加入的账本，支持创建新账本。",
+      "size": {
+        "width": 941,
+        "height": 1672
+      }
+    },
+    {
+      "title": "创建账本",
+      "file": "screens/02-books/02-create-book.png",
+      "description": "创建新账本，填写名称、默认货币、备注以及基础开关。",
+      "size": {
+        "width": 941,
+        "height": 1672
+      }
+    },
+    {
+      "title": "账本首页",
+      "file": "screens/02-books/03-book-home.png",
+      "description": "当前账本的月度收入、支出、结余、待确认和最近记录。",
+      "size": {
+        "width": 941,
+        "height": 1672
+      }
+    },
+    {
+      "title": "账本设置",
+      "file": "screens/02-books/04-book-settings.png",
+      "description": "账本名称、货币、成员权限、预算、分类、标签与删除账本。",
+      "size": {
+        "width": 941,
+        "height": 1672
+      }
+    },
+    {
+      "title": "我的邀请",
+      "file": "screens/03-invitations/01-my-invitations.png",
+      "description": "查看收到的账本邀请，支持接受或拒绝。",
+      "size": {
+        "width": 941,
+        "height": 1672
+      }
+    },
+    {
+      "title": "已发邀请",
+      "file": "screens/03-invitations/02-sent-invitations.png",
+      "description": "查看已发出的邀请状态，支持提醒或撤回。",
+      "size": {
+        "width": 941,
+        "height": 1672
+      }
+    },
+    {
+      "title": "记录列表",
+      "file": "screens/04-records/01-record-list.png",
+      "description": "按日期展示收入和支出记录，支持搜索、筛选和记一笔。",
+      "size": {
+        "width": 941,
+        "height": 1672
+      }
+    },
+    {
+      "title": "新增记录",
+      "file": "screens/04-records/02-new-record.png",
+      "description": "新增收入或支出记录，填写金额、分类、成员、时间、账户、标签、备注与明细。",
+      "size": {
+        "width": 941,
+        "height": 1672
+      }
+    },
+    {
+      "title": "编辑记录",
+      "file": "screens/04-records/03-edit-record.png",
+      "description": "编辑本人创建的记录，可修改基础字段、明细或删除记录。",
+      "size": {
+        "width": 941,
+        "height": 1672
+      }
+    },
+    {
+      "title": "记录详情",
+      "file": "screens/04-records/04-record-detail.png",
+      "description": "查看记录详情、明细、附件和创建人。",
+      "size": {
+        "width": 941,
+        "height": 1672
+      }
+    },
+    {
+      "title": "添加明细",
+      "file": "screens/04-records/05-add-line-items.png",
+      "description": "为一笔记录拆分明细，支持多项目金额分配。",
+      "size": {
+        "width": 941,
+        "height": 1672
+      }
+    },
+    {
+      "title": "导入",
+      "file": "screens/05-import/01-import-upload.png",
+      "description": "上传图片、PDF、Excel、CSV 文件，进入智能识别流程。",
+      "size": {
+        "width": 941,
+        "height": 1672
+      }
+    },
+    {
+      "title": "待确认记录",
+      "file": "screens/05-import/02-pending-records.png",
+      "description": "展示导入后识别出的待确认记录，支持编辑、确认、全部确认。",
+      "size": {
+        "width": 941,
+        "height": 1672
+      }
+    },
+    {
+      "title": "导入历史",
+      "file": "screens/05-import/03-import-history.png",
+      "description": "查看导入任务历史、处理状态和识别记录数。",
+      "size": {
+        "width": 941,
+        "height": 1672
+      }
+    },
+    {
+      "title": "分析",
+      "file": "screens/06-analysis/01-analysis.png",
+      "description": "收入、支出、结余、趋势、分类占比和成员支出排行。",
+      "size": {
+        "width": 863,
+        "height": 1822
+      }
+    },
+    {
+      "title": "成员管理",
+      "file": "screens/07-members/01-member-management.png",
+      "description": "查看当前成员、邀请中的成员，并管理成员和邀请。",
+      "size": {
+        "width": 863,
+        "height": 1822
+      }
+    },
+    {
+      "title": "邀请成员",
+      "file": "screens/07-members/02-invite-member.png",
+      "description": "通过邮箱、手机号或链接邀请成员加入当前账本。",
+      "size": {
+        "width": 941,
+        "height": 1672
+      }
+    },
+    {
+      "title": "成员权限编辑",
+      "file": "screens/07-members/03-member-role-edit.png",
+      "description": "创建者/管理员/成员角色选择与权限说明。",
+      "size": {
+        "width": 941,
+        "height": 1672
+      }
+    },
+    {
+      "title": "设置",
+      "file": "screens/08-settings/01-settings-home.png",
+      "description": "分类、标签、账户、导出、隐私、通知、关于和退出登录。",
+      "size": {
+        "width": 863,
+        "height": 1822
+      }
+    },
+    {
+      "title": "分类管理",
+      "file": "screens/08-settings/02-category-management.png",
+      "description": "管理收入/支出分类，支持排序和新增。",
+      "size": {
+        "width": 941,
+        "height": 1672
+      }
+    },
+    {
+      "title": "标签管理",
+      "file": "screens/08-settings/03-tag-management.png",
+      "description": "查看、搜索、新增标签。",
+      "size": {
+        "width": 941,
+        "height": 1672
+      }
+    },
+    {
+      "title": "账户管理",
+      "file": "screens/08-settings/04-payment-account-management.png",
+      "description": "管理现金、微信、支付宝、银行卡、信用卡等账户。",
+      "size": {
+        "width": 941,
+        "height": 1672
+      }
+    },
+    {
+      "title": "导出数据",
+      "file": "screens/08-settings/05-export-data.png",
+      "description": "选择导出范围、内容、格式和导出方式。",
+      "size": {
+        "width": 941,
+        "height": 1672
+      }
+    },
+    {
+      "title": "隐私设置",
+      "file": "screens/08-settings/06-privacy-settings.png",
+      "description": "控制金额、收入、记录可见性、导入文件保存和 AI 分析授权。",
+      "size": {
+        "width": 941,
+        "height": 1672
+      }
+    },
+    {
+      "title": "AI 助手",
+      "file": "screens/09-ai/01-ai-assistant-page.png",
+      "description": "订阅用户可见的完整对话页，类似 ChatGPT 首页。",
+      "size": {
+        "width": 941,
+        "height": 1672
+      }
+    },
+    {
+      "title": "全局 AI 助手抽屉",
+      "file": "screens/09-ai/02-global-ai-drawer.png",
+      "description": "订阅用户在任何页面可呼出的 AI 助手抽屉。",
+      "size": {
+        "width": 941,
+        "height": 1672
+      }
+    }
+  ],
+  "missing": []
+}

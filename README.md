@@ -1,0 +1,67 @@
+# 一起记 / shared-ledger
+
+移动端优先的多人共享记账 Web MVP。家庭、情侣、室友和旅行小组可在同一本账本记录收支、邀请成员、导入文件并分析支出。
+
+## 技术栈
+
+- Web：React、TypeScript、Vite、Tailwind CSS v4、React Router、React Hook Form、Zod、Recharts。
+- API：Hono on Cloudflare Workers、D1、R2、Queues、Drizzle。
+- 工程：pnpm monorepo、Vitest、Testing Library、Playwright、MSW。
+
+## 目录
+
+```text
+apps/web       React 移动端界面
+apps/api       Hono Worker API 与队列消费者
+packages/shared 权限、类型、Zod schema
+packages/db     Drizzle schema 与 D1 migrations
+packages/ai     可替换 AI Provider adapter
+packages/import 文件解析、OCR 与导入编排
+packages/ui     复用 UI 原子组件
+```
+
+## 本地启动
+
+```bash
+corepack enable
+pnpm install
+pnpm dev
+```
+
+网页默认位于 `http://localhost:5173`，Worker 位于 `http://localhost:8787`。复制 `.env.example` 为 `.env` 后可设置 `VITE_API_URL`。
+
+```bash
+pnpm test
+pnpm test:unit
+pnpm test:integration
+pnpm test:e2e
+pnpm test:coverage
+pnpm lint
+pnpm typecheck
+pnpm build
+```
+
+## Cloudflare 资源
+
+每个环境各自拥有 D1、R2 和 Queue：`shared-ledger-{dev|prod}`。先创建资源并把 ID 写入环境变量，再生成配置：
+
+```bash
+wrangler d1 create shared-ledger-dev
+wrangler r2 bucket create shared-ledger-files-dev
+wrangler queues create shared-ledger-imports-dev
+$env:CLOUDFLARE_D1_DATABASE_ID_DEV = "<D1 id>"
+node scripts/prepare-wrangler-config.mjs api dev
+pnpm --filter @shared-ledger/api exec wrangler d1 migrations apply shared-ledger-dev --local --config wrangler.generated-api-dev.json
+```
+
+生产环境使用同样命令并替换为 `prod`；迁移位于 `packages/db/migrations`。Web 与 API 分开部署：Web 使用 Worker static assets，API 使用 Hono Worker。自定义域名已作为模板配置：生产为 `leger.aleph-cat.com` 与 `api.leger.aleph-cat.com`，开发为 `dev.leger.aleph-cat.com` 与 `api.dev.leger.aleph-cat.com`。Cloudflare zone 必须已托管 `aleph-cat.com`，首次部署需具备编辑 DNS/Workers routes 的 API token 权限。
+
+## 文件导入、OCR 与 AI
+
+原文件先进入 R2，再通过 Queue 处理；CSV/Excel/PDF 文本先解析，图片或扫描 PDF 经 `OcrAdapter`，最后将结构化文本交给 `AiProvider`。AI 输出会经过 Zod 校验，只生成待确认记录，确认后才创建 Transaction。当前 `MockAiProvider` 和 `UnavailablePaddleOcrAdapter` 是可测试的免费开发适配器；Container/PaddleOCR 接口已预留，付费 Workers Containers 可用后替换 adapter，不需要改业务层。
+
+免费用户没有 AI 对话入口；Pro 用户可使用全局抽屉与完整对话页。Provider、模型和 key 仅由服务端环境配置。
+
+## CI/CD
+
+`.github/workflows/deploy.yml` 通过 paths filter 判断 web、api、database、shared 与基础设施的变更；仅部署受影响的层。`main` 部署 prod，`develop` 部署 dev。需要 GitHub secrets：`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_D1_DATABASE_ID_DEV`、`CLOUDFLARE_D1_DATABASE_ID_PROD`。容器未在部署脚本中启用，保持免费 Worker 可部署。

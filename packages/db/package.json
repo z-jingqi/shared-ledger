@@ -1,0 +1,11 @@
+{
+  "name": "@shared-ledger/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts", "./schema": "./src/schema.ts" },
+  "scripts": { "generate": "drizzle-kit generate", "lint": "eslint src --max-warnings=0", "typecheck": "tsc -p tsconfig.json" },
+  "dependencies": { "drizzle-orm": "^0.41.0" },
+  "devDependencies": { "drizzle-kit": "^0.31.1", "eslint": "^9.25.1", "typescript": "^5.8.3" }
+}
+

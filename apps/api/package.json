@@ -1,0 +1,32 @@
+{
+  "name": "@shared-ledger/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --config wrangler.local.jsonc",
+    "build": "wrangler deploy --dry-run --config wrangler.local.jsonc",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src test --max-warnings=0",
+    "typecheck": "tsc -p tsconfig.json",
+    "d1:migrate:local": "wrangler d1 migrations apply shared-ledger-local --local --config wrangler.local.jsonc"
+  },
+  "dependencies": {
+    "@hono/zod-validator": "^0.4.3",
+    "@shared-ledger/ai": "workspace:*",
+    "@shared-ledger/import": "workspace:*",
+    "@shared-ledger/shared": "workspace:*",
+    "hono": "^4.7.7",
+    "zod": "^3.24.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250628.0",
+    "@vitest/coverage-v8": "^3.1.2",
+    "eslint": "^9.25.1",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.2",
+    "wrangler": "^4.24.3"
+  }
+}
+

@@ -1,0 +1,99 @@
+name: Deploy changed Cloudflare layers
+on:
+  push:
+    branches: [main, develop]
+permissions:
+  contents: read
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      web: ${{ steps.filter.outputs.web }}
+      api: ${{ steps.filter.outputs.api }}
+      database: ${{ steps.filter.outputs.database }}
+      shared: ${{ steps.filter.outputs.shared }}
+      infrastructure: ${{ steps.filter.outputs.infrastructure }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            web:
+              - 'apps/web/**'
+              - 'packages/ui/**'
+            api:
+              - 'apps/api/**'
+              - 'packages/ai/**'
+              - 'packages/import/**'
+            database:
+              - 'packages/db/**'
+            shared:
+              - 'packages/shared/**'
+            infrastructure:
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'scripts/**'
+              - '.github/workflows/deploy.yml'
+  deploy-web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true' || needs.changes.outputs.shared == 'true' || needs.changes.outputs.infrastructure == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'production' || 'development' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.15.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @shared-ledger/web build
+        env:
+          VITE_API_URL: ${{ github.ref_name == 'main' && 'https://api.leger.aleph-cat.com' || 'https://api.dev.leger.aleph-cat.com' }}
+      - run: node ../../scripts/prepare-wrangler-config.mjs web ${{ github.ref_name == 'main' && 'prod' || 'dev' }} && ../../apps/api/node_modules/.bin/wrangler deploy --config wrangler.generated-web-${{ github.ref_name == 'main' && 'prod' || 'dev' }}.json
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  deploy-api:
+    needs: changes
+    if: needs.changes.outputs.api == 'true' || needs.changes.outputs.shared == 'true' || needs.changes.outputs.infrastructure == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'production' || 'development' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.15.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: node ../../scripts/prepare-wrangler-config.mjs api ${{ github.ref_name == 'main' && 'prod' || 'dev' }} && ../../apps/api/node_modules/.bin/wrangler deploy --config wrangler.generated-api-${{ github.ref_name == 'main' && 'prod' || 'dev' }}.json
+        working-directory: apps/api
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_D1_DATABASE_ID_DEV: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID_DEV }}
+          CLOUDFLARE_D1_DATABASE_ID_PROD: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID_PROD }}
+  deploy-database:
+    needs: changes
+    if: needs.changes.outputs.database == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'production' || 'development' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.15.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: node ../../scripts/prepare-wrangler-config.mjs api ${{ github.ref_name == 'main' && 'prod' || 'dev' }} && ../../apps/api/node_modules/.bin/wrangler d1 migrations apply shared-ledger-${{ github.ref_name == 'main' && 'prod' || 'dev' }} --remote --config wrangler.generated-api-${{ github.ref_name == 'main' && 'prod' || 'dev' }}.json
+        working-directory: apps/api
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_D1_DATABASE_ID_DEV: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID_DEV }}
+          CLOUDFLARE_D1_DATABASE_ID_PROD: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID_PROD }}

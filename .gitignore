@@ -1,0 +1,11 @@
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+.wrangler/
+apps/*/wrangler.generated-*.json
+.env
+.env.*
+!.env.example
+*.log
