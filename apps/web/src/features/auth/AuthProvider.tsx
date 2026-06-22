@@ -26,6 +26,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+  useEffect(() => {
+    const unauthorized = () => {
+      setUser(undefined);
+      setLoading(false);
+    };
+    window.addEventListener("ledger:unauthorized", unauthorized);
+    return () => window.removeEventListener("ledger:unauthorized", unauthorized);
+  }, []);
   const value = useMemo(() => ({ user, loading, refresh, setUser }), [user, loading, refresh]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

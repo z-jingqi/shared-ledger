@@ -23,5 +23,5 @@ test("authenticated user can navigate from a real book response to a record form
   await expect(page.getByRole("heading", { name: "家庭账本" })).toBeVisible();
   await expect(page.getByLabel("打开 AI 助手")).toHaveCount(0);
   await page.getByText("记一笔").click();
-  await expect(page.getByRole("heading", { name: "记一笔" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "新增记录" })).toBeVisible();
 });

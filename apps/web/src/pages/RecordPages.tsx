@@ -1,5 +1,18 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { CaretRightIcon, MagnifyingGlassIcon, PlusIcon } from "@phosphor-icons/react";
+import {
+  CalendarBlankIcon,
+  CaretRightIcon,
+  FunnelSimpleIcon,
+  ListBulletsIcon,
+  NotePencilIcon,
+  PlusCircleIcon,
+  PlusIcon,
+  ReceiptIcon,
+  SquaresFourIcon,
+  TagIcon,
+  UserCircleIcon,
+  WalletIcon,
+} from "@phosphor-icons/react";
 import { createTransactionSchema } from "@shared-ledger/shared";
 import { Button, Panel } from "@shared-ledger/ui";
 import { useState } from "react";
@@ -20,14 +33,24 @@ export function RecordsPage() {
   const transactions = (data?.transactions ?? []).filter(
     (item) => filter === "全部" || (filter === "收入" ? item.type === "income" : item.type === "expense"),
   );
+  const groups = transactions.reduce<Record<string, LedgerTransaction[]>>((result, transaction) => {
+    const key = new Date(transaction.occurredAt).toLocaleDateString("zh-CN", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      weekday: "short",
+    });
+    result[key] = [...(result[key] ?? []), transaction];
+    return result;
+  }, {});
   return (
     <>
       <Page
         title="记录列表"
         back={false}
         action={
-          <button className="icon-link">
-            <MagnifyingGlassIcon size={25} />
+          <button className="icon-link" aria-label="筛选记录">
+            <FunnelSimpleIcon size={25} />
           </button>
         }
       />
@@ -39,7 +62,25 @@ export function RecordsPage() {
           </button>
         ))}
       </div>
-      <TransactionList transactions={transactions} />
+      <div className="record-groups">
+        {Object.entries(groups).map(([date, items]) => (
+          <section key={date}>
+            <header>
+              <h2>{date}</h2>
+              <span>
+                收入 {money(items.filter((item) => item.type === "income").reduce((sum, item) => sum + item.amount, 0))}
+                <b>
+                  支出 {money(items.filter((item) => item.type === "expense").reduce((sum, item) => sum + item.amount, 0))}
+                </b>
+              </span>
+            </header>
+            <Panel>
+              <TransactionList transactions={items} />
+            </Panel>
+          </section>
+        ))}
+        {!transactions.length && <p className="muted">还没有记录，记下第一笔吧。</p>}
+      </div>
       <Link to={`/records/new?bookId=${book?.id ?? ""}`} className="primary-wide">
         <PlusIcon size={24} weight="bold" />
         记一笔
@@ -90,7 +131,7 @@ export function TransactionFormPage() {
   });
   return (
     <>
-      <Page title={id ? "编辑记录" : "记一笔"} />
+      <Page title={id ? "编辑记录" : "新增记录"} />
       <form className="form transaction-form" onSubmit={submit}>
         <div className="type-toggle">
           <button
@@ -108,7 +149,7 @@ export function TransactionFormPage() {
             收入
           </button>
         </div>
-        <label className="amount-field">
+        <label className="amount-field amount-card">
           金额
           <input
             type="number"
@@ -119,31 +160,125 @@ export function TransactionFormPage() {
           />
         </label>
         <p className="field-error">{form.formState.errors.amount?.message}</p>
-        <label>
-          分类
-          <select {...form.register("categoryId")}>
-            <option value="">未分类</option>
-            {categories?.categories?.map((item) => (
-              <option value={item.id} key={item.id}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          日期
-          <input type="date" {...form.register("occurredAt")} />
-        </label>
-        <label>
-          备注
-          <textarea placeholder="写点说明…" {...form.register("note")} />
-        </label>
-        <Link className="sub-action" to="/records/new/items">
-          添加明细 <CaretRightIcon />
+        <Panel className="record-fields">
+          <label>
+            <SquaresFourIcon size={22} />
+            <span>分类</span>
+            <select {...form.register("categoryId")}>
+              <option value="">请选择分类</option>
+              {categories?.categories?.map((item) => (
+                <option value={item.id} key={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+            <CaretRightIcon />
+          </label>
+          <label>
+            <UserCircleIcon size={22} />
+            <span>成员</span>
+            <em>请选择成员</em>
+            <CaretRightIcon />
+          </label>
+          <label>
+            <CalendarBlankIcon size={22} />
+            <span>时间</span>
+            <input type="date" {...form.register("occurredAt")} />
+            <CaretRightIcon />
+          </label>
+          <label>
+            <WalletIcon size={22} />
+            <span>账户</span>
+            <em>请选择账户</em>
+            <CaretRightIcon />
+          </label>
+          <label>
+            <TagIcon size={22} />
+            <span>标签</span>
+            <em>请选择标签</em>
+            <CaretRightIcon />
+          </label>
+          <label>
+            <NotePencilIcon size={22} />
+            <span>备注</span>
+            <input placeholder="可填写备注信息（选填）" {...form.register("note")} />
+          </label>
+        </Panel>
+        <Link className="sub-action add-detail-row" to="/records/new/items">
+          <PlusCircleIcon size={22} />
+          添加明细（选填） <CaretRightIcon />
         </Link>
         {error && <p className="field-error">{error}</p>}
         <Button type="submit">保存记录</Button>
       </form>
+    </>
+  );
+}
+export function AddLineItemsPage() {
+  const navigate = useNavigate();
+  const [items, setItems] = useState([
+    { id: "milk", name: "牛奶", amount: "58.50" },
+    { id: "fruit", name: "水果", amount: "40.00" },
+    { id: "empty", name: "", amount: "" },
+  ]);
+  const total = 128.5;
+  const assigned = items.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const updateItem = (id: string, field: "name" | "amount", value: string) =>
+    setItems((current) => current.map((item) => (item.id === id ? { ...item, [field]: value } : item)));
+  const addItem = () =>
+    setItems((current) => [...current, { id: crypto.randomUUID(), name: "", amount: "" }]);
+  return (
+    <>
+      <Page
+        title="添加明细"
+        action={
+          <button className="icon-link" type="button" aria-label="新增明细" onClick={addItem}>
+            <PlusCircleIcon size={27} />
+          </button>
+        }
+      />
+      <Panel className="line-summary">
+        <ReceiptIcon size={32} weight="fill" />
+        <span>
+          <small>总金额</small>
+          <b>{money(total)}</b>
+        </span>
+        <i />
+        <span>
+          <small>
+            已分配 <b>{money(assigned)}</b> / 剩余{" "}
+            <em className={total - assigned < 0 ? "expense" : "income"}>{money(total - assigned)}</em>
+          </small>
+        </span>
+      </Panel>
+      <Panel className="line-items">
+        {items.map((item) => (
+          <label key={item.id}>
+            <input
+              aria-label="明细名称"
+              value={item.name}
+              placeholder="输入明细名称"
+              onChange={(event) => updateItem(item.id, "name", event.target.value)}
+            />
+            <input
+              aria-label="明细金额"
+              inputMode="decimal"
+              value={item.amount}
+              placeholder="¥0.00"
+              onChange={(event) => updateItem(item.id, "amount", event.target.value)}
+            />
+            <ListBulletsIcon size={22} />
+          </label>
+        ))}
+      </Panel>
+      <button className="sub-action split-row" type="button">
+        <ChartPieIcon />
+        按分类拆分
+        <CaretRightIcon />
+      </button>
+      <Button type="button" onClick={() => navigate(-1)}>
+        保存明细
+      </Button>
     </>
   );
 }
@@ -198,4 +333,8 @@ export function RecordDetailPage() {
       </Panel>
     </>
   );
+}
+
+function ChartPieIcon() {
+  return <SquaresFourIcon size={22} weight="fill" />;
 }

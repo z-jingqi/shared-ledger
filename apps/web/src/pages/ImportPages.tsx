@@ -1,4 +1,13 @@
-import { CaretRightIcon, FileArrowUpIcon, ShoppingCartIcon } from "@phosphor-icons/react";
+import {
+  CaretRightIcon,
+  CheckCircleIcon,
+  CloudArrowUpIcon,
+  FileArrowUpIcon,
+  FilePdfIcon,
+  ImageSquareIcon,
+  ScanIcon,
+  ShoppingCartIcon,
+} from "@phosphor-icons/react";
 import { Panel } from "@shared-ledger/ui";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -7,7 +16,7 @@ import { useActiveBook } from "../hooks/useActiveBook";
 import { useApi } from "../hooks/useApi";
 import { api, money } from "../lib";
 
-type Job = { id: string; fileName: string; status: string; createdAt: string };
+type Job = { id: string; fileName: string; fileType: string; status: string; createdAt: string };
 type Record = {
   id: string;
   importJobId: string;
@@ -35,16 +44,14 @@ export function ImportsPage() {
     }
   };
   const pending = data?.imports.filter((item) => item.status === "pending_confirmation").length ?? 0;
+  const recent = data?.imports.slice(0, 3) ?? [];
   return (
     <>
-      <Page title="导入记录" back={false} />
+      <Page title="导入" back={false} />
       <Panel className="upload-zone">
-        <FileArrowUpIcon size={42} weight="duotone" />
-        <h2>导入账单或票据</h2>
-        <p>支持图片、PDF、CSV、Excel（20MB 以内）</p>
-        <button disabled={uploading || !book} onClick={() => input.current?.click()}>
-          {uploading ? "正在上传…" : "选择文件"}
-        </button>
+        <FileArrowUpIcon size={58} weight="duotone" />
+        <h2>上传账单或图片</h2>
+        <p>图片 / PDF / Excel / CSV</p>
         <input
           ref={input}
           type="file"
@@ -54,18 +61,64 @@ export function ImportsPage() {
         />
       </Panel>
       {error && <p className="field-error">{error}</p>}
-      <div className="tips">
-        <h3>智能识别流程</h3>
-        <p>上传文件 → 提取文本/OCR → AI 整理 → 待确认入账</p>
-      </div>
+      <section className="import-steps">
+        <h2>导入说明</h2>
+        <ImportStep index={1} Icon={CloudArrowUpIcon} title="上传文件" desc="支持图片、PDF、Excel、CSV 格式" />
+        <ImportStep index={2} Icon={ScanIcon} title="智能识别" desc="自动识别账单信息并分类" />
+        <ImportStep index={3} Icon={CheckCircleIcon} title="确认入账" desc="核对信息后，确认导入账本" />
+      </section>
       <Link className="sub-action" to="/imports/pending">
         待确认记录 <b>{pending}</b>
         <CaretRightIcon />
       </Link>
-      <Link className="sub-action" to="/imports/history">
-        导入历史 <CaretRightIcon />
-      </Link>
+      <section className="recent-imports">
+        <header className="section-header">
+          <h2>最近导入</h2>
+          <Link to="/imports/history">
+            全部记录 <CaretRightIcon />
+          </Link>
+        </header>
+        <Panel>
+          {recent.map((job) => (
+            <div className="history-row" key={job.id}>
+              {job.fileType.includes("pdf") ? <FilePdfIcon size={27} /> : <ImageSquareIcon size={27} />}
+              <div>
+                <strong>{job.fileName}</strong>
+                <small>{new Date(job.createdAt).toLocaleString("zh-CN")}</small>
+              </div>
+              <span className={job.status === "completed" ? "status success" : "status"}>{job.status}</span>
+              <CaretRightIcon />
+            </div>
+          ))}
+          {!recent.length && <p className="muted">还没有导入记录</p>}
+        </Panel>
+      </section>
+      <button className="primary-wide" disabled={uploading || !book} onClick={() => input.current?.click()}>
+        {uploading ? "正在上传…" : "选择文件"}
+      </button>
     </>
+  );
+}
+function ImportStep({
+  index,
+  Icon,
+  title,
+  desc,
+}: {
+  index: number;
+  Icon: typeof CloudArrowUpIcon;
+  title: string;
+  desc: string;
+}) {
+  return (
+    <div>
+      <em>{index}</em>
+      <Icon size={28} />
+      <span>
+        <strong>{title}</strong>
+        <small>{desc}</small>
+      </span>
+    </div>
   );
 }
 function usePendingRecords() {

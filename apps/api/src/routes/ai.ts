@@ -1,5 +1,5 @@
 import { convertToModelMessages, type UIMessage } from "ai";
-import { aiProviderConfigSchema, aiProviders, canUseAi } from "@shared-ledger/shared";
+import { canUseAi } from "@shared-ledger/shared";
 import type { Hono } from "hono";
 import { jsonError } from "../lib/http";
 import { D1LedgerRepository } from "../repository";
@@ -15,30 +15,6 @@ const messageText = (message?: UIMessage) =>
     .join("\n") ?? "";
 
 export function registerAiRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryLedgerStore) {
-  app.get("/ai/providers", async (context) => {
-    const user = await requireUser(context, store);
-    if (user instanceof Response) return user;
-    if (!context.env.DB) return jsonError(context, "AI 配置需要 D1 运行时", 503);
-    const config = await new D1LedgerRepository(context.env.DB).ensureAiProviderConfig(user.id);
-    return context.json({ config, providers: aiProviders });
-  });
-
-  app.put("/ai/providers", async (context) => {
-    const user = await requireUser(context, store);
-    if (user instanceof Response) return user;
-    if (!canUseAi(user.plan)) return jsonError(context, "AI Provider 配置仅对订阅用户开放", 403);
-    if (!context.env.DB) return jsonError(context, "AI 配置需要 D1 运行时", 503);
-    const parsed = aiProviderConfigSchema.safeParse(await context.req.json());
-    if (!parsed.success) return jsonError(context, "Provider 配置不合法");
-    try {
-      runtimeAiProvider(context.env, parsed.data);
-      const config = await new D1LedgerRepository(context.env.DB).setAiProviderConfig(user.id, parsed.data);
-      return context.json({ config });
-    } catch (error) {
-      return jsonError(context, error instanceof Error ? error.message : "Provider 配置不可用");
-    }
-  });
-
   app.post("/ai/chat", async (context) => {
     const user = await requireUser(context, store);
     if (user instanceof Response) return user;

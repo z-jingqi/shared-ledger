@@ -167,3 +167,15 @@ export const aiProviderConfigs = sqliteTable("ai_provider_configs", {
   baseUrl: text("base_url"),
   ...timestamps,
 });
+export const refreshTokens = sqliteTable(
+  "refresh_tokens",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    tokenHash: text("token_hash").notNull().unique(),
+    expiresAt: text("expires_at").notNull(),
+    revokedAt: text("revoked_at"),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [index("refresh_tokens_user").on(t.userId)],
+);

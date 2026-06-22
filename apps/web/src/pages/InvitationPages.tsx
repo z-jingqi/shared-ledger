@@ -1,3 +1,4 @@
+import { CheckCircleIcon, ClockCounterClockwiseIcon, ProhibitIcon, UserPlusIcon } from "@phosphor-icons/react";
 import { Button, Panel } from "@shared-ledger/ui";
 import { Page } from "../components/layout/Page";
 import { useActiveBook } from "../hooks/useActiveBook";
@@ -21,20 +22,29 @@ export function ReceivedInvitationsPage() {
   return (
     <>
       <Page title="我的邀请" />
-      <Panel>
+      <Panel className="invitation-list">
         {data?.invitations.map((invitation) => (
-          <div className="history-row" key={invitation.id}>
+          <div className="history-row invitation-row" key={invitation.id}>
+            <span className="invitation-icon">
+              <UserPlusIcon size={22} weight="fill" />
+            </span>
             <div>
               <strong>{invitation.role === "admin" ? "管理员邀请" : "成员邀请"}</strong>
               <small>有效至 {new Date(invitation.expiresAt).toLocaleString("zh-CN")}</small>
             </div>
             {invitation.status === "pending" ? (
-              <span>
-                <Button onClick={() => void respond(invitation.id, "accept")}>接受</Button>
-                <button onClick={() => void respond(invitation.id, "decline")}>拒绝</button>
+              <span className="inline-actions">
+                <Button onClick={() => void respond(invitation.id, "accept")}>
+                  <CheckCircleIcon size={16} />
+                  接受
+                </Button>
+                <button onClick={() => void respond(invitation.id, "decline")}>
+                  <ProhibitIcon size={16} />
+                  拒绝
+                </button>
               </span>
             ) : (
-              <span>{invitation.status}</span>
+              <span className="status">{statusLabel(invitation.status)}</span>
             )}
           </div>
         ))}
@@ -55,17 +65,20 @@ export function SentInvitationsPage() {
   return (
     <>
       <Page title="已发邀请" />
-      <Panel>
+      <Panel className="invitation-list">
         {data?.invitations.map((invitation) => (
-          <div className="history-row" key={invitation.id}>
+          <div className="history-row invitation-row" key={invitation.id}>
+            <span className="invitation-icon">
+              <ClockCounterClockwiseIcon size={22} weight="fill" />
+            </span>
             <div>
               <strong>{invitation.inviteeEmail || invitation.inviteePhone || "未命名受邀人"}</strong>
               <small>
-                {invitation.role} · {invitation.status}
+                {invitation.role === "admin" ? "管理员" : "成员"} · {statusLabel(invitation.status)}
               </small>
             </div>
             {invitation.status === "pending" && (
-              <span>
+              <span className="inline-actions">
                 <button onClick={() => void action(invitation.id, "remind")}>提醒</button>
                 <button onClick={() => void action(invitation.id, "revoke")}>撤回</button>
               </span>
@@ -76,4 +89,12 @@ export function SentInvitationsPage() {
       </Panel>
     </>
   );
+}
+
+function statusLabel(status: string) {
+  if (status === "pending") return "待处理";
+  if (status === "accepted") return "已接受";
+  if (status === "declined") return "已拒绝";
+  if (status === "revoked") return "已撤回";
+  return status;
 }

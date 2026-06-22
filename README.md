@@ -91,4 +91,4 @@ pnpm cf:deploy:containers:prod
 
 ## CI/CD
 
-`.github/workflows/deploy.yml` 通过 paths filter 判断 web、api、database、shared 与基础设施的变更；仅部署受影响的层。`main` 部署 prod，`develop` 部署 dev。需要 GitHub secrets：`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_D1_DATABASE_ID_DEV`、`CLOUDFLARE_D1_DATABASE_ID_PROD`。OAuth 密钥使用 `wrangler secret put` 分别写入 dev/prod Worker，绝不提交到仓库。
+`.github/workflows/deploy.yml` 通过 paths filter 判断 web、api、migration、shared 与基础设施的变更；仅部署受影响的层。Actions 不创建或部署 D1 数据库，只在 `packages/db/migrations` 变化时执行 migration，且 migration 会先于 API 部署完成。`main` 部署 prod，`develop` 部署 dev。需要 GitHub secrets：`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_D1_DATABASE_ID_DEV`、`CLOUDFLARE_D1_DATABASE_ID_PROD`。OAuth 密钥使用 `wrangler secret put` 分别写入 dev/prod Worker，绝不提交到仓库。

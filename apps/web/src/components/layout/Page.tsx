@@ -17,15 +17,17 @@ export function Page({
   children,
   action,
   back = true,
+  backTo,
 }: {
   title: string;
   children?: ReactNode;
   action?: ReactNode;
   back?: boolean;
+  backTo?: string;
 }) {
   return (
     <>
-      <PageTitle title={title} action={action ?? (back ? <BackButton /> : undefined)} />
+      <PageTitle title={title} left={back ? <BackButton to={backTo} /> : undefined} action={action} />
       {children}
     </>
   );

@@ -13,7 +13,7 @@ jobs:
     outputs:
       web: ${{ steps.filter.outputs.web }}
       api: ${{ steps.filter.outputs.api }}
-      database: ${{ steps.filter.outputs.database }}
+      migration: ${{ steps.filter.outputs.migration }}
       shared: ${{ steps.filter.outputs.shared }}
       infrastructure: ${{ steps.filter.outputs.infrastructure }}
     steps:
@@ -29,8 +29,8 @@ jobs:
               - 'apps/api/**'
               - 'packages/ai/**'
               - 'packages/import/**'
-            database:
-              - 'packages/db/**'
+            migration:
+              - 'packages/db/migrations/**'
             shared:
               - 'packages/shared/**'
             infrastructure:
@@ -59,28 +59,9 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-  deploy-api:
+  migrate-database:
     needs: changes
-    if: needs.changes.outputs.api == 'true' || needs.changes.outputs.shared == 'true' || needs.changes.outputs.infrastructure == 'true'
-    runs-on: ubuntu-latest
-    environment: ${{ github.ref_name == 'main' && 'production' || 'development' }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with: { version: 10.15.0 }
-      - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: pnpm }
-      - run: pnpm install --frozen-lockfile
-      - run: node ../../scripts/prepare-wrangler-config.mjs api ${{ github.ref_name == 'main' && 'prod' || 'dev' }} && ../../apps/api/node_modules/.bin/wrangler deploy --config wrangler.generated-api-${{ github.ref_name == 'main' && 'prod' || 'dev' }}.json
-        working-directory: apps/api
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_D1_DATABASE_ID_DEV: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID_DEV }}
-          CLOUDFLARE_D1_DATABASE_ID_PROD: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID_PROD }}
-  deploy-database:
-    needs: changes
-    if: needs.changes.outputs.database == 'true'
+    if: needs.changes.outputs.migration == 'true'
     runs-on: ubuntu-latest
     environment: ${{ github.ref_name == 'main' && 'production' || 'development' }}
     steps:
@@ -91,6 +72,28 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: node ../../scripts/prepare-wrangler-config.mjs api ${{ github.ref_name == 'main' && 'prod' || 'dev' }} && ../../apps/api/node_modules/.bin/wrangler d1 migrations apply shared-ledger-${{ github.ref_name == 'main' && 'prod' || 'dev' }} --remote --config wrangler.generated-api-${{ github.ref_name == 'main' && 'prod' || 'dev' }}.json
+        working-directory: apps/api
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_D1_DATABASE_ID_DEV: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID_DEV }}
+          CLOUDFLARE_D1_DATABASE_ID_PROD: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID_PROD }}
+  deploy-api:
+    needs: [changes, migrate-database]
+    if: |
+      always() &&
+      (needs.changes.outputs.api == 'true' || needs.changes.outputs.shared == 'true' || needs.changes.outputs.infrastructure == 'true') &&
+      (needs.migrate-database.result == 'success' || needs.migrate-database.result == 'skipped')
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'production' || 'development' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.15.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: node ../../scripts/prepare-wrangler-config.mjs api ${{ github.ref_name == 'main' && 'prod' || 'dev' }} && ../../apps/api/node_modules/.bin/wrangler deploy --config wrangler.generated-api-${{ github.ref_name == 'main' && 'prod' || 'dev' }}.json
         working-directory: apps/api
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

@@ -1,14 +1,36 @@
-import { CheckIcon, CaretRightIcon, NotebookIcon, SparkleIcon } from "@phosphor-icons/react";
+import {
+  BellIcon,
+  CheckIcon,
+  CaretRightIcon,
+  CreditCardIcon,
+  GlobeHemisphereEastIcon,
+  LockKeyIcon,
+  NotebookIcon,
+  SignOutIcon,
+  SparkleIcon,
+  UserCircleIcon,
+} from "@phosphor-icons/react";
 import { Button, Panel } from "@shared-ledger/ui";
 import { useForm } from "react-hook-form";
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Page } from "../components/layout/Page";
 import { useAuth } from "../features/auth/AuthProvider";
 import { api } from "../lib";
 
 export function AccountSettingsPage() {
-  const { user } = useAuth();
+  const { setUser, user } = useAuth();
+  const logout = async () => {
+    await api("/auth/logout", { method: "POST" });
+    setUser(undefined);
+  };
+  const links = [
+    { label: "个人资料", Icon: UserCircleIcon, to: "/account" },
+    { label: "安全与登录", Icon: LockKeyIcon, to: "/account" },
+    { label: "通知设置", Icon: BellIcon, to: "/settings/notifications" },
+    { label: "语言与主题", Icon: GlobeHemisphereEastIcon, to: "/account" },
+    { label: "订阅与套餐", Icon: CreditCardIcon, to: "/subscription" },
+  ];
   return (
     <>
       <Page title="账号设置" />
@@ -19,14 +41,19 @@ export function AccountSettingsPage() {
           <p>{user?.email || "未绑定邮箱"}</p>
         </div>
       </Panel>
-      <div className="settings-list">
-        {["个人资料", "安全与登录", "通知设置", "语言与主题", "订阅与套餐"].map((item) => (
-          <Link key={item} to={item === "订阅与套餐" ? "/subscription" : "/account"}>
-            <span>{item}</span>
+      <Panel className="settings-list">
+        {links.map(({ label, Icon, to }) => (
+          <Link key={label} to={to}>
+            <Icon size={24} />
+            <span>{label}</span>
             <CaretRightIcon />
           </Link>
         ))}
-      </div>
+      </Panel>
+      <button className="logout" onClick={() => void logout()}>
+        <SignOutIcon size={20} />
+        退出登录
+      </button>
     </>
   );
 }
@@ -55,6 +82,16 @@ export function SubscriptionPage() {
         <SparkleIcon size={33} weight="fill" />
         <h2>一起记 Pro</h2>
         <p>让账本帮你发现每一笔钱的意义</p>
+        <div className="plan-options">
+          <button className="selected" type="button">
+            <b>年度套餐</b>
+            <small>¥68/年</small>
+          </button>
+          <button type="button">
+            <b>月度套餐</b>
+            <small>¥12/月</small>
+          </button>
+        </div>
         <ul>
           <li>
             <CheckIcon /> AI 账本助手
@@ -80,7 +117,7 @@ export function SubscriptionPage() {
               <input {...form.register("phone")} />
             </label>
             {error && <p className="field-error">{error}</p>}
-            <Button type="submit">立即升级 ¥18/月</Button>
+            <Button type="submit">立即升级</Button>
           </form>
         )}
       </Panel>
@@ -91,17 +128,20 @@ export function SubscriptionPage() {
 export function AuthPage({ register = false }: { register?: boolean }) {
   const navigate = useNavigate();
   const { refresh } = useAuth();
-  const form = useForm({ defaultValues: { name: "", identifier: "", email: "", phone: "", password: "" } });
+  const [searchParams] = useSearchParams();
+  const form = useForm({ defaultValues: { name: "", identifier: "", password: "", confirmPassword: "" } });
   const [error, setError] = useState("");
   const submit = form.handleSubmit(async (value) => {
+    if (register && value.password !== value.confirmPassword) {
+      setError("两次输入的密码不一致");
+      return;
+    }
     try {
       const result = register
         ? await api("/auth/register", {
             method: "POST",
             body: JSON.stringify({
               name: value.name,
-              email: value.email || undefined,
-              phone: value.phone || undefined,
               password: value.password,
             }),
           })
@@ -111,16 +151,11 @@ export function AuthPage({ register = false }: { register?: boolean }) {
           });
       void result;
       await refresh();
-      navigate("/books");
+      navigate(searchParams.get("redirect") || "/books");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "认证失败");
     }
   });
-  const oauth = (provider: "google" | "wechat") => {
-    window.location.assign(
-      `${import.meta.env.VITE_API_URL || "/api"}/auth/oauth/${provider}?redirectTo=${encodeURIComponent(window.location.origin + "/books")}`,
-    );
-  };
   return (
     <>
       <div className="brand">
@@ -130,47 +165,34 @@ export function AuthPage({ register = false }: { register?: boolean }) {
       </div>
       <form className="form auth-form" onSubmit={submit}>
         {register && (
-          <>
-            <label>
-              昵称
-              <input placeholder="怎么称呼你" {...form.register("name")} />
-            </label>
-            <label>
-              邮箱（可选）
-              <input type="email" placeholder="用于找回密码" {...form.register("email")} />
-            </label>
-            <label>
-              手机号（可选）
-              <input placeholder="用于找回密码" {...form.register("phone")} />
-            </label>
-          </>
-        )}
-        <label>
-          {register ? "密码" : "邮箱或手机号"}
-          <input
-            placeholder={register ? "至少 10 位" : "name@example.com 或手机号"}
-            {...form.register(register ? "password" : "identifier")}
-          />
-        </label>
-        {!register && (
           <label>
-            密码
-            <input type="password" {...form.register("password")} />
+            用户名
+            <input placeholder="请输入用户名" {...form.register("name")} />
           </label>
         )}
+        {!register && (
+          <label>
+            用户名
+            <input type="text" placeholder="请输入用户名" {...form.register("identifier")} />
+          </label>
+        )}
+        <label>
+          密码
+          <input
+            type="password"
+            placeholder={register ? "至少 10 位" : "请输入密码"}
+            {...form.register("password")}
+          />
+        </label>
         {register && (
           <label>
             确认密码
-            <input type="password" {...form.register("password")} />
+            <input type="password" aria-label="确认密码" placeholder="再次输入密码" {...form.register("confirmPassword")} />
           </label>
         )}
         {error && <p className="field-error">{error}</p>}
         <Button type="submit">{register ? "创建账号" : "登录"}</Button>
       </form>
-      <div className="oauth-actions">
-        <button onClick={() => oauth("google")}>使用 Google 登录</button>
-        <button onClick={() => oauth("wechat")}>使用微信登录</button>
-      </div>
       <p className="auth-switch">
         {register ? "已有账号？" : "还没有账号？"}
         <Link to={register ? "/login" : "/register"}>{register ? "去登录" : "注册"}</Link>

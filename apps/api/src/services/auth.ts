@@ -1,7 +1,8 @@
 import type { LedgerUser } from "../types";
 
 const encoder = new TextEncoder();
-const sessionTtlMs = 30 * 24 * 60 * 60 * 1000;
+const sessionTtlMs = 15 * 60 * 1000;
+const refreshTtlMs = 30 * 24 * 60 * 60 * 1000;
 const id = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 
 type UserRow = {
@@ -80,10 +81,14 @@ async function findUser(db: D1Database, where: string, value: string) {
 
 export async function createPasswordAccount(
   db: D1Database,
-  input: { name: string; password: string; email?: string; phone?: string },
+  input: { name: string; password: string },
 ) {
-  if (input.email && (await findUser(db, "u.email = ?", input.email))) throw new Error("邮箱已被使用");
-  if (input.phone && (await findUser(db, "u.phone = ?", input.phone))) throw new Error("手机号已被使用");
+  const username = input.name.trim();
+  const existingIdentity = await db
+    .prepare("SELECT id FROM auth_identities WHERE provider = 'password' AND provider_account_id = ? LIMIT 1")
+    .bind(username)
+    .first<{ id: string }>();
+  if (existingIdentity || (await findUser(db, "u.name = ?", username))) throw new Error("用户名已被使用");
 
   const now = new Date().toISOString();
   const userId = `user_${crypto.randomUUID()}`;
@@ -93,23 +98,27 @@ export async function createPasswordAccount(
       .prepare(
         "INSERT INTO users (id,name,email,phone,password_hash,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
       )
-      .bind(userId, input.name, input.email ?? null, input.phone ?? null, passwordHash, now, now),
+      .bind(userId, username, null, null, passwordHash, now, now),
     db
       .prepare(
         "INSERT INTO auth_identities (id,user_id,provider,provider_account_id,password_hash,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
       )
-      .bind(`identity_${crypto.randomUUID()}`, userId, "password", null, passwordHash, now, now),
+      .bind(`identity_${crypto.randomUUID()}`, userId, "password", username, passwordHash, now, now),
     db
       .prepare(
         "INSERT INTO subscriptions (id,user_id,plan,status,started_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
       )
       .bind(`subscription_${crypto.randomUUID()}`, userId, "free", "active", now, now, now),
   ]);
-  return { id: userId, name: input.name, email: input.email ?? "", plan: "free" as const };
+  return { id: userId, name: username, email: "", plan: "free" as const };
 }
 
 export async function authenticatePassword(db: D1Database, identifier: string, password: string) {
-  const user = await findUser(db, "(u.email = ? OR u.phone = ?)", identifier);
+  const user = await findUser(
+    db,
+    "(i.provider = 'password' AND i.provider_account_id = ?) OR u.name = ? OR u.email = ? OR u.phone = ?",
+    identifier,
+  );
   if (!user) return null;
   const identity = await db
     .prepare("SELECT password_hash FROM auth_identities WHERE user_id = ? AND provider = 'password'")
@@ -132,6 +141,30 @@ export async function createSession(db: D1Database, userId: string) {
     )
     .run();
   return token;
+}
+
+export async function createRefreshToken(db: D1Database, userId: string) {
+  const token = randomToken();
+  const now = new Date();
+  await db
+    .prepare("INSERT INTO refresh_tokens (id,user_id,token_hash,expires_at,created_at) VALUES (?,?,?,?,?)")
+    .bind(
+      id("refresh"),
+      userId,
+      await digest(token),
+      new Date(now.getTime() + refreshTtlMs).toISOString(),
+      now.toISOString(),
+    )
+    .run();
+  return token;
+}
+
+export async function createSessionPair(db: D1Database, userId: string) {
+  const [accessToken, refreshToken] = await Promise.all([
+    createSession(db, userId),
+    createRefreshToken(db, userId),
+  ]);
+  return { accessToken, refreshToken };
 }
 
 export async function findSessionUser(db: D1Database, token?: string) {
@@ -157,6 +190,30 @@ export async function revokeSession(db: D1Database, token?: string) {
       .prepare("DELETE FROM auth_sessions WHERE token_hash = ?")
       .bind(await digest(token))
       .run();
+}
+
+export async function revokeRefreshToken(db: D1Database, token?: string) {
+  if (!token) return;
+  await db
+    .prepare("UPDATE refresh_tokens SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL")
+    .bind(new Date().toISOString(), await digest(token))
+    .run();
+}
+
+export async function refreshSession(db: D1Database, refreshToken?: string) {
+  if (!refreshToken) return null;
+  const row = await db
+    .prepare(
+      `SELECT user_id AS userId
+       FROM refresh_tokens
+       WHERE token_hash = ? AND expires_at > ? AND revoked_at IS NULL
+       LIMIT 1`,
+    )
+    .bind(await digest(refreshToken), new Date().toISOString())
+    .first<{ userId: string }>();
+  if (!row) return null;
+  await revokeRefreshToken(db, refreshToken);
+  return createSessionPair(db, row.userId);
 }
 
 export async function upgradeSubscription(

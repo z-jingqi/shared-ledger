@@ -1,4 +1,15 @@
-import { CaretRightIcon, RobotIcon, SignOutIcon, SparkleIcon } from "@phosphor-icons/react";
+import {
+  BookOpenIcon,
+  CaretRightIcon,
+  ChartPieSliceIcon,
+  MoonIcon,
+  SignOutIcon,
+  SquaresFourIcon,
+  TagIcon,
+  TrashIcon,
+  UsersThreeIcon,
+  WalletIcon,
+} from "@phosphor-icons/react";
 import { Button, Panel } from "@shared-ledger/ui";
 import { useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
@@ -10,57 +21,41 @@ import { useApi } from "../hooks/useApi";
 import { api } from "../lib";
 
 export function SettingsPage() {
-  const { user, setUser } = useAuth();
+  const { setUser } = useAuth();
   const logout = async () => {
     await api("/auth/logout", { method: "POST" });
     setUser(undefined);
   };
+  const primaryLinks = settingsLinks.slice(0, 4);
+  const secondaryLinks = settingsLinks.slice(4);
   return (
     <>
-      <Page title="我的" back={false} />
-      <Panel className="profile">
-        <span>{user?.name.slice(0, 1) ?? "?"}</span>
-        <div>
-          <h2>{user?.name ?? "未登录"}</h2>
-          <p>{user?.email || "未绑定邮箱"}</p>
-        </div>
-        <Link to="/account">
-          <CaretRightIcon />
-        </Link>
+      <Page title="设置" back={false} />
+      <SettingsGroup links={primaryLinks} />
+      <SettingsGroup links={secondaryLinks} />
+      <Panel className="settings-toggle-row">
+        <MoonIcon size={25} />
+        <span>深色模式</span>
+        <button aria-label="深色模式" type="button" />
       </Panel>
-      {user?.plan === "pro" ? (
-        <Link to="/ai" className="upgrade-banner">
-          <RobotIcon size={24} weight="fill" />
-          <span>
-            <b>AI 助手已开启</b>
-            <small>随时分析你的账本</small>
-          </span>
-          <CaretRightIcon />
-        </Link>
-      ) : (
-        <Link to="/subscription" className="upgrade-banner">
-          <SparkleIcon size={24} weight="fill" />
-          <span>
-            <b>升级 Pro</b>
-            <small>开启 AI 账本助手</small>
-          </span>
-          <CaretRightIcon />
-        </Link>
-      )}
-      <div className="settings-list">
-        {settingsLinks.map(({ label, to, Icon }) => (
-          <Link to={to} key={to}>
-            <Icon size={22} />
-            <span>{label}</span>
-            <CaretRightIcon />
-          </Link>
-        ))}
-      </div>
       <button className="logout" onClick={() => void logout()}>
         <SignOutIcon size={20} />
         退出登录
       </button>
     </>
+  );
+}
+function SettingsGroup({ links }: { links: typeof settingsLinks }) {
+  return (
+    <Panel className="settings-list">
+      {links.map(({ label, to, Icon }) => (
+        <Link to={to} key={to}>
+          <Icon size={24} />
+          <span>{label}</span>
+          <CaretRightIcon />
+        </Link>
+      ))}
+    </Panel>
   );
 }
 type Resource = { id: string; name: string; type?: string; color?: string };
@@ -76,7 +71,8 @@ export function ManagementSettingsPage() {
       : location.pathname.includes("accounts")
         ? "accounts"
         : undefined;
-  const title = settingsLinks.find((item) => location.pathname === item.to)?.label ?? "账本设置";
+  const settingsTitle = settingsLinks.find((item) => location.pathname === item.to)?.label;
+  const title = settingsTitle ?? (routeBookId ? "账本设置" : "设置");
   const { data, reload } = useApi<Record<string, Resource[]>>(
     path && book ? `/books/${book.id}/${path}` : undefined,
   );
@@ -85,7 +81,6 @@ export function ManagementSettingsPage() {
   );
   const [name, setName] = useState("");
   const [error, setError] = useState("");
-  const [currency, setCurrency] = useState("CNY");
   const items = path ? (data?.[path] ?? []) : [];
   const create = async () => {
     if (!path || !book || !name.trim()) return;
@@ -130,13 +125,6 @@ export function ManagementSettingsPage() {
     );
   }
   if (!path && routeBookId) {
-    const save = async () => {
-      await api(`/books/${routeBookId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ name: name || directBookData?.book.name, currency }),
-      });
-      navigate(`/books/${routeBookId}`);
-    };
     const remove = async () => {
       if (window.confirm("删除账本会隐藏其全部数据，确定继续吗？")) {
         await api(`/books/${routeBookId}`, { method: "DELETE" });
@@ -146,39 +134,97 @@ export function ManagementSettingsPage() {
     return (
       <>
         <Page title="账本设置" />
-        <div className="form">
-          <label>
-            账本名称
-            <input
-              defaultValue={directBookData?.book.name}
-              onChange={(event) => setName(event.target.value)}
-            />
-          </label>
-          <label>
-            货币
-            <select
-              defaultValue={directBookData?.book.currency ?? "CNY"}
-              onChange={(event) => setCurrency(event.target.value)}
-            >
-              <option value="CNY">人民币 CNY</option>
-              <option value="USD">美元 USD</option>
-            </select>
-          </label>
-          <Button onClick={() => void save()}>保存账本</Button>
-          <button className="logout" onClick={() => void remove()}>
-            删除账本
+        <Panel className="settings-list book-settings-list">
+          <button type="button">
+            <BookOpenIcon size={24} />
+            <span>账本名称</span>
+            <small>{directBookData?.book.name ?? "我的日常账本"}</small>
+            <CaretRightIcon />
           </button>
-        </div>
+          <button type="button">
+            <WalletIcon size={24} />
+            <span>默认货币</span>
+            <small>{directBookData?.book.currency === "USD" ? "美元（USD）" : "人民币（CNY）"}</small>
+            <CaretRightIcon />
+          </button>
+          <Link to="/members">
+            <UsersThreeIcon size={24} />
+            <span>成员与权限</span>
+            <small>成员管理</small>
+            <CaretRightIcon />
+          </Link>
+          <button type="button">
+            <ChartPieSliceIcon size={24} />
+            <span>预算设置</span>
+            <small>未设置</small>
+            <CaretRightIcon />
+          </button>
+          <Link to="/settings/categories">
+            <SquaresFourIcon size={24} />
+            <span>分类管理</span>
+            <small>分类</small>
+            <CaretRightIcon />
+          </Link>
+          <Link to="/settings/tags">
+            <TagIcon size={24} />
+            <span>标签管理</span>
+            <small>标签</small>
+            <CaretRightIcon />
+          </Link>
+        </Panel>
+        <button className="logout danger-outline" onClick={() => void remove()}>
+          <TrashIcon size={22} />
+          删除账本
+          <CaretRightIcon />
+        </button>
       </>
     );
   }
+  if (!path && !routeBookId && location.pathname.includes("/settings/privacy"))
+    return (
+      <>
+        <Page title={title} />
+        <Panel className="settings-list">
+          {["隐藏金额", "隐藏收入", "仅本人可见记录", "保存导入文件", "允许智能分析"].map((item) => (
+            <button type="button" key={item}>
+              <span>{item}</span>
+              <small>已关闭</small>
+            </button>
+          ))}
+        </Panel>
+      </>
+    );
+  if (!path && !routeBookId && location.pathname.includes("/settings/notifications"))
+    return (
+      <>
+        <Page title={title} />
+        <Panel className="settings-list">
+          {["邀请通知", "导入完成提醒", "每周账本摘要"].map((item) => (
+            <button type="button" key={item}>
+              <span>{item}</span>
+              <small>已开启</small>
+            </button>
+          ))}
+        </Panel>
+      </>
+    );
+  if (!path && !routeBookId && location.pathname.includes("/settings/about"))
+    return (
+      <>
+        <Page title={title} />
+        <Panel>
+          <h2>一起记</h2>
+          <p className="muted">和重要的人，一起记下生活。当前版本 0.1.0。</p>
+        </Panel>
+      </>
+    );
   if (!path)
     return (
       <>
         <Page title={title} />
         <Panel>
           <h2>{title}</h2>
-          <p className="muted">账本名称、货币及成员均可通过对应入口管理。</p>
+          <p className="muted">该设置项暂未开放。</p>
         </Panel>
       </>
     );

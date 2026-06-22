@@ -11,6 +11,13 @@ export function AppFrame({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const isAuthPage = ["/login", "/register"].includes(location.pathname);
+  const isBookHome = /^\/books\/[^/]+$/.test(location.pathname);
+  const showBottomNav = isBookHome || location.pathname === "/analysis";
+  const bottomNavigation = [
+    { to: isBookHome ? location.pathname : "/books", label: "账本", Icon: mainNavigation[0].Icon },
+    { to: "/analysis", label: "统计", Icon: mainNavigation[3].Icon },
+    { to: "/settings", label: "我的", Icon: mainNavigation[4].Icon },
+  ];
 
   if (isAuthPage) return <main className="phone auth-shell">{children}</main>;
 
@@ -25,17 +32,22 @@ export function AppFrame({ children }: { children: ReactNode }) {
           {drawerOpen && <AiDrawer close={() => setDrawerOpen(false)} />}
         </>
       )}
-      <nav className="bottom-nav">
-        {mainNavigation.map(({ to, label, Icon }) => {
-          const active = location.pathname.startsWith(to);
-          return (
-            <Link key={to} to={to} className={active ? "active" : ""}>
-              <Icon size={23} weight={active ? "fill" : "regular"} />
-              <span>{label}</span>
-            </Link>
-          );
-        })}
-      </nav>
+      {showBottomNav && (
+        <nav className="bottom-nav">
+          {bottomNavigation.map(({ to, label, Icon }) => {
+            const active =
+              (label === "账本" && isBookHome) ||
+              (label === "统计" && location.pathname === "/analysis") ||
+              (label === "我的" && location.pathname === "/settings");
+            return (
+              <Link key={to} to={to} className={active ? "active" : ""}>
+                <Icon size={23} weight={active ? "fill" : "regular"} />
+                <span>{label}</span>
+              </Link>
+            );
+          })}
+        </nav>
+      )}
     </main>
   );
 }

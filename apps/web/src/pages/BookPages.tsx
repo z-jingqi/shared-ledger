@@ -3,9 +3,11 @@ import {
   BookOpenIcon,
   CaretDownIcon,
   CaretRightIcon,
+  ChartPieSliceIcon,
   CircleNotchIcon,
   GearIcon,
   PlusIcon,
+  UsersIcon,
 } from "@phosphor-icons/react";
 import { createBookSchema } from "@shared-ledger/shared";
 import { Button, Panel } from "@shared-ledger/ui";
@@ -35,15 +37,14 @@ export function BookHomePage() {
   const pending = imports?.imports.filter((item) => item.status === "pending_confirmation").length ?? 0;
   return (
     <>
-      <Page
-        title={bookData?.book.name ?? "账本"}
-        back={false}
-        action={
-          <Link className="icon-link" to={`/books/${id}/settings`}>
-            <GearIcon size={27} />
-          </Link>
-        }
-      />
+      <header className="book-home-title">
+        <h1>
+          {bookData?.book.name ?? "账本"} <CaretDownIcon size={22} />
+        </h1>
+        <Link className="icon-link" to={`/books/${id}/settings`} aria-label="账本设置">
+          <GearIcon size={29} />
+        </Link>
+      </header>
       <Panel className="summary">
         <div>
           <span>
@@ -91,22 +92,42 @@ export function BooksPage() {
   const { data, loading, error } = useApi<{ books: Book[] }>("/books");
   return (
     <>
-      <Page title="我的账本" back={false} />
+      <Page
+        title="账本"
+        back={false}
+        action={
+          <Link className="icon-link icon-link-primary" to="/books/new" aria-label="创建账本">
+            <PlusIcon size={28} />
+          </Link>
+        }
+      />
+      <h2 className="section-kicker">我加入的账本</h2>
       {loading && <p className="muted">正在读取账本…</p>}
       {error && <p className="field-error">{error}</p>}
       {data?.books.map((book) => (
-        <Link className="book-hero" to={`/books/${book.id}`} key={book.id}>
-          <BookOpenIcon size={35} weight="fill" />
-          <div>
+        <Link className="book-card" to={`/books/${book.id}`} key={book.id}>
+          <span className="book-card-icon">
+            <BookOpenIcon size={36} weight="fill" />
+          </span>
+          <div className="book-card-main">
             <h2>{book.name}</h2>
-            <p>{book.currency}</p>
+            <p>日常生活收支记录</p>
+            <small>
+              <UsersIcon size={16} /> 1 位成员
+            </small>
+          </div>
+          <div className="book-card-money">
+            <span>
+              本月收入 <b>{money(0)}</b>
+            </span>
+            <span>本月支出 {money(0)}</span>
           </div>
           <CaretRightIcon />
         </Link>
       ))}
-      <Link className="add-row" to="/books/new">
-        <PlusIcon />
-        新建账本
+      <Link className="primary-wide book-create-cta" to="/books/new">
+        <PlusIcon size={24} weight="bold" />
+        创建账本
       </Link>
     </>
   );
@@ -129,23 +150,45 @@ export function CreateBookPage() {
   return (
     <>
       <Page title="创建账本" />
-      <form className="form" onSubmit={submit}>
-        <label>
-          账本名称
-          <input placeholder="例如：家庭账本" {...form.register("name")} />
-        </label>
-        <p className="field-error">{form.formState.errors.name?.message}</p>
-        <label>
-          默认货币
-          <select {...form.register("currency")}>
-            <option value="CNY">人民币 CNY</option>
-            <option value="USD">美元 USD</option>
-          </select>
-        </label>
-        <label>
-          备注
-          <textarea placeholder="可选，说明这个账本的用途" {...form.register("note")} />
-        </label>
+      <section className="create-book-intro">
+        <span>
+          <BookOpenIcon size={48} weight="duotone" />
+        </span>
+        <p>创建一个新账本，开始管理你的收支</p>
+      </section>
+      <form className="form create-book-form" onSubmit={submit}>
+        <Panel>
+          <label>
+            账本名称
+            <input placeholder="请输入账本名称" {...form.register("name")} />
+          </label>
+          <p className="field-error">{form.formState.errors.name?.message}</p>
+          <label>
+            默认货币
+            <select {...form.register("currency")}>
+              <option value="CNY">CNY 人民币</option>
+              <option value="USD">USD 美元</option>
+            </select>
+          </label>
+          <label>
+            备注（可选）
+            <textarea placeholder="输入备注信息（可选）" maxLength={100} {...form.register("note")} />
+          </label>
+        </Panel>
+        <Panel className="book-option-list">
+          <span>
+            <UsersIcon size={25} />
+            <b>多人共享</b>
+            <small>邀请家人或朋友一起管理账本</small>
+            <button type="button" aria-label="多人共享" />
+          </span>
+          <span>
+            <ChartPieSliceIcon size={25} />
+            <b>启用预算</b>
+            <small>为收支设置预算，帮助控制开销</small>
+            <button type="button" aria-label="启用预算" />
+          </span>
+        </Panel>
         {error && <p className="field-error">{error}</p>}
         <Button type="submit">创建账本</Button>
       </form>

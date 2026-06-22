@@ -30,8 +30,6 @@ export const createBookSchema = z.object({
 export const registerSchema = z.object({
   name: z.string().trim().min(1).max(60),
   password: z.string().min(10).max(128),
-  email: z.string().email().optional(),
-  phone: z.string().trim().min(6).max(30).optional(),
 });
 export const loginSchema = z.object({
   identifier: z.string().trim().min(1),

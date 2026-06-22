@@ -1,4 +1,14 @@
-import { CaretRightIcon, CheckCircleIcon } from "@phosphor-icons/react";
+import {
+  CaretRightIcon,
+  CheckCircleIcon,
+  EnvelopeSimpleIcon,
+  LinkIcon,
+  PhoneIcon,
+  ShieldCheckIcon,
+  UserCircleIcon,
+  UserPlusIcon,
+  UsersThreeIcon,
+} from "@phosphor-icons/react";
 import { Button, Panel } from "@shared-ledger/ui";
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -8,20 +18,39 @@ import { useApi } from "../hooks/useApi";
 import { api } from "../lib";
 
 type Member = { id: string; name: string; role: "creator" | "admin" | "member" };
+type SentInvitation = {
+  id: string;
+  inviteeEmail?: string;
+  inviteePhone?: string;
+  role: "admin" | "member";
+  status: string;
+};
 export function MembersPage() {
   const { book } = useActiveBook();
   const { data } = useApi<{ members: Member[] }>(book ? `/books/${book.id}/members` : undefined);
+  const { data: sentInvitations } = useApi<{ invitations: SentInvitation[] }>(
+    book ? `/books/${book.id}/invitations` : undefined,
+  );
+  const pendingInvitations = sentInvitations?.invitations.filter((item) => item.status === "pending") ?? [];
   return (
     <>
       <Page
         title="成员管理"
         action={
-          <Link className="text-action" to={`/members/invite?bookId=${book?.id ?? ""}`}>
-            邀请
+          <Link className="icon-link icon-link-primary" to={`/members/invite?bookId=${book?.id ?? ""}`} aria-label="邀请成员">
+            <UserPlusIcon size={26} />
           </Link>
         }
       />
-      <Panel>
+      <Panel className="member-summary">
+        <UsersThreeIcon size={31} weight="fill" />
+        <span>
+          <b>{data?.members.length ?? 0} 位成员</b>
+          <small>共同维护当前账本</small>
+        </span>
+      </Panel>
+      <h2 className="section-kicker">当前成员</h2>
+      <Panel className="member-list">
         {data?.members.map((member) => (
           <Link
             to={`/members/role?bookId=${book?.id ?? ""}&memberId=${member.id}`}
@@ -31,18 +60,44 @@ export function MembersPage() {
             <span>{member.name.slice(0, 1)}</span>
             <div>
               <strong>{member.name}</strong>
-              <small>{member.role}</small>
+              <small>{roleLabel(member.role)}</small>
             </div>
             <CaretRightIcon />
           </Link>
         ))}
         {!data?.members.length && <p className="muted">暂无成员</p>}
       </Panel>
+      <h2 className="section-kicker">邀请中的成员</h2>
+      <Panel className="member-list">
+        {pendingInvitations.map((invitation) => (
+          <div className="member-row pending-member-row" key={invitation.id}>
+            <span>
+              {invitation.inviteeEmail ? (
+                <EnvelopeSimpleIcon size={20} weight="bold" />
+              ) : (
+                <PhoneIcon size={20} weight="bold" />
+              )}
+            </span>
+            <div>
+              <strong>{invitation.inviteeEmail || invitation.inviteePhone || "邀请链接"}</strong>
+              <small>将加入为 {roleLabel(invitation.role)} · 待接受</small>
+            </div>
+            <Link className="text-action" to="/invitations/sent">
+              管理
+            </Link>
+          </div>
+        ))}
+        {!pendingInvitations.length && <p className="muted">暂无待接受邀请</p>}
+      </Panel>
       <Link className="sub-action" to="/invitations/received">
         我的邀请 <CaretRightIcon />
       </Link>
       <Link className="sub-action" to="/invitations/sent">
         已发邀请 <CaretRightIcon />
+      </Link>
+      <Link className="primary-wide" to={`/members/invite?bookId=${book?.id ?? ""}`}>
+        <UserPlusIcon size={24} weight="bold" />
+        邀请成员
       </Link>
     </>
   );
@@ -51,6 +106,7 @@ export function InviteMemberPage() {
   const { book } = useActiveBook();
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [method, setMethod] = useState<"email" | "phone" | "link">("email");
   const [role, setRole] = useState<"member" | "admin">("member");
   const [message, setMessage] = useState("");
   const send = async () => {
@@ -68,30 +124,52 @@ export function InviteMemberPage() {
   return (
     <>
       <Page title="邀请成员" />
-      <div className="form">
+      <Panel className="invite-intro">
+        <UserPlusIcon size={34} weight="fill" />
+        <b>邀请成员一起记账</b>
+        <small>支持邮箱、手机号或复制邀请链接，成员接受后即可加入。</small>
+      </Panel>
+      <div className="invite-tabs">
+        {(["email", "phone", "link"] as const).map((value) => (
+          <button
+            className={method === value ? "selected" : ""}
+            type="button"
+            onClick={() => setMethod(value)}
+            key={value}
+          >
+            {value === "email" ? "邮箱" : value === "phone" ? "手机号" : "链接"}
+          </button>
+        ))}
+      </div>
+      <div className="form invite-form">
+        {method !== "link" && (
+          <label>
+            {method === "email" ? <EnvelopeSimpleIcon size={20} /> : <PhoneIcon size={20} />}
+            {method === "email" ? "邮箱" : "手机号"}
+            <input
+              value={method === "email" ? email : phone}
+              onChange={(event) =>
+                method === "email" ? setEmail(event.target.value) : setPhone(event.target.value)
+              }
+              placeholder={method === "email" ? "输入对方邮箱" : "输入对方手机号"}
+            />
+          </label>
+        )}
         <label>
-          邮箱
-          <input
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            placeholder="输入对方邮箱"
-          />
-        </label>
-        <label>
-          手机号
-          <input
-            value={phone}
-            onChange={(event) => setPhone(event.target.value)}
-            placeholder="或输入手机号"
-          />
-        </label>
-        <label>
+          <ShieldCheckIcon size={20} />
           成员角色
           <select value={role} onChange={(event) => setRole(event.target.value as "member" | "admin")}>
             <option value="member">成员</option>
             <option value="admin">管理员</option>
           </select>
         </label>
+        {method === "link" && (
+          <button className="sub-action invite-link-row" type="button">
+            <LinkIcon size={21} />
+            复制邀请链接
+            <CaretRightIcon />
+          </button>
+        )}
         <Button onClick={() => void send()}>发送邀请</Button>
         {message && (
           <p className="success-note">
@@ -124,6 +202,13 @@ export function MemberRolePage() {
   return (
     <>
       <Page title="成员权限" />
+      <Panel className="role-intro">
+        <span>
+          <UserCircleIcon size={25} weight="fill" />
+        </span>
+        <h2>编辑成员角色</h2>
+        <p>管理员可邀请成员、调整权限；成员可查看账本并新增自己的记录。</p>
+      </Panel>
       <div className="role-options">
         {(["admin", "member"] as const).map((value) => (
           <label key={value}>
@@ -137,4 +222,10 @@ export function MemberRolePage() {
       <Button onClick={() => void save()}>保存权限</Button>
     </>
   );
+}
+
+function roleLabel(role: Member["role"]) {
+  if (role === "creator") return "创建者";
+  if (role === "admin") return "管理员";
+  return "成员";
 }

@@ -1,12 +1,13 @@
 import {
   ChartPieSliceIcon,
+  BellIcon,
   FileArrowUpIcon,
   GearIcon,
   HouseIcon,
+  InfoIcon,
   ListBulletsIcon,
-  SparkleIcon,
+  TagIcon,
   UserCircleIcon,
-  UsersIcon,
   WalletIcon,
 } from "@phosphor-icons/react";
 
@@ -19,11 +20,11 @@ export const mainNavigation = [
 ];
 
 export const settingsLinks = [
-  { label: "AI Provider", to: "/settings/ai-provider", Icon: SparkleIcon },
-  { label: "成员管理", to: "/members", Icon: UsersIcon },
   { label: "分类管理", to: "/settings/categories", Icon: ListBulletsIcon },
-  { label: "标签管理", to: "/settings/tags", Icon: SparkleIcon },
+  { label: "标签管理", to: "/settings/tags", Icon: TagIcon },
   { label: "账户管理", to: "/settings/accounts", Icon: WalletIcon },
   { label: "导出数据", to: "/settings/export", Icon: FileArrowUpIcon },
   { label: "隐私设置", to: "/settings/privacy", Icon: GearIcon },
+  { label: "通知设置", to: "/settings/notifications", Icon: BellIcon },
+  { label: "关于我们", to: "/settings/about", Icon: InfoIcon },
 ];
