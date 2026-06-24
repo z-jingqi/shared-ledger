@@ -122,7 +122,11 @@ export const importJobs = sqliteTable("import_jobs", {
   fileType: text("file_type").notNull(),
   r2Key: text("r2_key").notNull(),
   status: text("status").notNull(),
+  autoConfirm: integer("auto_confirm").notNull().default(0),
   errorMessage: text("error_message"),
+  ocrJobId: text("ocr_job_id"),
+  ocrSubmittedAt: text("ocr_submitted_at"),
+  ocrPollCount: integer("ocr_poll_count").notNull().default(0),
   ...timestamps,
 });
 export const importedRecords = sqliteTable("imported_records", {

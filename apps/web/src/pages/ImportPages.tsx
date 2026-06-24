@@ -12,6 +12,7 @@ import { Button, Input, Panel } from "@shared-ledger/ui";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Page } from "../components/layout/Page";
+import { supportedFileAccept } from "../features/imports/files";
 import { useActiveBook } from "../hooks/useActiveBook";
 import { useApi } from "../hooks/useApi";
 import { api, money } from "../lib";
@@ -56,7 +57,7 @@ export function ImportsPage() {
           ref={input}
           type="file"
           hidden
-          accept="image/jpeg,image/png,image/webp,image/heic,application/pdf,text/csv,.xlsx,.xls"
+          accept={supportedFileAccept}
           onChange={(event) => void upload(event.target.files?.[0])}
         />
       </Panel>

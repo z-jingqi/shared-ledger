@@ -1,19 +1,10 @@
 import type { AiProvider } from "@shared-ledger/ai";
-import { aiImportRecordSchema } from "@shared-ledger/shared";
+import { aiImportRecordSchema, supportedFileTypes } from "@shared-ledger/shared";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import { z } from "zod";
 
-export const supportedFileTypes = [
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/heic",
-  "application/pdf",
-  "text/csv",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.ms-excel",
-] as const;
+export { supportedFileTypes } from "@shared-ledger/shared";
 export type OcrResult = { text: string; confidence: number; pages?: number };
 export interface OcrAdapter {
   recognize(input: { bytes: ArrayBuffer; mimeType: string }): Promise<OcrResult>;
@@ -23,6 +14,26 @@ export function parseCsv(content: string): NormalizedImport {
   const parsed = Papa.parse<string[]>(content, { skipEmptyLines: true });
   if (parsed.errors.length) throw new Error(parsed.errors[0].message);
   return { rawText: parsed.data.map((row) => row.join(" | ")).join("\n"), warnings: [] };
+}
+export function parseExcel(bytes: ArrayBuffer): NormalizedImport {
+  const workbook = XLSX.read(bytes, { type: "array", cellText: true, cellDates: true });
+  const lines: string[] = [];
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+      header: 1,
+      blankrows: false,
+      defval: null,
+      raw: false,
+    });
+    rows.forEach((row, index) => {
+      const cells = rowToCells(row);
+      if (Object.keys(cells).length === 0) return;
+      lines.push(JSON.stringify({ sheet: sheetName, row: index + 1, cells }));
+    });
+  }
+  if (!lines.length) throw new Error("Excel 文件中没有可导入的数据");
+  return { rawText: lines.join("\n"), warnings: [] };
 }
 export async function normalizeFile(
   file: { mimeType: string; bytes: ArrayBuffer; text?: string },
@@ -34,12 +45,7 @@ export async function normalizeFile(
     return { rawText: result.text, warnings: result.confidence < 0.8 ? ["OCR 置信度较低"] : [] };
   }
   if (file.mimeType.includes("sheet") || file.mimeType.includes("excel")) {
-    const workbook = XLSX.read(file.bytes, { type: "array", cellText: true, cellDates: true });
-    const rawText = workbook.SheetNames.map((name) => XLSX.utils.sheet_to_csv(workbook.Sheets[name]))
-      .filter(Boolean)
-      .join("\n");
-    if (!rawText.trim()) throw new Error("Excel 文件中没有可导入的数据");
-    return { rawText, warnings: [] };
+    return parseExcel(file.bytes);
   }
   throw new Error("不支持的文件类型");
 }
@@ -63,3 +69,29 @@ export const importPayloadSchema = z.object({
   fileName: z.string().min(1),
   fileType: z.enum(supportedFileTypes),
 });
+
+function rowToCells(row: unknown[]): Record<string, string> {
+  return row.reduce<Record<string, string>>((cells, value, index) => {
+    const normalized = normalizeCellValue(value);
+    if (!normalized) return cells;
+    cells[columnName(index)] = normalized;
+    return cells;
+  }, {});
+}
+
+function normalizeCellValue(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (value instanceof Date) return value.toISOString();
+  return String(value).trim();
+}
+
+function columnName(index: number): string {
+  let value = "";
+  let current = index + 1;
+  while (current > 0) {
+    const remainder = (current - 1) % 26;
+    value = String.fromCharCode(65 + remainder) + value;
+    current = Math.floor((current - 1) / 26);
+  }
+  return value;
+}

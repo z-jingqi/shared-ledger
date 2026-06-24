@@ -55,6 +55,11 @@ const mapImportJob = (row: Row): ImportJob => ({
   fileType: row.fileType,
   r2Key: row.r2Key,
   status: row.status,
+  autoConfirm: Boolean(row.autoConfirm),
+  ...(row.errorMessage ? { errorMessage: row.errorMessage } : {}),
+  ...(row.ocrJobId ? { ocrJobId: row.ocrJobId } : {}),
+  ...(row.ocrSubmittedAt ? { ocrSubmittedAt: row.ocrSubmittedAt } : {}),
+  ocrPollCount: row.ocrPollCount ?? 0,
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
 });
@@ -461,11 +466,7 @@ export class D1LedgerRepository {
     return result ? mapSimple(result) : null;
   }
 
-  async createSimple(
-    kind: "categories" | "tags",
-    bookId: string,
-    data: Omit<SimpleEntity, "id" | "bookId">,
-  ) {
+  async createSimple(kind: "categories" | "tags", bookId: string, data: Omit<SimpleEntity, "id" | "bookId">) {
     const timestamp = now();
     const entity: SimpleEntity = { ...data, id: id(kind.slice(0, -1)), bookId };
     if (kind === "categories")
@@ -631,7 +632,7 @@ export class D1LedgerRepository {
     };
     await this.db
       .prepare(
-        "INSERT INTO import_jobs (id,book_id,user_id,file_name,file_type,r2_key,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO import_jobs (id,book_id,user_id,file_name,file_type,r2_key,status,auto_confirm,ocr_poll_count,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
       )
       .bind(
         job.id,
@@ -641,6 +642,8 @@ export class D1LedgerRepository {
         job.fileType,
         job.r2Key,
         job.status,
+        job.autoConfirm ? 1 : 0,
+        0,
         timestamp,
         timestamp,
       )
@@ -650,7 +653,7 @@ export class D1LedgerRepository {
   async listImportJobs(bookId: string) {
     const result = await this.db
       .prepare(
-        "SELECT id,book_id AS bookId,user_id AS userId,file_name AS fileName,file_type AS fileType,r2_key AS r2Key,status,created_at AS createdAt,updated_at AS updatedAt FROM import_jobs WHERE book_id=? ORDER BY created_at DESC",
+        "SELECT id,book_id AS bookId,user_id AS userId,file_name AS fileName,file_type AS fileType,r2_key AS r2Key,status,auto_confirm AS autoConfirm,error_message AS errorMessage,ocr_job_id AS ocrJobId,ocr_submitted_at AS ocrSubmittedAt,ocr_poll_count AS ocrPollCount,created_at AS createdAt,updated_at AS updatedAt FROM import_jobs WHERE book_id=? ORDER BY created_at DESC",
       )
       .bind(bookId)
       .all<Row>();
@@ -659,7 +662,7 @@ export class D1LedgerRepository {
   async getImportJob(jobId: string) {
     const row = await this.db
       .prepare(
-        "SELECT id,book_id AS bookId,user_id AS userId,file_name AS fileName,file_type AS fileType,r2_key AS r2Key,status,created_at AS createdAt,updated_at AS updatedAt FROM import_jobs WHERE id=?",
+        "SELECT id,book_id AS bookId,user_id AS userId,file_name AS fileName,file_type AS fileType,r2_key AS r2Key,status,auto_confirm AS autoConfirm,error_message AS errorMessage,ocr_job_id AS ocrJobId,ocr_submitted_at AS ocrSubmittedAt,ocr_poll_count AS ocrPollCount,created_at AS createdAt,updated_at AS updatedAt FROM import_jobs WHERE id=?",
       )
       .bind(jobId)
       .first<Row>();
@@ -669,6 +672,22 @@ export class D1LedgerRepository {
     await this.db
       .prepare("UPDATE import_jobs SET status=?,error_message=?,updated_at=? WHERE id=?")
       .bind(status, errorMessage ?? null, now(), jobId)
+      .run();
+    return this.getImportJob(jobId);
+  }
+  async attachOcrJob(jobId: string, ocrJobId: string) {
+    await this.db
+      .prepare(
+        "UPDATE import_jobs SET status=?,ocr_job_id=?,ocr_submitted_at=?,ocr_poll_count=0,error_message=NULL,updated_at=? WHERE id=?",
+      )
+      .bind("ocr_processing", ocrJobId, now(), now(), jobId)
+      .run();
+    return this.getImportJob(jobId);
+  }
+  async incrementOcrPoll(jobId: string) {
+    await this.db
+      .prepare("UPDATE import_jobs SET ocr_poll_count=ocr_poll_count+1,updated_at=? WHERE id=?")
+      .bind(now(), jobId)
       .run();
     return this.getImportJob(jobId);
   }

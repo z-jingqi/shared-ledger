@@ -1,6 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   CalendarBlankIcon,
+  FileArrowUpIcon,
   FunnelSimpleIcon,
   NotePencilIcon,
   PlusCircleIcon,
@@ -14,11 +15,21 @@ import {
 import { createTransactionSchema } from "@shared-ledger/shared";
 import { Button, Input, Panel } from "@shared-ledger/ui";
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
+import { ImportAttachmentCards, type ImportAttachmentView } from "../components/imports/ImportAttachmentCards";
 import { TransactionList, type LedgerTransaction } from "../components/ledger/Transactions";
 import { Page } from "../components/layout/Page";
+import {
+  isSupportedAttachment,
+  maxAttachmentFiles,
+  supportedFileAccept,
+  supportedFileDescription,
+} from "../features/imports/files";
+import { watchImportJobs } from "../features/imports/status";
+import { uploadImportFiles } from "../features/imports/upload";
 import { useActiveBook } from "../hooks/useActiveBook";
 import { useApi } from "../hooks/useApi";
 import { api, money } from "../lib";
@@ -27,6 +38,11 @@ type RecordPicker = "type" | "category" | "date" | "tag";
 
 export function RecordsPage() {
   const [filter, setFilter] = useState("全部");
+  const [attachments, setAttachments] = useState<ImportAttachmentView[]>([]);
+  const [uploadingAttachments, setUploadingAttachments] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const stopWatchingRef = useRef<(() => void) | undefined>(undefined);
+  const previewUrlsRef = useRef(new Set<string>());
   const { book } = useActiveBook();
   const { data } = useApi<{ transactions: LedgerTransaction[] }>(
     book ? `/books/${book.id}/transactions` : undefined,
@@ -44,6 +60,116 @@ export function RecordsPage() {
     result[key] = [...(result[key] ?? []), transaction];
     return result;
   }, {});
+  useEffect(() => {
+    attachments.forEach((attachment) => {
+      if (attachment.previewUrl) previewUrlsRef.current.add(attachment.previewUrl);
+    });
+  }, [attachments]);
+  useEffect(() => () => {
+    stopWatchingRef.current?.();
+    previewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+  }, []);
+  const removeAttachments = (ids: string[]) => {
+    const removing = new Set(ids);
+    setAttachments((current) => {
+      current.forEach((attachment) => {
+        if (removing.has(attachment.id) && attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+      });
+      return current.filter((attachment) => !removing.has(attachment.id));
+    });
+  };
+  const addAttachments = (fileList: FileList | null) => {
+    const files = Array.from(fileList ?? []);
+    if (!files.length) return;
+    const unsupported = files.find((file) => !isSupportedAttachment(file));
+    if (unsupported) {
+      toast.error("附件格式暂不支持", {
+        description: `${unsupported.name} 不是支持的 ${supportedFileDescription} 格式。`,
+        duration: 3000,
+        closeButton: true,
+      });
+      if (fileInput.current) fileInput.current.value = "";
+      return;
+    }
+    const next = [...attachments, ...files.map(createImportAttachment)].slice(0, maxAttachmentFiles);
+    if (attachments.length + files.length > maxAttachmentFiles) {
+      toast.warning(`一次最多上传 ${maxAttachmentFiles} 个附件`, {
+        description: "请减少文件数量后重试。",
+        duration: 3000,
+        closeButton: true,
+      });
+    }
+    setAttachments(next);
+    if (fileInput.current) fileInput.current.value = "";
+  };
+  const uploadRecordAttachments = async () => {
+    const uploadable = attachments.filter((attachment) => attachment.status === "idle" || attachment.status === "failed");
+    if (!uploadable.length) return fileInput.current?.click();
+    if (!book) return toast.error("请先选择账本", { duration: 3000, closeButton: true });
+    const uploadIds = new Set(uploadable.map((attachment) => attachment.id));
+    setUploadingAttachments(true);
+    try {
+      setAttachments((current) =>
+        current.map((attachment) =>
+          uploadIds.has(attachment.id) ? { ...attachment, status: "uploading" } : attachment,
+        ),
+      );
+      const { jobs } = await uploadImportFiles(
+        book.id,
+        uploadable.map((attachment) => attachment.file),
+        { autoConfirm: true },
+      );
+      const jobToAttachment = new Map<string, string>();
+      jobs.forEach((job, index) => {
+        const attachment = uploadable[index];
+        if (attachment) jobToAttachment.set(job.id, attachment.id);
+      });
+      setAttachments((current) =>
+        current.map((attachment) => {
+          const job = jobs.find((item) => jobToAttachment.get(item.id) === attachment.id);
+          return job ? { ...attachment, status: "processing", jobId: job.id } : attachment;
+        }),
+      );
+      stopWatchingRef.current?.();
+      stopWatchingRef.current = watchImportJobs(jobs.map((job) => job.id), (job) => {
+        const attachmentId = jobToAttachment.get(job.id);
+        if (!attachmentId) return;
+        setAttachments((current) =>
+          current.map((attachment) =>
+            attachment.id === attachmentId
+              ? {
+                  ...attachment,
+                  status:
+                    job.status === "failed"
+                      ? "failed"
+                      : job.status === "completed" || job.status === "pending_confirmation"
+                        ? "completed"
+                        : "processing",
+                  errorMessage: job.errorMessage,
+                }
+              : attachment,
+          ),
+        );
+      });
+      toast.success("附件已上传", {
+        description: `${jobs.length} 个文件正在 OCR/解析，完成后会自动保存到当前账本。`,
+        duration: 3000,
+        closeButton: true,
+      });
+    } catch (cause) {
+      setAttachments((current) =>
+        current.map((attachment) =>
+          uploadIds.has(attachment.id) ? { ...attachment, status: "failed", errorMessage: "附件上传失败" } : attachment,
+        ),
+      );
+      toast.error(cause instanceof Error ? cause.message : "附件上传失败", {
+        duration: 3000,
+        closeButton: true,
+      });
+    } finally {
+      setUploadingAttachments(false);
+    }
+  };
   return (
     <>
       <Page
@@ -94,6 +220,41 @@ export function RecordsPage() {
           记一笔
         </Link>
       </Button>
+      <Panel className="records-upload-panel">
+        <div>
+          <strong>上传文件记一笔</strong>
+          <small>
+            最多 {maxAttachmentFiles} 个，支持{supportedFileDescription}
+          </small>
+        </div>
+        <ImportAttachmentCards attachments={attachments} onRemove={(id) => removeAttachments([id])} />
+        <input
+          ref={fileInput}
+          className="sr-only"
+          type="file"
+          multiple
+          accept={supportedFileAccept}
+          onChange={(event) => addAttachments(event.currentTarget.files)}
+        />
+        <div className="records-upload-actions">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={uploadingAttachments || attachments.length >= maxAttachmentFiles}
+            onClick={() => fileInput.current?.click()}
+          >
+            <FileArrowUpIcon size={19} />
+            选择文件
+          </Button>
+          <Button
+            type="button"
+            disabled={uploadingAttachments || !attachments.length || !book}
+            onClick={() => void uploadRecordAttachments()}
+          >
+            {uploadingAttachments ? "处理中…" : "上传并自动记账"}
+          </Button>
+        </div>
+      </Panel>
     </>
   );
 }
@@ -594,6 +755,16 @@ function getPositiveNumber(value: unknown) {
 function hasPositiveNumber(value: unknown) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0;
+}
+
+function createImportAttachment(file: File): ImportAttachmentView {
+  const canPreview = file.type.startsWith("image/") && typeof URL.createObjectURL === "function";
+  return {
+    id: `attachment_${crypto.randomUUID()}`,
+    file,
+    status: "idle",
+    ...(canPreview ? { previewUrl: URL.createObjectURL(file) } : {}),
+  };
 }
 export function AddLineItemsPage() {
   const navigate = useNavigate();

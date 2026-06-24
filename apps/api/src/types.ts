@@ -1,12 +1,13 @@
-import type { PaddleOcrContainer } from "./ocr";
-
 export type Env = {
   DB?: D1Database;
   FILES?: R2Bucket;
   IMPORT_QUEUE?: Queue;
-  OCR?: DurableObjectNamespace<PaddleOcrContainer>;
   AI?: { run(model: string, input: unknown): Promise<unknown> };
   AI_PROVIDER_KEYS?: string;
+  ALEPH_OCR_BASE_URL?: string;
+  ALEPH_OCR_API_KEY?: string;
+  OCR_POLL_DELAY_SECONDS?: string;
+  OCR_MAX_WAIT_MINUTES?: string;
   APP_ENV?: string;
   WEB_ORIGIN?: string;
   GOOGLE_CLIENT_ID?: string;

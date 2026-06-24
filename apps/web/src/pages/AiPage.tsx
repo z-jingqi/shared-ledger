@@ -9,7 +9,7 @@ export function AiPage() {
   return (
     <>
       <Page title="AI 助手" />
-      <div className="ai-page">
+      <div className="ai-page-shell">
         <Robot size={42} weight="fill" />
         <h2>你好，{user?.name ?? "用户"}</h2>
         <p>我已准备好帮你理解这个账本。</p>

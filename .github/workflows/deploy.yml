@@ -93,10 +93,24 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - run: node ../../scripts/prepare-wrangler-config.mjs api ${{ github.ref_name == 'main' && 'prod' || 'dev' }} && ../../apps/api/node_modules/.bin/wrangler deploy --config wrangler.generated-api-${{ github.ref_name == 'main' && 'prod' || 'dev' }}.json
+      - run: node ../../scripts/prepare-wrangler-config.mjs api ${{ github.ref_name == 'main' && 'prod' || 'dev' }}
+        working-directory: apps/api
+        env:
+          CLOUDFLARE_D1_DATABASE_ID_DEV: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID_DEV }}
+          CLOUDFLARE_D1_DATABASE_ID_PROD: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID_PROD }}
+          ALEPH_OCR_BASE_URL_DEV: ${{ vars.ALEPH_OCR_BASE_URL_DEV || 'https://ocr.dev.aleph-cat.com' }}
+          ALEPH_OCR_BASE_URL_PROD: ${{ vars.ALEPH_OCR_BASE_URL_PROD || 'https://ocr.aleph-cat.com' }}
+      - run: |
+          if [ -n "$ALEPH_OCR_API_KEY" ]; then
+            printf "%s" "$ALEPH_OCR_API_KEY" | ../../apps/api/node_modules/.bin/wrangler secret put ALEPH_OCR_API_KEY --config wrangler.generated-api-${{ github.ref_name == 'main' && 'prod' || 'dev' }}.json
+          fi
         working-directory: apps/api
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_D1_DATABASE_ID_DEV: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID_DEV }}
-          CLOUDFLARE_D1_DATABASE_ID_PROD: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID_PROD }}
+          ALEPH_OCR_API_KEY: ${{ secrets.ALEPH_OCR_API_KEY }}
+      - run: ../../apps/api/node_modules/.bin/wrangler deploy --config wrangler.generated-api-${{ github.ref_name == 'main' && 'prod' || 'dev' }}.json
+        working-directory: apps/api
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

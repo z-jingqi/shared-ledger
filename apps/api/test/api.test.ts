@@ -50,4 +50,8 @@ describe("Hono REST API", () => {
     expect((await app.request("/books/book_home/invitations", init, { APP_ENV: "test" })).status).toBe(201);
     expect((await app.request("/books/book_home/invitations", init, { APP_ENV: "test" })).status).toBe(409);
   });
+  it("rejects anonymous import status streams", async () => {
+    const response = await createApp().request("/imports/status-stream?ids=import_test", undefined, { APP_ENV: "test" });
+    expect(response.status).toBe(401);
+  });
 });

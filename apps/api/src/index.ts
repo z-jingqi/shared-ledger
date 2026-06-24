@@ -1,7 +1,6 @@
 import { createApp } from "./app";
 import type { Env } from "./types";
 import { processImportJob, type ImportQueueMessage } from "./services/imports";
-import { PaddleOcrContainer } from "./ocr";
 
 export { createApp } from "./app";
 
@@ -23,5 +22,3 @@ export default {
     }
   },
 } satisfies ExportedHandler<Env>;
-
-export { PaddleOcrContainer };

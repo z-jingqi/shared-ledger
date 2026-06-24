@@ -19,6 +19,27 @@ export const importStatuses = [
   "failed",
 ] as const;
 export const importedRecordStatuses = ["pending", "confirmed", "ignored", "duplicated"] as const;
+export const supportedFileTypes = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "application/pdf",
+  "text/csv",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+] as const;
+export type SupportedFileType = (typeof supportedFileTypes)[number];
+export const supportedFileExtensions = [
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".webp",
+  ".pdf",
+  ".csv",
+  ".xlsx",
+  ".xls",
+] as const;
+export const supportedFileAccept = [...supportedFileTypes, ...supportedFileExtensions].join(",");
 
 export const idSchema = z.string().min(1).max(64);
 export const moneySchema = z.coerce.number().positive().finite().multipleOf(0.01);

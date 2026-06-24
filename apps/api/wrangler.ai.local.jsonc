@@ -5,7 +5,13 @@
   "compatibility_date": "2026-06-21",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
-  "vars": { "APP_ENV": "local", "WEB_ORIGIN": "http://localhost:5175" },
+  "vars": {
+    "APP_ENV": "local",
+    "WEB_ORIGIN": "http://localhost:5175",
+    "ALEPH_OCR_BASE_URL": "http://127.0.0.1:8787",
+    "OCR_POLL_DELAY_SECONDS": "5",
+    "OCR_MAX_WAIT_MINUTES": "30",
+  },
   "ai": { "binding": "AI" },
   "d1_databases": [
     {

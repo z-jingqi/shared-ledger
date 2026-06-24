@@ -241,6 +241,21 @@ describe("shared ledger mobile UI", () => {
     await user.click(await screen.findByText("记一笔"));
     expect(await screen.findByRole("heading", { name: "新增记录" })).toBeInTheDocument();
   });
+  it("shows file upload below the records button and keeps it out of the record form", async () => {
+    window.history.pushState({}, "", "/records");
+    const { unmount } = render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "记录列表" })).toBeInTheDocument();
+    expect(screen.getByText("上传文件记一笔")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "选择文件" })).toBeInTheDocument();
+
+    unmount();
+    window.history.pushState({}, "", "/records/new?bookId=book_test");
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "新增记录" })).toBeInTheDocument();
+    expect(screen.queryByText("上传文件记一笔")).not.toBeInTheDocument();
+    expect(screen.queryByText("用附件记一笔")).not.toBeInTheDocument();
+  });
   it("renders the redesigned record form without native category and date fields", async () => {
     const user = userEvent.setup();
     window.history.pushState({}, "", "/records/new?bookId=book_test");

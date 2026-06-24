@@ -22,6 +22,11 @@ export type ImportJob = {
   fileType: string;
   r2Key: string;
   status: string;
+  autoConfirm?: boolean;
+  errorMessage?: string;
+  ocrJobId?: string;
+  ocrSubmittedAt?: string;
+  ocrPollCount?: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -144,11 +149,7 @@ export class MemoryLedgerStore {
     this.transactions.unshift(tx);
     return tx;
   }
-  createSimple(
-    kind: "categories" | "tags",
-    bookId: string,
-    data: Omit<SimpleEntity, "id" | "bookId">,
-  ) {
+  createSimple(kind: "categories" | "tags", bookId: string, data: Omit<SimpleEntity, "id" | "bookId">) {
     const value = { ...data, id: id(kind.slice(0, 3)), bookId };
     this[kind].push(value);
     return value;

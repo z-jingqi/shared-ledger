@@ -5,7 +5,7 @@
 ## 技术栈
 
 - Web：React、TypeScript、Vite、Tailwind CSS v4、React Router、React Hook Form、Zod、Recharts。
-- API：Hono on Cloudflare Workers、D1、R2、Queues、Workers AI、Drizzle；可选 PaddleOCR Container。
+- API：Hono on Cloudflare Workers、D1、R2、Queues、Workers AI、Drizzle；图片/PDF OCR 通过外部 Aleph-OCR 服务。
 - 工程：pnpm monorepo、Vitest、Testing Library、Playwright、MSW。
 
 ## 目录
@@ -36,11 +36,11 @@ pnpm dev
 pnpm db:migrate:local
 ```
 
-`pnpm --filter @shared-ledger/api dev` 使用完全离线的 D1、R2、Queue 模拟，认证、账本与 CSV/Excel 导入均可本地验证。Workers AI 不能本地模拟，登录 Cloudflare 后可使用远程 AI 绑定；图片和 PDF 的 OCR 需要 Docker 与 Container：
+`pnpm --filter @shared-ledger/api dev` 使用本地 D1、R2、Queue 模拟，认证、账本与 CSV/Excel 导入均可本地验证。Workers AI 不能本地模拟，登录 Cloudflare 后可使用远程 AI 绑定；图片和 PDF 的 OCR 需要可访问的 Aleph-OCR 服务。本地默认指向 `http://127.0.0.1:8787`，API key 写入 `apps/api/.dev.vars`：
 
 ```bash
+ALEPH_OCR_API_KEY=dev-key
 pnpm --filter @shared-ledger/api dev:ai
-pnpm --filter @shared-ledger/api dev:containers
 ```
 
 ```bash
@@ -75,20 +75,17 @@ pnpm --filter @shared-ledger/api exec wrangler d1 migrations apply shared-ledger
 
 ## 文件导入、OCR 与 AI
 
-原文件先进入 R2，再通过 Queue 处理；CSV 和 Excel 在 Worker 中解析，图片或 PDF 由 PaddleOCR Container 识别，最后交给 Workers AI。AI 输出会经过 Zod 校验，只生成待确认记录，确认后才创建 Transaction。测试用 mock 仅位于测试目录，运行时代码不会回退到 mock。
+原文件先进入 R2，再通过 Queue 处理；CSV 和 Excel 在 Worker 中解析，图片或 PDF 会提交到公共 Aleph-OCR 服务，保存 Aleph job id 后延迟轮询，OCR ready 后再交给 AI 结构化。AI 输出会经过 Zod 校验，只生成待确认记录，确认后才创建 Transaction。测试用 mock 仅位于测试目录，运行时代码不会回退到 mock 或本地 OCR。
 
-默认的 `wrangler.template.jsonc` 与 CI/CD 保持免费 Worker 部署，不绑定 Container；因此在未升级时，CSV/Excel 导入完整可用，图片/PDF 任务会明确标记失败而不会伪造结果。升级 Workers Containers 后，使用专用配置部署 OCR：
+生产环境需要为 API Worker 配置：
 
-```bash
-# Docker 必须已运行；这会构建并发布 PaddleOCR 镜像
-pnpm cf:deploy:containers:dev
-pnpm cf:deploy:containers:prod
-```
+- 普通变量：`ALEPH_OCR_BASE_URL`，默认模板为 dev `https://ocr.dev.aleph-cat.com`、prod `https://ocr.aleph-cat.com`
+- Secret：`ALEPH_OCR_API_KEY`
 
-相应模板位于 `apps/api/wrangler.container.template.jsonc`，本地全链路配置为 `wrangler.container.local.jsonc`。
+缺少 `ALEPH_OCR_API_KEY` 时，图片/PDF 导入会明确失败；CSV/Excel 不受影响。
 
 免费用户没有 AI 对话入口；Pro 用户可使用全局抽屉与完整对话页。Provider 与模型保存在每位用户的 D1 配置中，切换会在下一次对话立即生效。密钥不写入 D1：通过 Worker secret `AI_PROVIDER_KEYS` 提供 JSON 映射，例如 `{"openai":"...","anthropic":"...","openrouter":"..."}`；配置中的“密钥引用”选择映射的键名。
 
 ## CI/CD
 
-`.github/workflows/deploy.yml` 通过 paths filter 判断 web、api、migration、shared 与基础设施的变更；仅部署受影响的层。Actions 不创建或部署 D1 数据库，只在 `packages/db/migrations` 变化时执行 migration，且 migration 会先于 API 部署完成。`main` 部署 prod，`develop` 部署 dev。需要 GitHub secrets：`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_D1_DATABASE_ID_DEV`、`CLOUDFLARE_D1_DATABASE_ID_PROD`。OAuth 密钥使用 `wrangler secret put` 分别写入 dev/prod Worker，绝不提交到仓库。
+`.github/workflows/deploy.yml` 通过 paths filter 判断 web、api、migration、shared 与基础设施的变更；仅部署受影响的层。Actions 不创建或部署 D1 数据库，只在 `packages/db/migrations` 变化时执行 migration，且 migration 会先于 API 部署完成。`main` 部署 prod，`develop` 部署 dev。需要 GitHub secrets：`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_D1_DATABASE_ID_DEV`、`CLOUDFLARE_D1_DATABASE_ID_PROD`、`ALEPH_OCR_API_KEY`。OAuth 与 AI provider 密钥使用 `wrangler secret put` 分别写入 dev/prod Worker，绝不提交到仓库。
