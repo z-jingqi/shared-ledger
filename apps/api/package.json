@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --config wrangler.local.jsonc",
-    "dev:ai": "wrangler dev --config wrangler.ai.local.jsonc",
-    "dev:containers": "wrangler dev --config wrangler.container.local.jsonc",
+    "dev": "wrangler dev --config wrangler.local.jsonc --port 8789",
+    "dev:ai": "wrangler dev --config wrangler.ai.local.jsonc --port 8789",
+    "dev:containers": "wrangler dev --config wrangler.container.local.jsonc --port 8789",
     "build": "wrangler deploy --dry-run --config wrangler.local.jsonc",
     "build:containers": "wrangler deploy --dry-run --config wrangler.container.local.jsonc",
     "test": "vitest run",

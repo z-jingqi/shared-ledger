@@ -3,6 +3,8 @@ import {
   CheckIcon,
   CaretRightIcon,
   CreditCardIcon,
+  EyeIcon,
+  EyeSlashIcon,
   GlobeHemisphereEastIcon,
   LockKeyIcon,
   NotebookIcon,
@@ -12,6 +14,8 @@ import {
 } from "@phosphor-icons/react";
 import { Button, Panel } from "@shared-ledger/ui";
 import { useForm } from "react-hook-form";
+import type { UseFormRegisterReturn } from "react-hook-form";
+import type { ReactNode } from "react";
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Page } from "../components/layout/Page";
@@ -125,30 +129,57 @@ export function SubscriptionPage() {
   );
 }
 
-export function AuthPage({ register = false }: { register?: boolean }) {
+function AuthShell({ children }: { children: ReactNode }) {
+  return (
+    <>
+      <div className="brand">
+        <NotebookIcon size={38} weight="fill" />
+        <h1>一起记</h1>
+        <p>和重要的人，一起记下生活</p>
+      </div>
+      {children}
+    </>
+  );
+}
+
+function PasswordField({
+  label,
+  placeholder,
+  registration,
+}: {
+  label: string;
+  placeholder: string;
+  registration: UseFormRegisterReturn;
+}) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <span className="password-field">
+      <input aria-label={label} type={visible ? "text" : "password"} placeholder={placeholder} {...registration} />
+      <button
+        type="button"
+        className="password-toggle"
+        aria-label={`${visible ? "隐藏" : "显示"}${label}`}
+        onClick={() => setVisible((current) => !current)}
+      >
+        {visible ? <EyeSlashIcon size={20} /> : <EyeIcon size={20} />}
+      </button>
+    </span>
+  );
+}
+
+export function LoginPage() {
   const navigate = useNavigate();
   const { refresh } = useAuth();
   const [searchParams] = useSearchParams();
-  const form = useForm({ defaultValues: { name: "", identifier: "", password: "", confirmPassword: "" } });
+  const form = useForm({ defaultValues: { identifier: "", password: "" } });
   const [error, setError] = useState("");
   const submit = form.handleSubmit(async (value) => {
-    if (register && value.password !== value.confirmPassword) {
-      setError("两次输入的密码不一致");
-      return;
-    }
+    setError("");
     try {
-      const result = register
-        ? await api("/auth/register", {
-            method: "POST",
-            body: JSON.stringify({
-              name: value.name,
-              password: value.password,
-            }),
-          })
-        : await api("/auth/login", {
-            method: "POST",
-            body: JSON.stringify({ identifier: value.identifier, password: value.password }),
-          });
+      const result = await api("/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ identifier: value.identifier, password: value.password }),
+      });
       void result;
       await refresh();
       navigate(searchParams.get("redirect") || "/books");
@@ -157,46 +188,76 @@ export function AuthPage({ register = false }: { register?: boolean }) {
     }
   });
   return (
-    <>
-      <div className="brand">
-        <NotebookIcon size={38} weight="fill" />
-        <h1>一起记</h1>
-        <p>和重要的人，一起记下生活</p>
-      </div>
+    <AuthShell>
       <form className="form auth-form" onSubmit={submit}>
-        {register && (
-          <label>
-            用户名
-            <input placeholder="请输入用户名" {...form.register("name")} />
-          </label>
-        )}
-        {!register && (
-          <label>
-            用户名
-            <input type="text" placeholder="请输入用户名" {...form.register("identifier")} />
-          </label>
-        )}
+        <label>
+          用户名
+          <input type="text" placeholder="请输入用户名" {...form.register("identifier")} />
+        </label>
         <label>
           密码
-          <input
-            type="password"
-            placeholder={register ? "至少 10 位" : "请输入密码"}
-            {...form.register("password")}
-          />
+          <PasswordField label="密码" placeholder="请输入密码" registration={form.register("password")} />
         </label>
-        {register && (
-          <label>
-            确认密码
-            <input type="password" aria-label="确认密码" placeholder="再次输入密码" {...form.register("confirmPassword")} />
-          </label>
-        )}
         {error && <p className="field-error">{error}</p>}
-        <Button type="submit">{register ? "创建账号" : "登录"}</Button>
+        <Button type="submit">登录</Button>
       </form>
       <p className="auth-switch">
-        {register ? "已有账号？" : "还没有账号？"}
-        <Link to={register ? "/login" : "/register"}>{register ? "去登录" : "注册"}</Link>
+        还没有账号？
+        <Link to="/register">注册</Link>
       </p>
-    </>
+    </AuthShell>
+  );
+}
+
+export function RegisterPage() {
+  const navigate = useNavigate();
+  const { refresh } = useAuth();
+  const [searchParams] = useSearchParams();
+  const form = useForm({ defaultValues: { name: "", password: "", confirmPassword: "" } });
+  const [error, setError] = useState("");
+  const submit = form.handleSubmit(async (value) => {
+    setError("");
+    if (value.password !== value.confirmPassword) {
+      setError("两次输入的密码不一致");
+      return;
+    }
+    try {
+      const result = await api("/auth/register", {
+        method: "POST",
+        body: JSON.stringify({
+          name: value.name,
+          password: value.password,
+        }),
+      });
+      void result;
+      await refresh();
+      navigate(searchParams.get("redirect") || "/books");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "认证失败");
+    }
+  });
+  return (
+    <AuthShell>
+      <form className="form auth-form" onSubmit={submit}>
+        <label>
+          用户名
+          <input placeholder="请输入用户名" {...form.register("name")} />
+        </label>
+        <label>
+          密码
+          <PasswordField label="密码" placeholder="至少 6 位" registration={form.register("password")} />
+        </label>
+        <label>
+          确认密码
+          <PasswordField label="确认密码" placeholder="再次输入密码" registration={form.register("confirmPassword")} />
+        </label>
+        {error && <p className="field-error">{error}</p>}
+        <Button type="submit">创建账号</Button>
+      </form>
+      <p className="auth-switch">
+        已有账号？
+        <Link to="/login">去登录</Link>
+      </p>
+    </AuthShell>
   );
 }

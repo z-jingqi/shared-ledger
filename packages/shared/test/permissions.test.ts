@@ -6,6 +6,7 @@ import {
   canMutateTransaction,
   canUseAi,
   createTransactionSchema,
+  registerSchema,
 } from "../src/index";
 
 describe("permissions and transaction constraints", () => {
@@ -32,5 +33,9 @@ describe("permissions and transaction constraints", () => {
         items: [{ name: "a", amount: 9 }],
       }).success,
     ).toBe(false);
+  });
+  it("requires at least six characters for registration passwords", () => {
+    expect(registerSchema.safeParse({ name: "tester", password: "123456" }).success).toBe(true);
+    expect(registerSchema.safeParse({ name: "tester", password: "12345" }).success).toBe(false);
   });
 });

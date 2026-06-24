@@ -8,6 +8,7 @@ import {
   GearIcon,
   PlusIcon,
   UsersIcon,
+  WalletIcon,
 } from "@phosphor-icons/react";
 import { createBookSchema } from "@shared-ledger/shared";
 import { Button, Panel } from "@shared-ledger/ui";
@@ -90,45 +91,50 @@ export function BookHomePage() {
 }
 export function BooksPage() {
   const { data, loading, error } = useApi<{ books: Book[] }>("/books");
+  const books = data?.books ?? [];
   return (
     <>
-      <Page
-        title="账本"
-        back={false}
-        action={
-          <Link className="icon-link icon-link-primary" to="/books/new" aria-label="创建账本">
-            <PlusIcon size={28} />
-          </Link>
-        }
-      />
-      <h2 className="section-kicker">我加入的账本</h2>
+      <Page title="账本" back={false} />
       {loading && <p className="muted">正在读取账本…</p>}
       {error && <p className="field-error">{error}</p>}
-      {data?.books.map((book) => (
-        <Link className="book-card" to={`/books/${book.id}`} key={book.id}>
-          <span className="book-card-icon">
-            <BookOpenIcon size={36} weight="fill" />
-          </span>
-          <div className="book-card-main">
-            <h2>{book.name}</h2>
-            <p>日常生活收支记录</p>
-            <small>
-              <UsersIcon size={16} /> 1 位成员
-            </small>
+      {!loading && !error && books.length === 0 && (
+        <section className="books-empty" aria-label="暂无账本">
+          <p>当前还没有账本</p>
+          <Link to="/books/new">创建一个</Link>
+        </section>
+      )}
+      {books.length > 0 && (
+        <section className="books-layout">
+          <h2 className="section-kicker">我加入的账本</h2>
+          <div className="book-list-scroll">
+            {books.map((book) => (
+              <Link className="book-card" to={`/books/${book.id}`} key={book.id}>
+                <span className="book-card-icon">
+                  <BookOpenIcon size={36} weight="fill" />
+                </span>
+                <div className="book-card-main">
+                  <h2>{book.name}</h2>
+                  <p>日常生活收支记录</p>
+                  <small>
+                    <UsersIcon size={16} /> 1 位成员
+                  </small>
+                </div>
+                <div className="book-card-money">
+                  <span>
+                    本月收入 <b>{money(0)}</b>
+                  </span>
+                  <span>本月支出 {money(0)}</span>
+                </div>
+                <CaretRightIcon />
+              </Link>
+            ))}
           </div>
-          <div className="book-card-money">
-            <span>
-              本月收入 <b>{money(0)}</b>
-            </span>
-            <span>本月支出 {money(0)}</span>
-          </div>
-          <CaretRightIcon />
-        </Link>
-      ))}
-      <Link className="primary-wide book-create-cta" to="/books/new">
-        <PlusIcon size={24} weight="bold" />
-        创建账本
-      </Link>
+          <Link className="primary-wide book-create-cta" to="/books/new">
+            <PlusIcon size={24} weight="bold" />
+            创建账本
+          </Link>
+        </section>
+      )}
     </>
   );
 }
@@ -139,6 +145,9 @@ export function CreateBookPage() {
     defaultValues: { name: "", currency: "CNY", note: "" },
   });
   const [error, setError] = useState("");
+  const [shared, setShared] = useState(false);
+  const [budgetEnabled, setBudgetEnabled] = useState(false);
+  const note = form.watch("note") ?? "";
   const submit = form.handleSubmit(async (value) => {
     try {
       const result = await api<{ book: Book }>("/books", { method: "POST", body: JSON.stringify(value) });
@@ -148,31 +157,32 @@ export function CreateBookPage() {
     }
   });
   return (
-    <>
+    <form className="form create-book-screen" onSubmit={submit}>
       <Page title="创建账本" />
-      <section className="create-book-intro">
-        <span>
-          <BookOpenIcon size={48} weight="duotone" />
-        </span>
-        <p>创建一个新账本，开始管理你的收支</p>
-      </section>
-      <form className="form create-book-form" onSubmit={submit}>
+      <div className="create-book-scroll">
+        <section className="create-book-intro">
+          <span>
+            <WalletIcon size={38} />
+          </span>
+          <p>创建一个新账本，开始管理你的收支</p>
+        </section>
         <Panel>
-          <label>
+          <label className="create-book-field">
             账本名称
             <input placeholder="请输入账本名称" {...form.register("name")} />
+            <span className="field-error">{form.formState.errors.name?.message}</span>
           </label>
-          <p className="field-error">{form.formState.errors.name?.message}</p>
-          <label>
+          <label className="create-book-field">
             默认货币
             <select {...form.register("currency")}>
               <option value="CNY">CNY 人民币</option>
               <option value="USD">USD 美元</option>
             </select>
           </label>
-          <label>
+          <label className="create-book-field">
             备注（可选）
             <textarea placeholder="输入备注信息（可选）" maxLength={100} {...form.register("note")} />
+            <span className="note-count">{note.length}/100</span>
           </label>
         </Panel>
         <Panel className="book-option-list">
@@ -180,18 +190,30 @@ export function CreateBookPage() {
             <UsersIcon size={25} />
             <b>多人共享</b>
             <small>邀请家人或朋友一起管理账本</small>
-            <button type="button" aria-label="多人共享" />
+            <button
+              type="button"
+              className={shared ? "selected" : ""}
+              aria-label="多人共享"
+              aria-pressed={shared}
+              onClick={() => setShared((current) => !current)}
+            />
           </span>
           <span>
             <ChartPieSliceIcon size={25} />
             <b>启用预算</b>
             <small>为收支设置预算，帮助控制开销</small>
-            <button type="button" aria-label="启用预算" />
+            <button
+              type="button"
+              className={budgetEnabled ? "selected" : ""}
+              aria-label="启用预算"
+              aria-pressed={budgetEnabled}
+              onClick={() => setBudgetEnabled((current) => !current)}
+            />
           </span>
         </Panel>
         {error && <p className="field-error">{error}</p>}
-        <Button type="submit">创建账本</Button>
-      </form>
-    </>
+      </div>
+      <Button type="submit">创建账本</Button>
+    </form>
   );
 }

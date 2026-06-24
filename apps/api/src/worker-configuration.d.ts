@@ -7,7 +7,7 @@ interface __BaseEnv_Env {
   IMPORT_QUEUE: Queue;
   AI: Ai;
   APP_ENV: "local";
-  WEB_ORIGIN: "http://localhost:5173";
+  WEB_ORIGIN: "http://localhost:5175";
 }
 declare namespace Cloudflare {
   interface GlobalProps {

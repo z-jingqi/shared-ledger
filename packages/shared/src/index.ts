@@ -29,7 +29,7 @@ export const createBookSchema = z.object({
 });
 export const registerSchema = z.object({
   name: z.string().trim().min(1).max(60),
-  password: z.string().min(10).max(128),
+  password: z.string().min(6).max(128),
 });
 export const loginSchema = z.object({
   identifier: z.string().trim().min(1),

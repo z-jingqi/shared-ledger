@@ -4,8 +4,9 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
-    port: 5173,
-    proxy: { "/api": { target: "http://localhost:8787", rewrite: (path) => path.replace(/^\/api/, "") } },
+    port: 5175,
+    strictPort: true,
+    proxy: { "/api": { target: "http://localhost:8789", rewrite: (path) => path.replace(/^\/api/, "") } },
   },
   build: {
     rollupOptions: {

@@ -5,7 +5,7 @@
   "compatibility_date": "2026-06-21",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
-  "vars": { "APP_ENV": "local", "WEB_ORIGIN": "http://localhost:5173" },
+  "vars": { "APP_ENV": "local", "WEB_ORIGIN": "http://localhost:5175" },
   "ai": { "binding": "AI" },
   "d1_databases": [
     {

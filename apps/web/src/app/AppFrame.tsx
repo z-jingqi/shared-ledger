@@ -11,10 +11,15 @@ export function AppFrame({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const isAuthPage = ["/login", "/register"].includes(location.pathname);
-  const isBookHome = /^\/books\/[^/]+$/.test(location.pathname);
-  const showBottomNav = isBookHome || location.pathname === "/analysis";
+  const isCreateBookPage = location.pathname === "/books/new";
+  const bottomNavTab = getBottomNavTab(location.pathname);
+  const showBottomNav = bottomNavTab !== null;
   const bottomNavigation = [
-    { to: isBookHome ? location.pathname : "/books", label: "账本", Icon: mainNavigation[0].Icon },
+    {
+      to: bottomNavTab === "books" && isBookHomePath(location.pathname) ? location.pathname : "/books",
+      label: "账本",
+      Icon: mainNavigation[0].Icon,
+    },
     { to: "/analysis", label: "统计", Icon: mainNavigation[3].Icon },
     { to: "/settings", label: "我的", Icon: mainNavigation[4].Icon },
   ];
@@ -22,7 +27,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
   if (isAuthPage) return <main className="phone auth-shell">{children}</main>;
 
   return (
-    <main className="phone">
+    <main className={`phone${isCreateBookPage ? " create-book-shell" : ""}`}>
       <div className="content">{children}</div>
       {user?.plan === "pro" && (
         <>
@@ -36,9 +41,9 @@ export function AppFrame({ children }: { children: ReactNode }) {
         <nav className="bottom-nav">
           {bottomNavigation.map(({ to, label, Icon }) => {
             const active =
-              (label === "账本" && isBookHome) ||
-              (label === "统计" && location.pathname === "/analysis") ||
-              (label === "我的" && location.pathname === "/settings");
+              (label === "账本" && bottomNavTab === "books") ||
+              (label === "统计" && bottomNavTab === "analysis") ||
+              (label === "我的" && bottomNavTab === "settings");
             return (
               <Link key={to} to={to} className={active ? "active" : ""}>
                 <Icon size={23} weight={active ? "fill" : "regular"} />
@@ -50,4 +55,15 @@ export function AppFrame({ children }: { children: ReactNode }) {
       )}
     </main>
   );
+}
+
+function isBookHomePath(pathname: string) {
+  return /^\/books\/(?!new$)[^/]+$/.test(pathname);
+}
+
+function getBottomNavTab(pathname: string): "books" | "analysis" | "settings" | null {
+  if (pathname === "/books" || isBookHomePath(pathname)) return "books";
+  if (pathname === "/analysis") return "analysis";
+  if (pathname === "/settings") return "settings";
+  return null;
 }

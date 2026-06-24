@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
-import { AccountSettingsPage, AuthPage, SubscriptionPage } from "../pages/AccountPages";
+import { AccountSettingsPage, LoginPage, RegisterPage, SubscriptionPage } from "../pages/AccountPages";
 import { AiPage } from "../pages/AiPage";
 import { BookHomePage, BooksPage, CreateBookPage } from "../pages/BookPages";
 import { AnalysisPage } from "../pages/AnalysisPage";
@@ -17,8 +17,8 @@ export function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/books" replace />} />
-      <Route path="/login" element={<AuthPage />} />
-      <Route path="/register" element={<AuthPage register />} />
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/register" element={<RegisterPage />} />
       <Route path="/books" element={<Protected element={<BooksPage />} />} />
       <Route path="/books/new" element={<Protected element={<CreateBookPage />} />} />
       <Route path="/books/:id" element={<Protected element={<BookHomePage />} />} />
