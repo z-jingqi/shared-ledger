@@ -1,4 +1,5 @@
 import { RobotIcon } from "@phosphor-icons/react";
+import { Button } from "@shared-ledger/ui";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
@@ -14,6 +15,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
   const isCreateBookPage = location.pathname === "/books/new";
   const bottomNavTab = getBottomNavTab(location.pathname);
   const showBottomNav = bottomNavTab !== null;
+  const showAiAssistant = user?.plan === "pro" && showBottomNav;
   const bottomNavigation = [
     {
       to: bottomNavTab === "books" && isBookHomePath(location.pathname) ? location.pathname : "/books",
@@ -26,14 +28,29 @@ export function AppFrame({ children }: { children: ReactNode }) {
 
   if (isAuthPage) return <main className="phone auth-shell">{children}</main>;
 
+  const shellClassName = [
+    "phone",
+    isCreateBookPage ? "create-book-shell" : "",
+    showBottomNav ? "has-bottom-nav" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <main className={`phone${isCreateBookPage ? " create-book-shell" : ""}`}>
+    <main className={shellClassName}>
       <div className="content">{children}</div>
-      {user?.plan === "pro" && (
+      {showAiAssistant && (
         <>
-          <button className="ai-fab" aria-label="打开 AI 助手" onClick={() => setDrawerOpen(true)}>
+          <Button
+            className="ai-fab"
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="打开 AI 助手"
+            onClick={() => setDrawerOpen(true)}
+          >
             <RobotIcon size={25} weight="fill" />
-          </button>
+          </Button>
           {drawerOpen && <AiDrawer close={() => setDrawerOpen(false)} />}
         </>
       )}

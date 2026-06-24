@@ -49,7 +49,6 @@ export const createTransactionSchema = z
     type: z.enum(transactionTypes),
     amount: moneySchema,
     categoryId: idSchema.optional(),
-    accountId: idSchema.optional(),
     memberId: idSchema.optional(),
     note: z.string().max(500).optional(),
     occurredAt: z.string().datetime().or(z.string().date()),
@@ -95,10 +94,6 @@ export const tagSchema = z.object({
     .string()
     .regex(/^#[0-9a-fA-F]{6}$/)
     .default("#ff6b1a"),
-});
-export const accountSchema = z.object({
-  name: z.string().trim().min(1).max(30),
-  type: z.string().trim().min(1).max(30),
 });
 export const aiImportRecordSchema = z.object({
   type: z.enum(transactionTypes),

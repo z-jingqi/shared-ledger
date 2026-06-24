@@ -8,7 +8,7 @@ import {
   ScanIcon,
   ShoppingCartIcon,
 } from "@phosphor-icons/react";
-import { Panel } from "@shared-ledger/ui";
+import { Button, Input, Panel } from "@shared-ledger/ui";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Page } from "../components/layout/Page";
@@ -52,7 +52,7 @@ export function ImportsPage() {
         <FileArrowUpIcon size={58} weight="duotone" />
         <h2>上传账单或图片</h2>
         <p>图片 / PDF / Excel / CSV</p>
-        <input
+        <Input
           ref={input}
           type="file"
           hidden
@@ -93,9 +93,9 @@ export function ImportsPage() {
           {!recent.length && <p className="muted">还没有导入记录</p>}
         </Panel>
       </section>
-      <button className="primary-wide" disabled={uploading || !book} onClick={() => input.current?.click()}>
+      <Button className="primary-wide" disabled={uploading || !book} onClick={() => input.current?.click()}>
         {uploading ? "正在上传…" : "选择文件"}
-      </button>
+      </Button>
     </>
   );
 }
@@ -168,9 +168,9 @@ export function PendingImportsPage() {
       <Page
         title="待确认记录"
         action={
-          <button className="text-action" disabled={busy} onClick={() => void confirmAll()}>
+          <Button className="text-action" variant="ghost" disabled={busy} onClick={() => void confirmAll()}>
             全部确认
-          </button>
+          </Button>
         }
       />
       <Panel>
@@ -189,9 +189,9 @@ export function PendingImportsPage() {
               </small>
             </div>
             <b>{money(record.suggestedTransaction.amount)}</b>
-            <button disabled={busy} onClick={() => void confirm(record.id)}>
+            <Button disabled={busy} onClick={() => void confirm(record.id)}>
               确认
-            </button>
+            </Button>
           </div>
         ))}
         {!records.length && <p className="muted">没有待确认记录</p>}

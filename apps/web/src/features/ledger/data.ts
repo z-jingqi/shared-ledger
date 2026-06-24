@@ -8,7 +8,6 @@ import {
   ListBulletsIcon,
   TagIcon,
   UserCircleIcon,
-  WalletIcon,
 } from "@phosphor-icons/react";
 
 export const mainNavigation = [
@@ -22,7 +21,6 @@ export const mainNavigation = [
 export const settingsLinks = [
   { label: "分类管理", to: "/settings/categories", Icon: ListBulletsIcon },
   { label: "标签管理", to: "/settings/tags", Icon: TagIcon },
-  { label: "账户管理", to: "/settings/accounts", Icon: WalletIcon },
   { label: "导出数据", to: "/settings/export", Icon: FileArrowUpIcon },
   { label: "隐私设置", to: "/settings/privacy", Icon: GearIcon },
   { label: "通知设置", to: "/settings/notifications", Icon: BellIcon },

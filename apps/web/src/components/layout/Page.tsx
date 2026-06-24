@@ -1,14 +1,21 @@
 import { CaretLeftIcon } from "@phosphor-icons/react";
-import { PageTitle } from "@shared-ledger/ui";
+import { Button, PageTitle } from "@shared-ledger/ui";
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 
 export function BackButton({ to }: { to?: string }) {
   const navigate = useNavigate();
   return (
-    <button className="back" onClick={() => (to ? navigate(to) : navigate(-1))} aria-label="返回">
+    <Button
+      className="back"
+      type="button"
+      variant="ghost"
+      size="icon"
+      onClick={() => (to ? navigate(to) : navigate(-1))}
+      aria-label="返回"
+    >
       <CaretLeftIcon size={30} />
-    </button>
+    </Button>
   );
 }
 

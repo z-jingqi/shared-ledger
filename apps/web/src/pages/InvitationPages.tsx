@@ -38,10 +38,10 @@ export function ReceivedInvitationsPage() {
                   <CheckCircleIcon size={16} />
                   接受
                 </Button>
-                <button onClick={() => void respond(invitation.id, "decline")}>
+                <Button variant="outline" onClick={() => void respond(invitation.id, "decline")}>
                   <ProhibitIcon size={16} />
                   拒绝
-                </button>
+                </Button>
               </span>
             ) : (
               <span className="status">{statusLabel(invitation.status)}</span>
@@ -79,8 +79,12 @@ export function SentInvitationsPage() {
             </div>
             {invitation.status === "pending" && (
               <span className="inline-actions">
-                <button onClick={() => void action(invitation.id, "remind")}>提醒</button>
-                <button onClick={() => void action(invitation.id, "revoke")}>撤回</button>
+                <Button variant="outline" onClick={() => void action(invitation.id, "remind")}>
+                  提醒
+                </Button>
+                <Button variant="destructive" onClick={() => void action(invitation.id, "revoke")}>
+                  撤回
+                </Button>
               </span>
             )}
           </div>

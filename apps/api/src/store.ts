@@ -101,7 +101,6 @@ export class MemoryLedgerStore {
     { id: "cat_salary", bookId: "book_home", name: "工资", type: "income", icon: "wallet", sortOrder: 1 },
   ];
   tags: SimpleEntity[] = [{ id: "tag_daily", bookId: "book_home", name: "日常", color: "#ff6b1a" }];
-  accounts: SimpleEntity[] = [{ id: "account_cash", bookId: "book_home", name: "现金", type: "cash" }];
   createUser(name: string, email: string, plan: LedgerUser["plan"] = "free") {
     const user = { id: id("user"), name, email, plan };
     this.users.push(user);
@@ -146,7 +145,7 @@ export class MemoryLedgerStore {
     return tx;
   }
   createSimple(
-    kind: "categories" | "tags" | "accounts",
+    kind: "categories" | "tags",
     bookId: string,
     data: Omit<SimpleEntity, "id" | "bookId">,
   ) {

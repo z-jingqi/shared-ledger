@@ -9,7 +9,19 @@ import {
   UserPlusIcon,
   UsersThreeIcon,
 } from "@phosphor-icons/react";
-import { Button, Panel } from "@shared-ledger/ui";
+import {
+  Button,
+  Input,
+  Panel,
+  RadioGroup,
+  RadioGroupItem,
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@shared-ledger/ui";
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Page } from "../components/layout/Page";
@@ -131,14 +143,15 @@ export function InviteMemberPage() {
       </Panel>
       <div className="invite-tabs">
         {(["email", "phone", "link"] as const).map((value) => (
-          <button
+          <Button
             className={method === value ? "selected" : ""}
             type="button"
+            variant="ghost"
             onClick={() => setMethod(value)}
             key={value}
           >
             {value === "email" ? "邮箱" : value === "phone" ? "手机号" : "链接"}
-          </button>
+          </Button>
         ))}
       </div>
       <div className="form invite-form">
@@ -146,7 +159,7 @@ export function InviteMemberPage() {
           <label>
             {method === "email" ? <EnvelopeSimpleIcon size={20} /> : <PhoneIcon size={20} />}
             {method === "email" ? "邮箱" : "手机号"}
-            <input
+            <Input
               value={method === "email" ? email : phone}
               onChange={(event) =>
                 method === "email" ? setEmail(event.target.value) : setPhone(event.target.value)
@@ -158,17 +171,24 @@ export function InviteMemberPage() {
         <label>
           <ShieldCheckIcon size={20} />
           成员角色
-          <select value={role} onChange={(event) => setRole(event.target.value as "member" | "admin")}>
-            <option value="member">成员</option>
-            <option value="admin">管理员</option>
-          </select>
+          <Select value={role} onValueChange={(value) => setRole(value as "member" | "admin")}>
+            <SelectTrigger aria-label="成员角色">
+              <SelectValue placeholder="请选择角色" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="member">成员</SelectItem>
+                <SelectItem value="admin">管理员</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
         </label>
         {method === "link" && (
-          <button className="sub-action invite-link-row" type="button">
+          <Button className="sub-action invite-link-row" type="button" variant="ghost">
             <LinkIcon size={21} />
             复制邀请链接
             <CaretRightIcon />
-          </button>
+          </Button>
         )}
         <Button onClick={() => void send()}>发送邀请</Button>
         {message && (
@@ -209,15 +229,19 @@ export function MemberRolePage() {
         <h2>编辑成员角色</h2>
         <p>管理员可邀请成员、调整权限；成员可查看账本并新增自己的记录。</p>
       </Panel>
-      <div className="role-options">
+      <RadioGroup
+        className="role-options"
+        value={role}
+        onValueChange={(value) => setRole(value as "admin" | "member")}
+      >
         {(["admin", "member"] as const).map((value) => (
           <label key={value}>
-            <input type="radio" name="role" checked={role === value} onChange={() => setRole(value)} />
+            <RadioGroupItem value={value} aria-label={value === "admin" ? "管理员" : "成员"} />
             {value === "admin" ? "管理员" : "成员"}
             <small>{value === "admin" ? "可邀请成员、管理成员" : "可查看账本并记录"}</small>
           </label>
         ))}
-      </div>
+      </RadioGroup>
       {error && <p className="field-error">{error}</p>}
       <Button onClick={() => void save()}>保存权限</Button>
     </>

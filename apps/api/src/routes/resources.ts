@@ -1,4 +1,4 @@
-import { accountSchema, categorySchema, tagSchema } from "@shared-ledger/shared";
+import { categorySchema, tagSchema } from "@shared-ledger/shared";
 import type { Hono } from "hono";
 import { jsonError, parseJson } from "../lib/http";
 import { D1LedgerRepository } from "../repository";
@@ -6,12 +6,11 @@ import { requireMember, requireUser } from "../services/access";
 import type { MemoryLedgerStore } from "../store";
 import type { Env } from "../types";
 
-type ResourcePath = "categories" | "tags" | "accounts";
+type ResourcePath = "categories" | "tags";
 
 export function registerResourceRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryLedgerStore) {
   registerResource(app, store, "categories", categorySchema);
   registerResource(app, store, "tags", tagSchema);
-  registerResource(app, store, "accounts", accountSchema);
 }
 
 function registerResource(
@@ -38,7 +37,7 @@ function registerResource(
     const body = await parseJson(context, schema);
     if (!body) return jsonError(context, "数据不合法");
     const value = context.env.DB
-      ? await new D1LedgerRepository(context.env.DB).createSimple(path, bookId, user.id, body)
+      ? await new D1LedgerRepository(context.env.DB).createSimple(path, bookId, body)
       : store?.createSimple(path, bookId, body);
     return value
       ? context.json({ [path.slice(0, -1)]: value }, 201)

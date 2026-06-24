@@ -203,15 +203,14 @@ export class D1LedgerRepository {
   async exportBook(bookId: string) {
     const book = await this.getBook(bookId);
     if (!book) return null;
-    const [members, transactions, categories, tags, accounts, invitations] = await Promise.all([
+    const [members, transactions, categories, tags, invitations] = await Promise.all([
       this.listMembers(bookId),
       this.listTransactions(bookId),
       this.listSimple("categories", bookId),
       this.listSimple("tags", bookId),
-      this.listSimple("accounts", bookId),
       this.listInvitations(bookId),
     ]);
-    return { exportedAt: now(), book, members, transactions, categories, tags, accounts, invitations };
+    return { exportedAt: now(), book, members, transactions, categories, tags, invitations };
   }
 
   async listMembers(bookId: string) {
@@ -256,7 +255,6 @@ export class D1LedgerRepository {
       type: row.type,
       amount: row.amount,
       ...(row.categoryId ? { categoryId: row.categoryId } : {}),
-      ...(row.accountId ? { accountId: row.accountId } : {}),
       ...(row.memberId ? { memberId: row.memberId } : {}),
       createdByUserId: row.createdByUserId,
       ...(row.note ? { note: row.note } : {}),
@@ -266,7 +264,7 @@ export class D1LedgerRepository {
     };
   }
 
-  private transactionSelect = `SELECT id,book_id AS bookId,type,amount_cents / 100.0 AS amount,category_id AS categoryId,account_id AS accountId,member_id AS memberId,created_by_user_id AS createdByUserId,note,occurred_at AS occurredAt FROM transactions`;
+  private transactionSelect = `SELECT id,book_id AS bookId,type,amount_cents / 100.0 AS amount,category_id AS categoryId,member_id AS memberId,created_by_user_id AS createdByUserId,note,occurred_at AS occurredAt FROM transactions`;
 
   async listTransactions(bookId: string) {
     const result = await this.db
@@ -310,7 +308,7 @@ export class D1LedgerRepository {
           transaction.type,
           Math.round(transaction.amount * 100),
           transaction.categoryId ?? null,
-          transaction.accountId ?? null,
+          null,
           transaction.memberId ?? null,
           userId,
           transaction.note ?? null,
@@ -370,7 +368,7 @@ export class D1LedgerRepository {
           transaction.type,
           Math.round(transaction.amount * 100),
           transaction.categoryId ?? null,
-          transaction.accountId ?? null,
+          null,
           transaction.memberId ?? null,
           transaction.note ?? null,
           transaction.occurredAt,
@@ -414,17 +412,15 @@ export class D1LedgerRepository {
       .run();
   }
 
-  private tableFor(kind: "categories" | "tags" | "accounts") {
+  private tableFor(kind: "categories" | "tags") {
     return kind;
   }
 
-  async listSimple(kind: "categories" | "tags" | "accounts", bookId: string) {
+  async listSimple(kind: "categories" | "tags", bookId: string) {
     const columns =
       kind === "categories"
         ? "id,book_id AS bookId,name,type,icon,sort_order AS sortOrder"
-        : kind === "tags"
-          ? "id,book_id AS bookId,name,color"
-          : "id,book_id AS bookId,name,type";
+        : "id,book_id AS bookId,name,color";
     const result = await this.db
       .prepare(`SELECT ${columns} FROM ${this.tableFor(kind)} WHERE book_id = ? ORDER BY created_at`)
       .bind(bookId)
@@ -453,13 +449,11 @@ export class D1LedgerRepository {
     return row;
   }
 
-  async getSimple(kind: "categories" | "tags" | "accounts", entityId: string) {
+  async getSimple(kind: "categories" | "tags", entityId: string) {
     const columns =
       kind === "categories"
         ? "id,book_id AS bookId,name,type,icon,sort_order AS sortOrder"
-        : kind === "tags"
-          ? "id,book_id AS bookId,name,color"
-          : "id,book_id AS bookId,name,type";
+        : "id,book_id AS bookId,name,color";
     const result = await this.db
       .prepare(`SELECT ${columns} FROM ${this.tableFor(kind)} WHERE id = ?`)
       .bind(entityId)
@@ -468,9 +462,8 @@ export class D1LedgerRepository {
   }
 
   async createSimple(
-    kind: "categories" | "tags" | "accounts",
+    kind: "categories" | "tags",
     bookId: string,
-    userId: string,
     data: Omit<SimpleEntity, "id" | "bookId">,
   ) {
     const timestamp = now();
@@ -496,18 +489,11 @@ export class D1LedgerRepository {
         .prepare("INSERT INTO tags (id,book_id,name,color,created_at,updated_at) VALUES (?,?,?,?,?,?)")
         .bind(entity.id, bookId, entity.name, entity.color, timestamp, timestamp)
         .run();
-    else
-      await this.db
-        .prepare(
-          "INSERT INTO accounts (id,book_id,name,type,created_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
-        )
-        .bind(entity.id, bookId, entity.name, entity.type, userId, timestamp, timestamp)
-        .run();
     return entity;
   }
 
   async updateSimple(
-    kind: "categories" | "tags" | "accounts",
+    kind: "categories" | "tags",
     entityId: string,
     data: Omit<SimpleEntity, "id" | "bookId">,
   ) {
@@ -524,15 +510,10 @@ export class D1LedgerRepository {
         .prepare("UPDATE tags SET name=?,color=?,updated_at=? WHERE id=?")
         .bind(entity.name, entity.color, now(), entityId)
         .run();
-    else
-      await this.db
-        .prepare("UPDATE accounts SET name=?,type=?,updated_at=? WHERE id=?")
-        .bind(entity.name, entity.type, now(), entityId)
-        .run();
     return entity;
   }
 
-  async deleteSimple(kind: "categories" | "tags" | "accounts", entityId: string) {
+  async deleteSimple(kind: "categories" | "tags", entityId: string) {
     await this.db
       .prepare(`DELETE FROM ${this.tableFor(kind)} WHERE id = ?`)
       .bind(entityId)

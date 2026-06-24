@@ -1,5 +1,6 @@
 import { CaretRightIcon } from "@phosphor-icons/react";
 import { useChat } from "@ai-sdk/react";
+import { Button, Input } from "@shared-ledger/ui";
 import { DefaultChatTransport } from "ai";
 import { useMemo, useState } from "react";
 import { API } from "../../lib";
@@ -41,20 +42,20 @@ export function AiChat({
         </div>
       )}
       <form onSubmit={submit}>
-        <input
+        <Input
           value={input}
           onChange={(event) => setInput(event.target.value)}
           placeholder="问问你的账本…"
           disabled={status === "streaming" || status === "submitted"}
         />
         {status === "streaming" || status === "submitted" ? (
-          <button type="button" onClick={stop}>
+          <Button type="button" onClick={stop}>
             停止
-          </button>
+          </Button>
         ) : (
-          <button aria-label="发送">
+          <Button aria-label="发送" size="icon">
             <CaretRightIcon />
-          </button>
+          </Button>
         )}
       </form>
       {error && <p className="field-error">{error.message}</p>}

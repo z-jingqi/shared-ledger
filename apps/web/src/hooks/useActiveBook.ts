@@ -6,6 +6,7 @@ export function useActiveBook() {
   const [search] = useSearchParams();
   const { data, ...state } = useApi<{ books: Book[] }>("/books");
   const requested = search.get("bookId");
-  const book = data?.books.find((item) => item.id === requested) ?? data?.books[0];
-  return { ...state, book };
+  const books = data?.books ?? [];
+  const book = books.find((item) => item.id === requested) ?? books[0];
+  return { ...state, book, books };
 }

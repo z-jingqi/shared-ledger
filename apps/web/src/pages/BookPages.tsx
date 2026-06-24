@@ -11,7 +11,19 @@ import {
   WalletIcon,
 } from "@phosphor-icons/react";
 import { createBookSchema } from "@shared-ledger/shared";
-import { Button, Panel } from "@shared-ledger/ui";
+import {
+  Button,
+  Input,
+  Panel,
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Switch,
+  Textarea,
+} from "@shared-ledger/ui";
 import { useForm } from "react-hook-form";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -147,6 +159,7 @@ export function CreateBookPage() {
   const [error, setError] = useState("");
   const [shared, setShared] = useState(false);
   const [budgetEnabled, setBudgetEnabled] = useState(false);
+  const currency = form.watch("currency");
   const note = form.watch("note") ?? "";
   const submit = form.handleSubmit(async (value) => {
     try {
@@ -169,19 +182,29 @@ export function CreateBookPage() {
         <Panel>
           <label className="create-book-field">
             账本名称
-            <input placeholder="请输入账本名称" {...form.register("name")} />
+            <Input placeholder="请输入账本名称" {...form.register("name")} />
             <span className="field-error">{form.formState.errors.name?.message}</span>
           </label>
           <label className="create-book-field">
             默认货币
-            <select {...form.register("currency")}>
-              <option value="CNY">CNY 人民币</option>
-              <option value="USD">USD 美元</option>
-            </select>
+            <Select
+              value={currency}
+              onValueChange={(value) => form.setValue("currency", value, { shouldDirty: true, shouldValidate: true })}
+            >
+              <SelectTrigger aria-label="默认货币">
+                <SelectValue placeholder="请选择货币" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="CNY">CNY 人民币</SelectItem>
+                  <SelectItem value="USD">USD 美元</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
           </label>
           <label className="create-book-field">
             备注（可选）
-            <textarea placeholder="输入备注信息（可选）" maxLength={100} {...form.register("note")} />
+            <Textarea placeholder="输入备注信息（可选）" maxLength={100} {...form.register("note")} />
             <span className="note-count">{note.length}/100</span>
           </label>
         </Panel>
@@ -190,24 +213,20 @@ export function CreateBookPage() {
             <UsersIcon size={25} />
             <b>多人共享</b>
             <small>邀请家人或朋友一起管理账本</small>
-            <button
-              type="button"
-              className={shared ? "selected" : ""}
+            <Switch
               aria-label="多人共享"
-              aria-pressed={shared}
-              onClick={() => setShared((current) => !current)}
+              checked={shared}
+              onCheckedChange={setShared}
             />
           </span>
           <span>
             <ChartPieSliceIcon size={25} />
             <b>启用预算</b>
             <small>为收支设置预算，帮助控制开销</small>
-            <button
-              type="button"
-              className={budgetEnabled ? "selected" : ""}
+            <Switch
               aria-label="启用预算"
-              aria-pressed={budgetEnabled}
-              onClick={() => setBudgetEnabled((current) => !current)}
+              checked={budgetEnabled}
+              onCheckedChange={setBudgetEnabled}
             />
           </span>
         </Panel>

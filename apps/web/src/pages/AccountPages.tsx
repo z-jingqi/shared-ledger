@@ -12,7 +12,7 @@ import {
   SparkleIcon,
   UserCircleIcon,
 } from "@phosphor-icons/react";
-import { Button, Panel } from "@shared-ledger/ui";
+import { Button, Input, Panel } from "@shared-ledger/ui";
 import { useForm } from "react-hook-form";
 import type { UseFormRegisterReturn } from "react-hook-form";
 import type { ReactNode } from "react";
@@ -54,10 +54,10 @@ export function AccountSettingsPage() {
           </Link>
         ))}
       </Panel>
-      <button className="logout" onClick={() => void logout()}>
+      <Button className="logout" variant="ghost" onClick={() => void logout()}>
         <SignOutIcon size={20} />
         退出登录
-      </button>
+      </Button>
     </>
   );
 }
@@ -87,14 +87,14 @@ export function SubscriptionPage() {
         <h2>一起记 Pro</h2>
         <p>让账本帮你发现每一笔钱的意义</p>
         <div className="plan-options">
-          <button className="selected" type="button">
+          <Button className="selected" variant="ghost" type="button">
             <b>年度套餐</b>
             <small>¥68/年</small>
-          </button>
-          <button type="button">
+          </Button>
+          <Button variant="ghost" type="button">
             <b>月度套餐</b>
             <small>¥12/月</small>
-          </button>
+          </Button>
         </div>
         <ul>
           <li>
@@ -114,11 +114,11 @@ export function SubscriptionPage() {
             <p className="muted">密码注册的账号订阅前需补充邮箱或手机号；Google、微信授权登录无需补充。</p>
             <label>
               邮箱
-              <input type="email" {...form.register("email")} />
+              <Input type="email" {...form.register("email")} />
             </label>
             <label>
               手机号
-              <input {...form.register("phone")} />
+              <Input {...form.register("phone")} />
             </label>
             {error && <p className="field-error">{error}</p>}
             <Button type="submit">立即升级</Button>
@@ -154,15 +154,17 @@ function PasswordField({
   const [visible, setVisible] = useState(false);
   return (
     <span className="password-field">
-      <input aria-label={label} type={visible ? "text" : "password"} placeholder={placeholder} {...registration} />
-      <button
+      <Input aria-label={label} type={visible ? "text" : "password"} placeholder={placeholder} {...registration} />
+      <Button
         type="button"
         className="password-toggle"
+        variant="ghost"
+        size="icon"
         aria-label={`${visible ? "隐藏" : "显示"}${label}`}
         onClick={() => setVisible((current) => !current)}
       >
         {visible ? <EyeSlashIcon size={20} /> : <EyeIcon size={20} />}
-      </button>
+      </Button>
     </span>
   );
 }
@@ -192,7 +194,7 @@ export function LoginPage() {
       <form className="form auth-form" onSubmit={submit}>
         <label>
           用户名
-          <input type="text" placeholder="请输入用户名" {...form.register("identifier")} />
+          <Input type="text" placeholder="请输入用户名" {...form.register("identifier")} />
         </label>
         <label>
           密码
@@ -241,7 +243,7 @@ export function RegisterPage() {
       <form className="form auth-form" onSubmit={submit}>
         <label>
           用户名
-          <input placeholder="请输入用户名" {...form.register("name")} />
+          <Input placeholder="请输入用户名" {...form.register("name")} />
         </label>
         <label>
           密码
