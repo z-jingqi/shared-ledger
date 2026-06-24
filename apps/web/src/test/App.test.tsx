@@ -247,7 +247,16 @@ describe("shared ledger mobile UI", () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "新增记录" })).toBeInTheDocument();
+    const main = screen.getByRole("main");
     expect(screen.getByRole("main")).not.toHaveClass("has-bottom-nav");
+    expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
+    const form = main.querySelector("form.transaction-form");
+    expect(form).toBeInTheDocument();
+    const footer = form?.querySelector(".record-form-footer");
+    expect(footer).toBeInTheDocument();
+    const actions = footer?.querySelector(".record-form-actions");
+    expect(actions).toBeInTheDocument();
+    expect(actions).toContainElement(screen.getByRole("button", { name: "保存记录" }));
     expect(screen.getByRole("spinbutton", { name: "金额" })).toHaveAttribute("inputmode", "decimal");
     expect(screen.getByRole("button", { name: /类型\s*支出/ })).toBeInTheDocument();
     expect(screen.queryByText("成员")).not.toBeInTheDocument();
@@ -274,6 +283,58 @@ describe("shared ledger mobile UI", () => {
     expect(await screen.findByRole("button", { name: "今天" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "昨天" })).toBeInTheDocument();
   });
+  it("keeps line items disabled until an amount is entered and preserves the amount after returning", async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, "", "/records/new?bookId=book_test");
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "新增记录" })).toBeInTheDocument();
+    const addDetailsButton = screen.getByRole("button", { name: /添加明细（选填）/ });
+    expect(addDetailsButton).toBeDisabled();
+
+    await user.click(addDetailsButton);
+    expect(window.location.pathname).toBe("/records/new");
+    expect(screen.queryByText("请先输入总金额")).not.toBeInTheDocument();
+
+    await user.type(screen.getByRole("spinbutton", { name: "金额" }), "128.5");
+    await waitFor(() => expect(addDetailsButton).toBeEnabled());
+    await user.click(addDetailsButton);
+
+    expect(window.location.pathname).toBe("/records/new/items");
+    expect(window.location.search).toContain("total=128.5");
+    expect(await screen.findByRole("heading", { name: "添加明细" })).toBeInTheDocument();
+    expect(screen.getAllByText(/128\.50/).length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("button", { name: "保存明细" }));
+
+    expect(window.location.pathname).toBe("/records/new");
+    expect(await screen.findByRole("heading", { name: "新增记录" })).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: "金额" })).toHaveValue(128.5);
+  });
+  it("starts line items empty and can add or delete rows", async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, "", "/records/new/items?total=128.5");
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "添加明细" })).toBeInTheDocument();
+    expect(screen.getAllByText(/128\.50/).length).toBeGreaterThan(0);
+    expect(screen.queryByDisplayValue("牛奶")).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("水果")).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText("明细名称")).toHaveLength(1);
+
+    await user.click(screen.getByRole("button", { name: /新增明细|添加一项/ }));
+    expect(screen.getAllByLabelText("明细名称")).toHaveLength(2);
+
+    await user.type(screen.getAllByLabelText("明细名称")[0], "咖啡");
+    await user.click(screen.getAllByRole("button", { name: "删除明细" })[1]);
+    expect(screen.getAllByLabelText("明细名称")).toHaveLength(1);
+    expect(screen.getByDisplayValue("咖啡")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "删除明细" }));
+    expect(screen.getAllByLabelText("明细名称")).toHaveLength(1);
+    expect(screen.queryByDisplayValue("咖啡")).not.toBeInTheDocument();
+    expect(screen.queryByText("按分类拆分")).not.toBeInTheDocument();
+  });
   it("keeps the current record draft when creating the first category from the picker", async () => {
     const user = userEvent.setup();
     categoriesByBook.book_test = [];
@@ -291,7 +352,7 @@ describe("shared ledger mobile UI", () => {
     expect(await screen.findByText(/暂无分类|还没有分类|没有可用分类/)).toBeInTheDocument();
 
     await user.type(screen.getByPlaceholderText("新分类名称"), "报销");
-    await user.click(screen.getByRole("button", { name: /添加/ }));
+    await user.click(screen.getByRole("button", { name: "添加分类" }));
 
     expect(screen.getByRole("heading", { name: "新增记录" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /分类\s*报销/ })).toHaveTextContent("报销");

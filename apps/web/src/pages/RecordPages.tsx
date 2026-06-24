@@ -1,15 +1,14 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   CalendarBlankIcon,
-  CaretRightIcon,
   FunnelSimpleIcon,
-  ListBulletsIcon,
   NotePencilIcon,
   PlusCircleIcon,
   PlusIcon,
   ReceiptIcon,
   SquaresFourIcon,
   TagIcon,
+  TrashIcon,
   XIcon,
 } from "@phosphor-icons/react";
 import { createTransactionSchema } from "@shared-ledger/shared";
@@ -17,7 +16,7 @@ import { Button, Input, Panel } from "@shared-ledger/ui";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { TransactionList, type LedgerTransaction } from "../components/ledger/Transactions";
 import { Page } from "../components/layout/Page";
 import { useActiveBook } from "../hooks/useActiveBook";
@@ -101,7 +100,9 @@ export function RecordsPage() {
 export function TransactionFormPage() {
   const navigate = useNavigate();
   const { id } = useParams();
+  const [searchParams] = useSearchParams();
   const { book } = useActiveBook();
+  const initialAmount = getPositiveNumber(searchParams.get("amount"));
   const { data: existing } = useApi<{ transaction: LedgerTransaction }>(
     id ? `/transactions/${id}` : undefined,
   );
@@ -123,7 +124,7 @@ export function TransactionFormPage() {
       : undefined,
     defaultValues: {
       type: "expense" as const,
-      amount: undefined as unknown as number,
+      amount: (initialAmount ?? undefined) as unknown as number,
       occurredAt: toDateInputValue(new Date()),
       note: "",
       categoryId: undefined,
@@ -141,11 +142,13 @@ export function TransactionFormPage() {
   const selectedCategoryId = form.watch("categoryId");
   const selectedTagIds = form.watch("tagIds") ?? [];
   const selectedDate = form.watch("occurredAt");
+  const selectedAmount = form.watch("amount");
   const selectedCategory = localCategories.find((item) => item.id === selectedCategoryId);
   const selectedTags = localTags.filter((item) => selectedTagIds.includes(item.id));
   const selectedTypeLabel = selectedType === "income" ? "收入" : "支出";
   const selectedTagLabel = selectedTags.length ? selectedTags.map((item) => item.name).join("、") : "请选择标签";
   const selectedDateValue = selectedDate || toDateInputValue(new Date());
+  const canOpenLineItems = hasPositiveNumber(selectedAmount);
   const monthDays = getMonthDays(selectedDateValue);
   const addLocalCategory = async () => {
     const name = categoryName.trim();
@@ -198,6 +201,20 @@ export function TransactionFormPage() {
   };
   const setDateValue = (value: string) => {
     form.setValue("occurredAt", value, { shouldDirty: true, shouldValidate: true });
+  };
+  const openLineItems = () => {
+    const amount = Number(selectedAmount);
+    if (!hasPositiveNumber(amount)) {
+      setError("请先输入总金额");
+      return;
+    }
+    setError("");
+    if (!id) {
+      const params = new URLSearchParams(searchParams);
+      params.set("amount", String(amount));
+      navigate({ search: params.toString() }, { replace: true });
+    }
+    navigate(`/records/new/items?total=${encodeURIComponent(String(amount))}`);
   };
   useEffect(() => {
     if (!categories?.categories) return;
@@ -317,10 +334,16 @@ export function TransactionFormPage() {
               <Input placeholder="可填写备注信息（选填）" {...form.register("note")} />
             </label>
           </Panel>
-          <Link className="sub-action add-detail-row" to="/records/new/items">
+          <Button
+            className="sub-action add-detail-row"
+            type="button"
+            variant="ghost"
+            disabled={!canOpenLineItems}
+            onClick={openLineItems}
+          >
             <PlusCircleIcon size={22} />
             添加明细（选填）
-          </Link>
+          </Button>
         </div>
         <div className="record-form-footer">
           {error && <p className="field-error">{error}</p>}
@@ -564,72 +587,113 @@ function toDateInputValue(date: Date) {
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
+function getPositiveNumber(value: unknown) {
+  const number = Number(value);
+  return hasPositiveNumber(number) ? number : undefined;
+}
+function hasPositiveNumber(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0;
+}
 export function AddLineItemsPage() {
   const navigate = useNavigate();
-  const [items, setItems] = useState([
-    { id: "milk", name: "牛奶", amount: "58.50" },
-    { id: "fruit", name: "水果", amount: "40.00" },
-    { id: "empty", name: "", amount: "" },
-  ]);
-  const total = 128.5;
+  const [searchParams] = useSearchParams();
+  const total = Number(searchParams.get("total") ?? "");
+  const hasTotal = Number.isFinite(total) && total > 0;
+  const [items, setItems] = useState([{ id: "empty", name: "", amount: "" }]);
   const assigned = items.reduce((sum, item) => sum + Number(item.amount || 0), 0);
   const updateItem = (id: string, field: "name" | "amount", value: string) =>
     setItems((current) => current.map((item) => (item.id === id ? { ...item, [field]: value } : item)));
   const addItem = () =>
     setItems((current) => [...current, { id: crypto.randomUUID(), name: "", amount: "" }]);
+  const removeItem = (id: string) =>
+    setItems((current) =>
+      current.length === 1
+        ? current.map((item) => (item.id === id ? { ...item, name: "", amount: "" } : item))
+        : current.filter((item) => item.id !== id),
+    );
   return (
-    <>
-      <Page
-        title="添加明细"
-        action={
-          <Button className="icon-link" type="button" variant="ghost" size="icon" aria-label="新增明细" onClick={addItem}>
-            <PlusCircleIcon size={27} />
-          </Button>
-        }
-      />
-      <Panel className="line-summary">
-        <ReceiptIcon size={32} weight="fill" />
-        <span>
-          <small>总金额</small>
-          <b>{money(total)}</b>
-        </span>
-        <i />
-        <span>
-          <small>
-            已分配 <b>{money(assigned)}</b> / 剩余{" "}
-            <em className={total - assigned < 0 ? "expense" : "income"}>{money(total - assigned)}</em>
-          </small>
-        </span>
-      </Panel>
-      <Panel className="line-items">
-        {items.map((item) => (
-          <label key={item.id}>
-            <Input
-              aria-label="明细名称"
-              value={item.name}
-              placeholder="输入明细名称"
-              onChange={(event) => updateItem(item.id, "name", event.target.value)}
-            />
-            <Input
-              aria-label="明细金额"
-              inputMode="decimal"
-              value={item.amount}
-              placeholder="¥0.00"
-              onChange={(event) => updateItem(item.id, "amount", event.target.value)}
-            />
-            <ListBulletsIcon size={22} />
-          </label>
-        ))}
-      </Panel>
-      <Button className="sub-action split-row" type="button" variant="ghost">
-        <ChartPieIcon />
-        按分类拆分
-        <CaretRightIcon />
-      </Button>
-      <Button type="button" onClick={() => navigate(-1)}>
-        保存明细
-      </Button>
-    </>
+    <div className="line-items-screen">
+      <Page title="添加明细" />
+      {!hasTotal ? (
+        <>
+          <div className="line-items-scroll">
+            <Panel>
+              <h2>请先输入总金额</h2>
+              <p className="muted">返回新增记录页面，输入总金额后再添加明细。</p>
+            </Panel>
+          </div>
+          <div className="line-items-footer">
+            <Button type="button" onClick={() => navigate(-1)}>
+              返回输入金额
+            </Button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="line-items-scroll">
+            <Panel className="line-summary">
+              <span className="line-summary-icon">
+                <ReceiptIcon size={26} weight="fill" />
+              </span>
+              <div className="line-summary-total">
+                <small>总金额</small>
+                <b>{money(total)}</b>
+              </div>
+              <i />
+              <div className="line-summary-balance">
+                <p>
+                  <small>已分配</small>
+                  <b>{money(assigned)}</b>
+                </p>
+                <p>
+                  <small>剩余</small>
+                  <em className={total - assigned < 0 ? "expense" : "income"}>{money(total - assigned)}</em>
+                </p>
+              </div>
+            </Panel>
+            <Panel className="line-items">
+              {items.map((item) => (
+                <label key={item.id}>
+                  <Input
+                    aria-label="明细名称"
+                    value={item.name}
+                    placeholder="输入明细名称"
+                    onChange={(event) => updateItem(item.id, "name", event.target.value)}
+                  />
+                  <Input
+                    aria-label="明细金额"
+                    inputMode="decimal"
+                    value={item.amount}
+                    placeholder="¥0.00"
+                    onChange={(event) => updateItem(item.id, "amount", event.target.value)}
+                  />
+                  <Button
+                    className="line-item-delete"
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    aria-label="删除明细"
+                    onClick={() => removeItem(item.id)}
+                  >
+                    <TrashIcon size={18} />
+                  </Button>
+                </label>
+              ))}
+              <Button className="line-item-add" type="button" variant="ghost" onClick={addItem}>
+                <PlusCircleIcon size={18} />
+                添加一项
+              </Button>
+            </Panel>
+          </div>
+          <div className="line-items-footer">
+            <Button type="button" onClick={() => navigate(-1)}>
+              保存明细
+            </Button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 export function RecordDetailPage() {
@@ -683,8 +747,4 @@ export function RecordDetailPage() {
       </Panel>
     </>
   );
-}
-
-function ChartPieIcon() {
-  return <SquaresFourIcon size={22} weight="fill" />;
 }
