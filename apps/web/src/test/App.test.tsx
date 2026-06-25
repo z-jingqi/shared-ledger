@@ -367,6 +367,10 @@ describe("shared ledger mobile UI", () => {
     expect(window.location.search).toContain("bookId=book_b");
     expect(await screen.findByRole("button", { name: /当前账本\s*旅行账本/ })).toBeInTheDocument();
     expect((await screen.findAllByText(/300\.00/)).length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("button", { name: "3 个月" }));
+    expect(screen.getByRole("button", { name: "3 个月" })).toHaveClass("selected");
+    expect(screen.getByRole("button", { name: "本月" })).not.toHaveClass("selected");
   });
   it("opens analysis directly with the requested book selected", async () => {
     window.history.pushState({}, "", "/analysis?bookId=book_b");
@@ -464,7 +468,9 @@ describe("shared ledger mobile UI", () => {
     expect((await screen.findAllByText("早餐", {}, { timeout: 3000 })).length).toBeGreaterThan(0);
     expect((await screen.findAllByText("工资")).length).toBeGreaterThan(0);
 
-    await user.click(screen.getByRole("button", { name: "支出" }));
+    await user.click(screen.getByRole("button", { name: "筛选记录" }));
+    await user.click(await screen.findByRole("button", { name: "支出" }));
+    await user.click(screen.getByRole("button", { name: "应用筛选" }));
     expect(window.location.search).toContain("type=expense");
     expect((await screen.findAllByText("早餐")).length).toBeGreaterThan(0);
     expect(screen.queryByText("工资")).not.toBeInTheDocument();
