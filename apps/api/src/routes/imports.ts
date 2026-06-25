@@ -4,13 +4,28 @@ import type { Context, Hono } from "hono";
 import { jsonError } from "../lib/http";
 import { D1LedgerRepository } from "../repository";
 import { requireMember, requireUser } from "../services/access";
+import {
+  cancelAlephOcrJob,
+  cancelImportJob,
+  failAlephOcrJob,
+  finalizeAlephConvertJob,
+  finalizeAlephOcrJob,
+  isOcrImportFileType,
+  markFailed,
+  requiresImageConversion,
+  retryImportJob,
+  submitAlephConvertJob,
+  submitAlephOcrJob,
+  updateAlephSnapshot,
+} from "../services/imports";
 import type { ImportQueueMessage } from "../services/imports";
-import type { MemoryLedgerStore } from "../store";
+import type { AlephErrorPayload, AlephOcrJob } from "../services/ocr";
+import type { ImportJob, MemoryLedgerStore } from "../store";
 import type { Env } from "../types";
 
 const maximumFileBytes = 20 * 1024 * 1024;
 const maximumBatchFiles = 5;
-const terminalImportStatuses = new Set(["completed", "pending_confirmation", "failed"]);
+const terminalImportStatuses = new Set(["completed", "pending_confirmation", "failed", "cancelled"]);
 const isSupportedFile = (type: string): type is (typeof supportedFileTypes)[number] =>
   (supportedFileTypes as readonly string[]).includes(type);
 const hasSupportedExtension = (name: string) =>
@@ -21,6 +36,10 @@ const fileType = (file: File) => {
   if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
   if (name.endsWith(".png")) return "image/png";
   if (name.endsWith(".webp")) return "image/webp";
+  if (name.endsWith(".heic")) return "image/heic";
+  if (name.endsWith(".heif")) return "image/heif";
+  if (name.endsWith(".tif") || name.endsWith(".tiff")) return "image/tiff";
+  if (name.endsWith(".bmp")) return "image/bmp";
   if (name.endsWith(".pdf")) return "application/pdf";
   if (name.endsWith(".csv")) return "text/csv";
   if (name.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -36,26 +55,52 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
   ) => {
     const files = context.env.FILES;
     const queue = context.env.IMPORT_QUEUE;
-    if (!files || !queue) throw new Error("导入功能需要 R2 与 Queue 绑定");
+    if (!files) throw new Error("导入功能需要 R2 绑定");
+    const resolvedFileType = fileType(input.file);
+    const needsOcr = isOcrImportFileType(resolvedFileType);
+    if (!needsOcr && !queue) throw new Error("CSV/Excel 导入功能需要 Queue 绑定");
     const suffix = input.file.name.replaceAll(/[^a-zA-Z0-9._-]/g, "_");
     const job = await input.repository.createImportJob({
       bookId: input.bookId,
       userId: input.userId,
       fileName: input.file.name,
-      fileType: fileType(input.file),
+      fileType: resolvedFileType,
       r2Key: `imports/${input.bookId}/${crypto.randomUUID()}-${suffix}`,
       autoConfirm: input.autoConfirm,
     });
     try {
-      await files.put(job.r2Key, input.file.stream(), {
-        httpMetadata: { contentType: fileType(input.file) },
+      const bytes = await input.file.arrayBuffer();
+      await files.put(job.r2Key, bytes, {
+        httpMetadata: { contentType: resolvedFileType },
         customMetadata: { importJobId: job.id, bookId: input.bookId, uploadedBy: input.userId },
       });
-      await queue.send({ jobId: job.id } satisfies ImportQueueMessage);
-      return job;
+      if (needsOcr) {
+        if (requiresImageConversion(resolvedFileType)) {
+          return await submitAlephConvertJob(
+            context.env,
+            input.repository,
+            job,
+            bytes,
+            new URL(context.req.url).origin,
+          );
+        }
+        return await submitAlephOcrJob(
+          context.env,
+          input.repository,
+          job,
+          bytes,
+          new URL(context.req.url).origin,
+        );
+      }
+      await queue?.send({ jobId: job.id } satisfies ImportQueueMessage);
+      return (await input.repository.getImportJob(job.id)) ?? job;
     } catch (error) {
-      await files.delete(job.r2Key);
-      await input.repository.updateImportJob(job.id, "failed", error instanceof Error ? error.message : "上传失败");
+      if (needsOcr) {
+        await markFailed(input.repository, job.id, error, requiresImageConversion(resolvedFileType) ? "convert" : "ocr");
+      } else {
+        await files.delete(job.r2Key);
+        await input.repository.updateImportJob(job.id, "failed", error instanceof Error ? error.message : "上传失败");
+      }
       throw error;
     }
   };
@@ -73,8 +118,7 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     if (user instanceof Response) return user;
     const denied = await requireMember(context, store, bookId, user);
     if (denied) return denied;
-    if (!context.env.DB || !context.env.FILES || !context.env.IMPORT_QUEUE)
-      return jsonError(context, "导入功能需要 D1、R2 与 Queue 绑定", 503);
+    if (!context.env.DB || !context.env.FILES) return jsonError(context, "导入功能需要 D1 与 R2 绑定", 503);
     const form = await context.req.formData();
     const file = form.get("file");
     const autoConfirm = form.get("autoConfirm") === "true";
@@ -97,8 +141,7 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     if (user instanceof Response) return user;
     const denied = await requireMember(context, store, bookId, user);
     if (denied) return denied;
-    if (!context.env.DB || !context.env.FILES || !context.env.IMPORT_QUEUE)
-      return jsonError(context, "导入功能需要 D1、R2 与 Queue 绑定", 503);
+    if (!context.env.DB || !context.env.FILES) return jsonError(context, "导入功能需要 D1 与 R2 绑定", 503);
 
     const form = await context.req.formData();
     const autoConfirm = form.get("autoConfirm") === "true";
@@ -129,6 +172,59 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     return context.json({ imports: await new D1LedgerRepository(context.env.DB).listImportJobs(bookId) });
   });
 
+  app.post("/imports/aleph-webhook", async (context) => {
+    if (!context.env.DB) return jsonError(context, "D1 运行时不可用", 503);
+    const secret = context.env.ALEPH_OCR_WEBHOOK_SECRET;
+    if (!secret) return jsonError(context, "ALEPH_OCR_WEBHOOK_SECRET 未配置", 503);
+
+    const rawBody = await context.req.text();
+    const timestamp = context.req.header("X-Aleph-Tools-Timestamp") ?? context.req.header("X-Aleph-OCR-Timestamp");
+    const signature = context.req.header("X-Aleph-Tools-Signature") ?? context.req.header("X-Aleph-OCR-Signature");
+    if (!(await verifyAlephWebhookSignature(secret, timestamp, signature, rawBody))) {
+      return jsonError(context, "Aleph-OCR webhook 签名无效", 401);
+    }
+
+    const payload = safeJson(rawBody) as AlephWebhookPayload | null;
+    const importJobId = payload?.metadata?.importJobId;
+    if (!payload?.jobId || !importJobId) return jsonError(context, "Aleph-OCR webhook metadata 缺失", 400);
+
+    const repository = new D1LedgerRepository(context.env.DB);
+    const job = await repository.getImportJob(importJobId);
+    if (!job) return jsonError(context, "导入任务不存在", 404);
+    const phase = resolveAlephPhase(job, payload);
+    if (!phase) return jsonError(context, "Aleph Tools jobId 与导入任务不匹配", 400);
+
+    const sequence = sequenceFromEventId(payload.eventId);
+    if (payload.job) await updateAlephSnapshot(repository, job.id, phase, payload.job, sequence);
+    if (payload.event?.endsWith(".cancelled") || payload.job?.status === "cancelled") {
+      await cancelAlephOcrJob(repository, job.id, sequence);
+      return context.json({ ok: true });
+    }
+    if (payload.event?.endsWith(".failed") || payload.job?.status === "failed") {
+      await failAlephOcrJob(repository, job.id, payload.error ?? payload.job?.error ?? "Aleph Tools 处理失败", sequence, phase);
+      return context.json({ ok: true });
+    }
+    if (!payload.event?.endsWith(".ready") && payload.job?.status !== "ready") {
+      return context.json({ ok: true });
+    }
+
+    const finalize = (phase === "convert"
+      ? finalizeAlephConvertJob(context.env, repository, job.id)
+      : finalizeAlephOcrJob(context.env, repository, job.id)
+    ).catch(async (error) => {
+      await repository.markImportJobFailed(job.id, {
+        message: error instanceof Error ? error.message : "导入处理失败",
+        code: "INTERNAL_ERROR",
+        stage: phase,
+        retryable: true,
+        terminal: false,
+      });
+    });
+    context.executionCtx?.waitUntil(finalize);
+    if (!context.executionCtx) await finalize;
+    return context.json({ ok: true });
+  });
+
   app.get("/imports/status-stream", async (context) => {
     const user = await requireUser(context, store);
     if (user instanceof Response) return user;
@@ -156,53 +252,53 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
-        const latest = new Map<string, string>();
         let stopped = false;
-        const send = (job: NonNullable<(typeof jobs)[number]>) => {
-          latest.set(job.id, `${job.status}:${job.errorMessage ?? ""}`);
-          controller.enqueue(
-            encoder.encode(
-              `event: job\ndata: ${JSON.stringify({
-                id: job.id,
-                fileName: job.fileName,
-                status: job.status,
-                ...(job.errorMessage ? { errorMessage: job.errorMessage } : {}),
-              })}\n\n`,
-            ),
-          );
-        };
-        const tick = async () => {
+        const sendEvent = (event: string, data: unknown) => {
           if (stopped) return;
+          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+        };
+        const sendJob = (job: ImportJob) => sendEvent("job", importJobStatusPayload(job));
+        const close = () => {
+          if (stopped) return;
+          stopped = true;
+          controller.close();
+        };
+        context.req.raw.signal.addEventListener("abort", close);
+
+        const run = async () => {
           try {
-            const current = await Promise.all(ids.map((id) => repository.getImportJob(id)));
-            for (const job of current) {
-              if (!job) continue;
-              const signature = `${job.status}:${job.errorMessage ?? ""}`;
-              if (latest.get(job.id) !== signature) send(job);
+            jobs.forEach((job) => job && sendJob(job));
+            const activeAlephJobs = jobs.filter((job): job is ImportJob => {
+              if (!job) return false;
+              return (
+                ((Boolean(job.convertJobId) && job.status === "converting") ||
+                  (Boolean(job.ocrJobId) && job.status === "ocr_processing")) &&
+                !terminalImportStatuses.has(job.status)
+              );
+            });
+            if (!activeAlephJobs.length) {
+              close();
+              return;
             }
-            if (current.every((job) => job && terminalImportStatuses.has(job.status))) {
-              stopped = true;
-              clearInterval(timer);
-              controller.close();
-            }
+            await Promise.all(
+              activeAlephJobs.map((job) =>
+                proxyAlephEvents(context.env, repository, job, async (nextJob) => {
+                  if (stopped) return;
+                  sendJob(nextJob);
+                }),
+              ),
+            );
+            close();
           } catch (error) {
-            stopped = true;
-            clearInterval(timer);
-            controller.error(error);
+            if (!stopped) {
+              sendEvent("stream-error", {
+                message: error instanceof Error ? error.message : "进度连接已断开，可刷新恢复",
+              });
+              close();
+            }
           }
         };
-        jobs.forEach((job) => job && send(job));
-        if (jobs.every((job) => job && terminalImportStatuses.has(job.status))) {
-          stopped = true;
-          controller.close();
-          return;
-        }
-        const timer = setInterval(() => void tick(), 2000);
-        context.req.raw.signal.addEventListener("abort", () => {
-          stopped = true;
-          clearInterval(timer);
-          controller.close();
-        });
+        void run();
       },
     });
     return new Response(stream, {
@@ -220,6 +316,45 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     if (!job) return jsonError(context, "导入任务不存在", 404);
     const denied = await requireMember(context, store, job.bookId);
     return denied ?? context.json({ job });
+  });
+
+  app.post("/imports/:id/cancel", async (context) => {
+    const user = await requireUser(context, store);
+    if (user instanceof Response) return user;
+    if (!context.env.DB) return jsonError(context, "D1 运行时不可用", 503);
+    const repository = new D1LedgerRepository(context.env.DB);
+    const job = await repository.getImportJob(context.req.param("id"));
+    if (!job) return jsonError(context, "导入任务不存在", 404);
+    const denied = await requireMember(context, store, job.bookId, user);
+    if (denied) return denied;
+    if (job.status === "completed" || job.status === "pending_confirmation") {
+      return jsonError(context, "该导入任务已经生成记录，不能取消", 409);
+    }
+    try {
+      await cancelImportJob(context.env, repository, job);
+      return context.json({ ok: true });
+    } catch (error) {
+      return jsonError(context, error instanceof Error ? error.message : "取消导入失败", 502);
+    }
+  });
+
+  app.post("/imports/:id/retry", async (context) => {
+    const user = await requireUser(context, store);
+    if (user instanceof Response) return user;
+    if (!context.env.DB) return jsonError(context, "D1 运行时不可用", 503);
+    const repository = new D1LedgerRepository(context.env.DB);
+    const job = await repository.getImportJob(context.req.param("id"));
+    if (!job) return jsonError(context, "导入任务不存在", 404);
+    const denied = await requireMember(context, store, job.bookId, user);
+    if (denied) return denied;
+    if (job.status !== "failed" || !job.errorRetryable) return jsonError(context, "该导入任务当前不可重试", 409);
+    try {
+      const result = await retryImportJob(context.env, repository, job, new URL(context.req.url).origin);
+      const nextJob = Array.isArray(result) ? await repository.getImportJob(job.id) : result;
+      return context.json({ job: nextJob ?? (await repository.getImportJob(job.id)) });
+    } catch (error) {
+      return jsonError(context, error instanceof Error ? error.message : "重试导入失败", 502);
+    }
   });
 
   app.get("/imports/:id/records", async (context) => {
@@ -306,4 +441,231 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     if (!stillPending) await repository.updateImportJob(job.id, "completed");
     return context.json({ confirmed });
   });
+}
+
+type AlephWebhookPayload = {
+  event?: string;
+  eventId?: string;
+  jobId?: string;
+  job?: Partial<AlephOcrJob>;
+  resultUrl?: string;
+  outputUrl?: string;
+  error?: string | AlephErrorPayload;
+  metadata?: { importJobId?: string; phase?: "convert" | "ocr" };
+  createdAt?: string;
+};
+
+type AlephSseMessage = {
+  id?: string;
+  event?: string;
+  data?: string;
+};
+
+function resolveAlephPhase(job: ImportJob, payload: AlephWebhookPayload): "convert" | "ocr" | undefined {
+  if (payload.metadata?.phase === "convert" && job.convertJobId === payload.jobId) return "convert";
+  if (payload.metadata?.phase === "ocr" && job.ocrJobId === payload.jobId) return "ocr";
+  if (job.convertJobId === payload.jobId) return "convert";
+  if (job.ocrJobId === payload.jobId) return "ocr";
+  return undefined;
+}
+
+export async function verifyAlephWebhookSignature(
+  secret: string,
+  timestamp: string | undefined,
+  signature: string | undefined,
+  rawBody: string,
+) {
+  if (!timestamp || !signature) return false;
+  const numericTimestamp = Number(timestamp);
+  const createdAt = Number.isFinite(numericTimestamp) ? numericTimestamp : Date.parse(timestamp);
+  if (!Number.isFinite(createdAt) || Math.abs(Date.now() - createdAt) > 5 * 60_000) return false;
+  const expected = await hmacSha256Hex(secret, `${timestamp}.${rawBody}`);
+  const provided = signature.startsWith("sha256=") ? signature.slice("sha256=".length) : "";
+  return timingSafeEqualHex(expected, provided);
+}
+
+async function proxyAlephEvents(
+  env: Env,
+  repository: D1LedgerRepository,
+  job: ImportJob,
+  onJob: (job: ImportJob) => Promise<void> | void,
+) {
+  const phase: "convert" | "ocr" = job.status === "converting" ? "convert" : "ocr";
+  const externalJobId = phase === "convert" ? job.convertJobId : job.ocrJobId;
+  if (!externalJobId) return;
+  if (!env.ALEPH_OCR_BASE_URL) throw new Error("ALEPH_OCR_BASE_URL 未配置，无法订阅 OCR 进度");
+  if (!env.ALEPH_OCR_API_KEY) throw new Error("ALEPH_OCR_API_KEY 未配置，无法订阅 OCR 进度");
+
+  const url = `${env.ALEPH_OCR_BASE_URL.replace(/\/+$/, "")}/v1/jobs/${encodeURIComponent(externalJobId)}/events`;
+  const headers: Record<string, string> = {
+    accept: "text/event-stream",
+    authorization: `Bearer ${env.ALEPH_OCR_API_KEY}`,
+  };
+  const lastEventId = phase === "convert" ? job.convertEventSequence : job.ocrEventSequence;
+  if (lastEventId && lastEventId > 0) headers["Last-Event-ID"] = String(lastEventId);
+  const response = await fetch(url, { headers });
+  if (!response.ok || !response.body) throw new Error(`Aleph-OCR 进度订阅失败 (${response.status})`);
+
+  for await (const message of parseSseStream(response.body)) {
+    if (message.event === "ping" || !message.data) continue;
+    const payload = safeJson(message.data) as (Partial<AlephOcrJob> & { job?: Partial<AlephOcrJob> }) | null;
+    if (!payload) continue;
+    const alephJob = payload.job ?? payload;
+    const sequence = sequenceFromEventId(message.id);
+    const isCancelled =
+      message.event === "job.cancel_requested" ||
+      message.event === "job.cancelled" ||
+      alephJob.status === "cancel_requested" ||
+      alephJob.status === "cancelled";
+    const isFailed = message.event === "job.failed" || alephJob.status === "failed";
+    const isReady = message.event === "job.ready" || alephJob.status === "ready";
+
+    if (alephJob) {
+      const updated = await updateAlephSnapshot(repository, job.id, phase, alephJob, sequence);
+      if (updated) await onJob(updated);
+    }
+    if (isCancelled) {
+      const cancelled = await cancelAlephOcrJob(repository, job.id, sequence);
+      if (cancelled) await onJob(cancelled);
+      return;
+    }
+    if (isFailed) {
+      const failed = await failAlephOcrJob(
+        repository,
+        job.id,
+        alephJob.error ?? "Aleph Tools 处理失败",
+        sequence,
+        phase,
+      );
+      if (failed) await onJob(failed);
+      return;
+    }
+    if (isReady) {
+      const current = await repository.getImportJob(job.id);
+      if (current && terminalImportStatuses.has(current.status)) {
+        await onJob(current);
+        return;
+      }
+      if (phase === "ocr") {
+        const processing = await repository.updateImportJob(job.id, "ai_processing");
+        if (processing) await onJob(processing);
+      }
+      try {
+        if (phase === "convert") {
+          await finalizeAlephConvertJob(env, repository, job.id);
+          const next = await repository.getImportJob(job.id);
+          if (next) {
+            await onJob(next);
+            if (next.ocrJobId && next.status === "ocr_processing") {
+              await proxyAlephEvents(env, repository, next, onJob);
+            }
+          }
+        } else {
+          await finalizeAlephOcrJob(env, repository, job.id);
+        }
+      } catch (error) {
+        await repository.markImportJobFailed(job.id, {
+          message: error instanceof Error ? error.message : "导入处理失败",
+          code: "INTERNAL_ERROR",
+          stage: phase,
+          retryable: true,
+          terminal: false,
+        });
+      }
+      const finished = await repository.getImportJob(job.id);
+      if (finished) await onJob(finished);
+      return;
+    }
+  }
+}
+
+async function* parseSseStream(stream: ReadableStream<Uint8Array>): AsyncGenerator<AlephSseMessage> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true }).replaceAll("\r\n", "\n");
+      let boundary = buffer.indexOf("\n\n");
+      while (boundary >= 0) {
+        const raw = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        const parsed = parseSseMessage(raw);
+        if (parsed) yield parsed;
+        boundary = buffer.indexOf("\n\n");
+      }
+    }
+    buffer += decoder.decode();
+    const parsed = parseSseMessage(buffer);
+    if (parsed) yield parsed;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function parseSseMessage(raw: string): AlephSseMessage | null {
+  if (!raw.trim()) return null;
+  const data: string[] = [];
+  const message: AlephSseMessage = {};
+  for (const line of raw.split("\n")) {
+    if (!line || line.startsWith(":")) continue;
+    const separator = line.indexOf(":");
+    const field = separator >= 0 ? line.slice(0, separator) : line;
+    const value = separator >= 0 ? line.slice(separator + 1).replace(/^ /, "") : "";
+    if (field === "id") message.id = value;
+    if (field === "event") message.event = value;
+    if (field === "data") data.push(value);
+  }
+  if (data.length) message.data = data.join("\n");
+  return message;
+}
+
+function importJobStatusPayload(job: ImportJob) {
+  return {
+    id: job.id,
+    fileName: job.fileName,
+    status: job.status,
+    ...(job.errorMessage ? { errorMessage: job.errorMessage } : {}),
+    ...(job.errorCode ? { errorCode: job.errorCode } : {}),
+    ...(job.errorRequestId ? { errorRequestId: job.errorRequestId } : {}),
+    ...(job.errorStage ? { errorStage: job.errorStage } : {}),
+    retryable: Boolean(job.errorRetryable || job.retryable),
+    cancelable: Boolean(job.cancelable),
+    ...(typeof job.ocrProgress === "number" ? { progress: job.ocrProgress } : {}),
+    ...(job.ocrStage ? { stage: job.ocrStage } : {}),
+    ...(typeof job.ocrCurrentPage === "number" ? { currentPage: job.ocrCurrentPage } : {}),
+    ...(typeof job.ocrTotalPages === "number" ? { totalPages: job.ocrTotalPages } : {}),
+  };
+}
+
+function safeJson(value: string) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function sequenceFromEventId(eventId: string | undefined) {
+  if (!eventId) return undefined;
+  const value = Number(eventId);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+async function hmacSha256Hex(secret: string, value: string) {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, [
+    "sign",
+  ]);
+  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(value));
+  return [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function timingSafeEqualHex(left: string, right: string) {
+  if (!/^[a-f0-9]+$/i.test(left) || !/^[a-f0-9]+$/i.test(right) || left.length !== right.length) return false;
+  let diff = 0;
+  for (let index = 0; index < left.length; index += 1) diff |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  return diff === 0;
 }

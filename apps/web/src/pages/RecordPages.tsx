@@ -1,6 +1,8 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   CalendarBlankIcon,
+  CaretRightIcon,
+  CircleNotchIcon,
   FileArrowUpIcon,
   FunnelSimpleIcon,
   NotePencilIcon,
@@ -8,7 +10,6 @@ import {
   PlusIcon,
   ReceiptIcon,
   SquaresFourIcon,
-  TagIcon,
   TrashIcon,
   XIcon,
 } from "@phosphor-icons/react";
@@ -24,32 +25,69 @@ import { TransactionList, type LedgerTransaction } from "../components/ledger/Tr
 import { Page } from "../components/layout/Page";
 import {
   isSupportedAttachment,
+  isOcrAttachment,
   maxAttachmentFiles,
   supportedFileAccept,
   supportedFileDescription,
 } from "../features/imports/files";
-import { watchImportJobs } from "../features/imports/status";
-import { uploadImportFiles } from "../features/imports/upload";
+import { terminalImportStatuses, watchImportJobs } from "../features/imports/status";
+import type { ImportJobStatus } from "../features/imports/status";
+import { cancelImportJob, retryImportJob, uploadImportFiles } from "../features/imports/upload";
 import { useActiveBook } from "../hooks/useActiveBook";
 import { useApi } from "../hooks/useApi";
 import { api, money } from "../lib";
 
-type RecordPicker = "type" | "category" | "date" | "tag";
+type RecordPicker = "type" | "category" | "date";
+type RecordFilterType = "all" | "expense" | "income";
+type CategoryOption = { id: string; name: string; type?: "expense" | "income" };
+type LineItemValue = { name: string; amount: number; categoryId?: string; note?: string };
+type RecordDraft = {
+  type: "income" | "expense";
+  amount?: number | "";
+  occurredAt: string;
+  note?: string;
+  categoryId?: string;
+  items: LineItemValue[];
+};
+type RecordFilters = {
+  q: string;
+  type: RecordFilterType;
+  start: string;
+  end: string;
+  min: string;
+  max: string;
+};
 
 export function RecordsPage() {
-  const [filter, setFilter] = useState("全部");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const filters = readRecordFilters(searchParams);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [rangeOpen, setRangeOpen] = useState(false);
+  const [draftFilters, setDraftFilters] = useState<RecordFilters>(filters);
   const [attachments, setAttachments] = useState<ImportAttachmentView[]>([]);
   const [uploadingAttachments, setUploadingAttachments] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const stopWatchingRef = useRef<(() => void) | undefined>(undefined);
+  const stopRestoredWatchingRef = useRef<(() => void) | undefined>(undefined);
   const previewUrlsRef = useRef(new Set<string>());
   const { book } = useActiveBook();
   const { data } = useApi<{ transactions: LedgerTransaction[] }>(
     book ? `/books/${book.id}/transactions` : undefined,
   );
-  const transactions = (data?.transactions ?? []).filter(
-    (item) => filter === "全部" || (filter === "收入" ? item.type === "income" : item.type === "expense"),
+  const { data: categories } = useApi<{ categories: CategoryOption[] }>(
+    book ? `/books/${book.id}/categories` : undefined,
   );
+  const { data: imports, reload: reloadImports } = useApi<{ imports: ImportJobStatus[] }>(
+    book ? `/books/${book.id}/imports` : undefined,
+  );
+  const categoryNames = Object.fromEntries((categories?.categories ?? []).map((item) => [item.id, item.name]));
+  const pendingCount = imports?.imports.filter((item) => item.status === "pending_confirmation").length ?? 0;
+  const activeImports =
+    imports?.imports.filter((item) => ["uploaded", "parsing", "converting", "ocr_processing", "ai_processing"].includes(item.status)) ??
+    [];
+  const transactions = (data?.transactions ?? [])
+    .filter((item) => matchesRecordFilters(item, filters, categoryNames))
+    .sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
   const groups = transactions.reduce<Record<string, LedgerTransaction[]>>((result, transaction) => {
     const key = new Date(transaction.occurredAt).toLocaleDateString("zh-CN", {
       year: "numeric",
@@ -60,6 +98,24 @@ export function RecordsPage() {
     result[key] = [...(result[key] ?? []), transaction];
     return result;
   }, {});
+  const updateFilters = (changes: Partial<RecordFilters>) => {
+    const next = writeRecordFilters(searchParams, { ...filters, ...changes });
+    setSearchParams(next);
+  };
+  const openFilters = () => {
+    setDraftFilters(filters);
+    setFilterOpen(true);
+  };
+  const applyDraftFilters = () => {
+    setSearchParams(writeRecordFilters(searchParams, draftFilters));
+    setFilterOpen(false);
+  };
+  const resetFilters = () => {
+    const empty = { q: "", type: "all" as const, start: "", end: "", min: "", max: "" };
+    setDraftFilters(empty);
+    setSearchParams(writeRecordFilters(searchParams, empty));
+    setFilterOpen(false);
+  };
   useEffect(() => {
     attachments.forEach((attachment) => {
       if (attachment.previewUrl) previewUrlsRef.current.add(attachment.previewUrl);
@@ -67,8 +123,28 @@ export function RecordsPage() {
   }, [attachments]);
   useEffect(() => () => {
     stopWatchingRef.current?.();
+    stopRestoredWatchingRef.current?.();
     previewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
   }, []);
+  useEffect(() => {
+    stopRestoredWatchingRef.current?.();
+    const ocrImportIds = activeImports.filter((job) => job.status === "converting" || job.status === "ocr_processing").map((job) => job.id);
+    if (!ocrImportIds.length) return undefined;
+    stopRestoredWatchingRef.current = watchImportJobs(
+      ocrImportIds,
+      (job) => {
+        if (terminalImportStatuses.has(job.status)) void reloadImports();
+      },
+      {
+        onDone: () => void reloadImports(),
+        onError: (message) => toast.warning(message, { duration: 3000, closeButton: true }),
+      },
+    );
+    return () => {
+      stopRestoredWatchingRef.current?.();
+      stopRestoredWatchingRef.current = undefined;
+    };
+  }, [activeImports.map((job) => `${job.id}:${job.status}`).join(","), reloadImports]);
   const removeAttachments = (ids: string[]) => {
     const removing = new Set(ids);
     setAttachments((current) => {
@@ -127,30 +203,63 @@ export function RecordsPage() {
       setAttachments((current) =>
         current.map((attachment) => {
           const job = jobs.find((item) => jobToAttachment.get(item.id) === attachment.id);
-          return job ? { ...attachment, status: "processing", jobId: job.id } : attachment;
+          return job
+            ? {
+                ...attachment,
+                status: "processing",
+                jobId: job.id,
+                progress: job.progress,
+                stage: job.stage,
+                currentPage: job.currentPage,
+                totalPages: job.totalPages,
+                retryable: job.retryable,
+                cancelable: job.cancelable,
+              }
+            : attachment;
         }),
       );
       stopWatchingRef.current?.();
-      stopWatchingRef.current = watchImportJobs(jobs.map((job) => job.id), (job) => {
-        const attachmentId = jobToAttachment.get(job.id);
-        if (!attachmentId) return;
-        setAttachments((current) =>
-          current.map((attachment) =>
-            attachment.id === attachmentId
-              ? {
-                  ...attachment,
-                  status:
-                    job.status === "failed"
+      const ocrJobIds = jobs
+        .filter((job, index) => {
+          const attachment = uploadable[index];
+          return Boolean(attachment && isOcrAttachment(attachment.file));
+        })
+        .map((job) => job.id);
+      if (ocrJobIds.length) stopWatchingRef.current = watchImportJobs(
+        ocrJobIds,
+        (job) => {
+          const attachmentId = jobToAttachment.get(job.id);
+          if (!attachmentId) return;
+          setAttachments((current) =>
+            current.map((attachment) =>
+              attachment.id === attachmentId
+                ? {
+                    ...attachment,
+                    status:
+                      job.status === "failed"
                       ? "failed"
+                      : job.status === "cancelled"
+                        ? "failed"
                       : job.status === "completed" || job.status === "pending_confirmation"
                         ? "completed"
                         : "processing",
-                  errorMessage: job.errorMessage,
-                }
-              : attachment,
+                    errorMessage: job.errorMessage,
+                    retryable: job.retryable,
+                    cancelable: job.cancelable,
+                    progress: job.progress,
+                    stage: job.stage ?? job.status,
+                    currentPage: job.currentPage,
+                    totalPages: job.totalPages,
+                  }
+                : attachment,
           ),
         );
-      });
+        if (job.status === "cancelled") removeAttachments([attachmentId]);
+      },
+        {
+          onError: (message) => toast.warning(message, { duration: 3000, closeButton: true }),
+        },
+      );
       toast.success("附件已上传", {
         description: `${jobs.length} 个文件正在 OCR/解析，完成后会自动保存到当前账本。`,
         duration: 3000,
@@ -170,31 +279,129 @@ export function RecordsPage() {
       setUploadingAttachments(false);
     }
   };
+  const cancelRecordAttachment = async (attachmentId: string) => {
+    const attachment = attachments.find((item) => item.id === attachmentId);
+    if (!attachment?.jobId) return;
+    try {
+      await cancelImportJob(attachment.jobId);
+      removeAttachments([attachmentId]);
+      void reloadImports();
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "取消导入失败", {
+        duration: 3000,
+        closeButton: true,
+      });
+      throw cause;
+    }
+  };
+  const retryRecordAttachment = async (attachmentId: string) => {
+    const attachment = attachments.find((item) => item.id === attachmentId);
+    if (!attachment?.jobId) return;
+    try {
+      const { job } = await retryImportJob(attachment.jobId);
+      setAttachments((current) =>
+        current.map((item) =>
+          item.id === attachmentId
+            ? {
+                ...item,
+                status: "processing",
+                errorMessage: undefined,
+                retryable: job.retryable,
+                cancelable: job.cancelable,
+                progress: job.progress,
+                stage: job.stage,
+                currentPage: job.currentPage,
+                totalPages: job.totalPages,
+              }
+            : item,
+        ),
+      );
+      stopWatchingRef.current?.();
+      stopWatchingRef.current = watchImportJobs(
+        [attachment.jobId],
+        (next) => {
+          if (next.status === "cancelled") {
+            removeAttachments([attachmentId]);
+            return;
+          }
+          setAttachments((current) =>
+            current.map((item) =>
+              item.id === attachmentId
+                ? {
+                    ...item,
+                    status:
+                      next.status === "failed"
+                        ? "failed"
+                        : next.status === "completed" || next.status === "pending_confirmation"
+                          ? "completed"
+                          : "processing",
+                    errorMessage: next.errorMessage,
+                    retryable: next.retryable,
+                    cancelable: next.cancelable,
+                    progress: next.progress,
+                    stage: next.stage ?? next.status,
+                    currentPage: next.currentPage,
+                    totalPages: next.totalPages,
+                  }
+                : item,
+            ),
+          );
+        },
+        { onError: (message) => toast.warning(message, { duration: 3000, closeButton: true }) },
+      );
+      void reloadImports();
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "重试导入失败", {
+        duration: 3000,
+        closeButton: true,
+      });
+      throw cause;
+    }
+  };
   return (
     <>
       <Page
-        title="记录列表"
+        title={book?.name ?? "记录"}
         back={false}
         action={
-          <Button className="icon-link" type="button" variant="ghost" size="icon" aria-label="筛选记录">
+          <Button className="icon-link" type="button" variant="ghost" size="icon" aria-label="筛选记录" onClick={openFilters}>
             <FunnelSimpleIcon size={25} />
           </Button>
         }
       />
-      <Input className="search" placeholder="搜索记录、分类或备注" />
-      <div className="chips">
-        {["全部", "收入", "支出"].map((item) => (
-          <Button
-            className={filter === item ? "selected" : ""}
-            type="button"
-            variant="ghost"
-            onClick={() => setFilter(item)}
-            key={item}
-          >
-            {item}
+      {pendingCount > 0 && (
+        <Link className="pending-strip records-pending-entry" to="/records/pending">
+          <ReceiptIcon size={22} weight="fill" />
+          <b>
+            待确认记录 <em>{pendingCount}</em>
+          </b>
+          <CaretRightIcon size={22} />
+        </Link>
+      )}
+      {activeImports.length > 0 && (
+        <Link className="processing-strip records-pending-entry" to="/records/imports">
+          <CircleNotchIcon size={22} weight="fill" />
+          <span>
+            <b>文件处理中</b>
+            <small>{formatActiveImportSummary(activeImports)}</small>
+          </span>
+          <CaretRightIcon size={22} />
+        </Link>
+      )}
+      <Input
+        className="search"
+        placeholder="搜索记录、分类或备注"
+        value={filters.q}
+        onChange={(event) => updateFilters({ q: event.target.value })}
+      />
+      {hasActiveRecordFilters(filters) && (
+        <div className="active-filter-summary">
+          <span>{formatFilterSummary(filters)}</span>
+          <Button type="button" variant="ghost" onClick={resetFilters}>
+            重置
           </Button>
-        ))}
-      </div>
+        </div>
+      )}
       <div className="record-groups">
         {Object.entries(groups).map(([date, items]) => (
           <section key={date}>
@@ -208,11 +415,11 @@ export function RecordsPage() {
               </span>
             </header>
             <Panel>
-              <TransactionList transactions={items} />
+              <TransactionList transactions={items} categoryNames={categoryNames} />
             </Panel>
           </section>
         ))}
-        {!transactions.length && <p className="muted">还没有记录，记下第一笔吧。</p>}
+        {!transactions.length && <p className="records-empty-state">还没有记录，记下第一笔吧。</p>}
       </div>
       <Button asChild className="primary-wide">
         <Link to={`/records/new?bookId=${book?.id ?? ""}`}>
@@ -227,7 +434,12 @@ export function RecordsPage() {
             最多 {maxAttachmentFiles} 个，支持{supportedFileDescription}
           </small>
         </div>
-        <ImportAttachmentCards attachments={attachments} onRemove={(id) => removeAttachments([id])} />
+        <ImportAttachmentCards
+          attachments={attachments}
+          onRemove={(id) => removeAttachments([id])}
+          onCancel={cancelRecordAttachment}
+          onRetry={retryRecordAttachment}
+        />
         <input
           ref={fileInput}
           className="sr-only"
@@ -255,6 +467,83 @@ export function RecordsPage() {
           </Button>
         </div>
       </Panel>
+      {filterOpen && (
+        <SelectionModal title="筛选记录" onClose={() => setFilterOpen(false)}>
+          <div className="record-filter-sheet">
+            <section>
+              <h3>类型</h3>
+              <div className="filter-segment">
+                {recordTypeFilterOptions.map((item) => (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className={draftFilters.type === item.value ? "selected" : ""}
+                    key={item.value}
+                    onClick={() => setDraftFilters((current) => ({ ...current, type: item.value }))}
+                  >
+                    {item.label}
+                  </Button>
+                ))}
+              </div>
+            </section>
+            <section>
+              <h3>时间范围</h3>
+              <Button className="filter-value-row" type="button" variant="outline" onClick={() => setRangeOpen(true)}>
+                <span>{formatDateRangeLabel(draftFilters.start, draftFilters.end)}</span>
+                <CaretRightIcon size={18} />
+              </Button>
+            </section>
+            <section>
+              <h3>金额范围</h3>
+              <div className="filter-number-row">
+                <Input
+                  aria-label="最低金额"
+                  inputMode="decimal"
+                  value={draftFilters.min}
+                  placeholder="最低金额"
+                  onChange={(event) => setDraftFilters((current) => ({ ...current, min: event.target.value }))}
+                />
+                <span>—</span>
+                <Input
+                  aria-label="最高金额"
+                  inputMode="decimal"
+                  value={draftFilters.max}
+                  placeholder="最高金额"
+                  onChange={(event) => setDraftFilters((current) => ({ ...current, max: event.target.value }))}
+                />
+              </div>
+            </section>
+            <section>
+              <h3>关键词</h3>
+              <Input
+                aria-label="筛选关键词"
+                value={draftFilters.q}
+                placeholder="搜索备注或分类"
+                onChange={(event) => setDraftFilters((current) => ({ ...current, q: event.target.value }))}
+              />
+            </section>
+            <div className="record-filter-actions">
+              <Button type="button" variant="outline" onClick={resetFilters}>
+                重置
+              </Button>
+              <Button type="button" onClick={applyDraftFilters}>
+                应用筛选
+              </Button>
+            </div>
+          </div>
+        </SelectionModal>
+      )}
+      {rangeOpen && (
+        <DateRangeModal
+          start={draftFilters.start}
+          end={draftFilters.end}
+          onClose={() => setRangeOpen(false)}
+          onChange={(range) => {
+            setDraftFilters((current) => ({ ...current, ...range }));
+            setRangeOpen(false);
+          }}
+        />
+      )}
     </>
   );
 }
@@ -264,14 +553,13 @@ export function TransactionFormPage() {
   const [searchParams] = useSearchParams();
   const { book } = useActiveBook();
   const initialAmount = getPositiveNumber(searchParams.get("amount"));
+  const draftKey = searchParams.get("draft") ?? getRecordDraftKey(id, book?.id ?? searchParams.get("bookId"));
+  const savedDraft = !id ? readRecordDraft(draftKey) : undefined;
   const { data: existing } = useApi<{ transaction: LedgerTransaction }>(
     id ? `/transactions/${id}` : undefined,
   );
-  const { data: categories } = useApi<{ categories: Array<{ id: string; name: string }> }>(
+  const { data: categories } = useApi<{ categories: CategoryOption[] }>(
     book ? `/books/${book.id}/categories` : undefined,
-  );
-  const { data: tags } = useApi<{ tags: Array<{ id: string; name: string }> }>(
-    book ? `/books/${book.id}/tags` : undefined,
   );
   const form = useForm({
     resolver: zodResolver(createTransactionSchema),
@@ -279,35 +567,29 @@ export function TransactionFormPage() {
       ? {
           ...existing.transaction,
           occurredAt: existing.transaction.occurredAt.slice(0, 10),
-          tagIds: [],
-          items: [],
+          items: existing.transaction.items ?? [],
         }
       : undefined,
     defaultValues: {
-      type: "expense" as const,
-      amount: (initialAmount ?? undefined) as unknown as number,
-      occurredAt: toDateInputValue(new Date()),
-      note: "",
-      categoryId: undefined,
-      tagIds: [],
-      items: [],
+      type: savedDraft?.type ?? ("expense" as const),
+      amount: (savedDraft?.amount ?? initialAmount ?? undefined) as unknown as number,
+      occurredAt: savedDraft?.occurredAt ?? toDateInputValue(new Date()),
+      note: savedDraft?.note ?? "",
+      categoryId: savedDraft?.categoryId,
+      items: savedDraft?.items ?? [],
     },
   });
   const [error, setError] = useState("");
   const [activePicker, setActivePicker] = useState<RecordPicker | null>(null);
-  const [localCategories, setLocalCategories] = useState<Array<{ id: string; name: string }>>([]);
-  const [localTags, setLocalTags] = useState<Array<{ id: string; name: string }>>([]);
+  const [localCategories, setLocalCategories] = useState<CategoryOption[]>([]);
   const [categoryName, setCategoryName] = useState("");
-  const [tagName, setTagName] = useState("");
   const selectedType = form.watch("type");
   const selectedCategoryId = form.watch("categoryId");
-  const selectedTagIds = form.watch("tagIds") ?? [];
   const selectedDate = form.watch("occurredAt");
   const selectedAmount = form.watch("amount");
+  const selectedItems = form.watch("items") ?? [];
   const selectedCategory = localCategories.find((item) => item.id === selectedCategoryId);
-  const selectedTags = localTags.filter((item) => selectedTagIds.includes(item.id));
   const selectedTypeLabel = selectedType === "income" ? "收入" : "支出";
-  const selectedTagLabel = selectedTags.length ? selectedTags.map((item) => item.name).join("、") : "请选择标签";
   const selectedDateValue = selectedDate || toDateInputValue(new Date());
   const canOpenLineItems = hasPositiveNumber(selectedAmount);
   const monthDays = getMonthDays(selectedDateValue);
@@ -331,33 +613,12 @@ export function TransactionFormPage() {
         category,
       ]);
       form.setValue("categoryId", category.id, { shouldDirty: true, shouldValidate: true });
+      form.clearErrors("categoryId");
       setCategoryName("");
       setActivePicker(null);
       setError("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "添加分类失败");
-    }
-  };
-  const addLocalTag = async () => {
-    const name = tagName.trim();
-    if (!name) return;
-    if (!book) return setError("请先创建账本");
-    try {
-      const result = await api<{ tag: { id: string; name: string } }>(`/books/${book.id}/tags`, {
-        method: "POST",
-        body: JSON.stringify({ name, color: "#ff6b1a" }),
-      });
-      const tag = result.tag;
-      setLocalTags((current) => [...current.filter((item) => item.id !== tag.id), tag]);
-      form.setValue("tagIds", [...new Set([...selectedTagIds, tag.id])], {
-        shouldDirty: true,
-        shouldValidate: true,
-      });
-      setTagName("");
-      setActivePicker(null);
-      setError("");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "添加标签失败");
     }
   };
   const setDateValue = (value: string) => {
@@ -370,12 +631,19 @@ export function TransactionFormPage() {
       return;
     }
     setError("");
+    writeRecordDraft(draftKey, form.getValues() as RecordDraft);
     if (!id) {
       const params = new URLSearchParams(searchParams);
       params.set("amount", String(amount));
+      params.set("draft", draftKey);
       navigate({ search: params.toString() }, { replace: true });
     }
-    navigate(`/records/new/items?total=${encodeURIComponent(String(amount))}`);
+    const itemParams = new URLSearchParams();
+    itemParams.set("total", String(amount));
+    itemParams.set("draft", draftKey);
+    const bookId = book?.id ?? searchParams.get("bookId");
+    if (bookId) itemParams.set("bookId", bookId);
+    navigate(`/records/new/items?${itemParams.toString()}`);
   };
   useEffect(() => {
     if (!categories?.categories) return;
@@ -384,22 +652,25 @@ export function TransactionFormPage() {
       ...current.filter((item) => !categories.categories.some((category) => category.id === item.id)),
     ]);
   }, [categories?.categories]);
-  useEffect(() => {
-    if (!tags?.tags) return;
-    setLocalTags((current) => [
-      ...tags.tags,
-      ...current.filter((item) => !tags.tags.some((tag) => tag.id === item.id)),
-    ]);
-  }, [tags?.tags]);
   const submit = (mode: "save" | "continue") => form.handleSubmit(async (value) => {
     if (!book && !existing?.transaction) return setError("请先创建账本");
+    if (!value.categoryId) {
+      const message = "分类必填";
+      form.setError("categoryId", { type: "manual", message });
+      setError(message);
+      return;
+    }
     try {
       const path = id ? `/transactions/${id}` : `/books/${book?.id}/transactions`;
-      const payload = { ...value };
+      const payload = { ...value, items: normalizeLineItemPayload(value.items) };
       delete (payload as { memberId?: unknown }).memberId;
+      delete (payload as { accountId?: unknown }).accountId;
+      delete (payload as { tags?: unknown }).tags;
+      delete (payload as { tagIds?: unknown }).tagIds;
       await api(path, { method: id ? "PATCH" : "POST", body: JSON.stringify(payload) });
       setError("");
       setActivePicker(null);
+      clearRecordDraft(draftKey);
       if (mode === "continue" && !id) {
         form.reset({
           type: value.type,
@@ -407,7 +678,6 @@ export function TransactionFormPage() {
           occurredAt: value.occurredAt,
           note: "",
           categoryId: undefined,
-          tagIds: [],
           items: [],
         });
         return;
@@ -455,7 +725,7 @@ export function TransactionFormPage() {
               <span>分类</span>
               <Button
                 type="button"
-                className="field-value-button"
+                className={`field-value-button ${form.formState.errors.categoryId ? "is-error" : ""}`}
                 variant="ghost"
                 aria-label={`分类 ${selectedCategory?.name ?? "请选择分类"}`}
                 onClick={() => setActivePicker("category")}
@@ -477,24 +747,14 @@ export function TransactionFormPage() {
               </Button>
             </label>
             <label>
-              <TagIcon size={22} />
-              <span>标签</span>
-              <Button
-                type="button"
-                className="field-value-button"
-                variant="ghost"
-                aria-label={`标签 ${selectedTagLabel}`}
-                onClick={() => setActivePicker("tag")}
-              >
-                {selectedTagLabel}
-              </Button>
-            </label>
-            <label>
               <NotePencilIcon size={22} />
               <span>备注</span>
               <Input placeholder="可填写备注信息（选填）" {...form.register("note")} />
             </label>
           </Panel>
+          {form.formState.errors.categoryId?.message && (
+            <p className="field-error record-field-error">{form.formState.errors.categoryId.message}</p>
+          )}
           <Button
             className="sub-action add-detail-row"
             type="button"
@@ -503,7 +763,7 @@ export function TransactionFormPage() {
             onClick={openLineItems}
           >
             <PlusCircleIcon size={22} />
-            添加明细（选填）
+            {selectedItems.length ? `添加明细（${selectedItems.length} 项）` : "添加明细（选填）"}
           </Button>
         </div>
         <div className="record-form-footer">
@@ -549,6 +809,7 @@ export function TransactionFormPage() {
                 key={item.id}
                 onClick={() => {
                   form.setValue("categoryId", item.id, { shouldDirty: true, shouldValidate: true });
+                  form.clearErrors("categoryId");
                   setActivePicker(null);
                 }}
               >
@@ -626,47 +887,6 @@ export function TransactionFormPage() {
           </div>
         </SelectionModal>
       )}
-      {activePicker === "tag" && (
-        <SelectionModal title="选择标签" onClose={() => setActivePicker(null)}>
-          <div className="modal-option-list">
-            {localTags.map((item) => {
-              const selected = selectedTagIds.includes(item.id);
-              return (
-                <Button
-                  type="button"
-                  variant="outline"
-                  className={selected ? "selected" : ""}
-                  key={item.id}
-                  onClick={() => {
-                    form.setValue(
-                      "tagIds",
-                      selected ? selectedTagIds.filter((tagId) => tagId !== item.id) : [...selectedTagIds, item.id],
-                      { shouldDirty: true, shouldValidate: true },
-                    );
-                  }}
-                >
-                  {item.name}
-                </Button>
-              );
-            })}
-          </div>
-          {!localTags.length && <p className="empty-panel-text">暂无标签，先添加一个。</p>}
-          <div className="inline-add modal-inline-add">
-            <Input
-              aria-label="标签名称"
-              value={tagName}
-              placeholder="新标签名称"
-              onChange={(event) => setTagName(event.target.value)}
-            />
-            <Button type="button" onClick={() => void addLocalTag()}>
-              添加标签
-            </Button>
-          </div>
-          <Button className="modal-done" type="button" onClick={() => setActivePicker(null)}>
-            完成
-          </Button>
-        </SelectionModal>
-      )}
     </div>
   );
 }
@@ -700,6 +920,212 @@ function SelectionModal({
     </div>
   );
 }
+
+function DateRangeModal({
+  start,
+  end,
+  onChange,
+  onClose,
+}: {
+  start: string;
+  end: string;
+  onChange: (range: { start: string; end: string }) => void;
+  onClose: () => void;
+}) {
+  const initial = start || end || toDateInputValue(new Date());
+  const [draftStart, setDraftStart] = useState(start);
+  const [draftEnd, setDraftEnd] = useState(end);
+  const [activeField, setActiveField] = useState<"start" | "end">("start");
+  const [calendarValue, setCalendarValue] = useState(initial);
+  const monthDays = getMonthDays(calendarValue);
+  const pickDate = (value: string) => {
+    if (activeField === "start") {
+      setDraftStart(value);
+      if (draftEnd && value > draftEnd) setDraftEnd(value);
+      setActiveField("end");
+    } else {
+      setDraftEnd(value);
+      if (draftStart && value < draftStart) setDraftStart(value);
+    }
+    setCalendarValue(value);
+  };
+  const applyPreset = (preset: "today" | "week" | "month" | "year") => {
+    const today = new Date();
+    let rangeStart = toDateInputValue(today);
+    const rangeEnd = toDateInputValue(today);
+    if (preset === "week") {
+      const day = today.getDay() || 7;
+      const first = new Date(today);
+      first.setDate(today.getDate() - day + 1);
+      rangeStart = toDateInputValue(first);
+    }
+    if (preset === "month") rangeStart = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-01`;
+    if (preset === "year") rangeStart = `${today.getFullYear()}-01-01`;
+    setDraftStart(rangeStart);
+    setDraftEnd(rangeEnd);
+    setCalendarValue(rangeEnd);
+  };
+  return (
+    <SelectionModal title="选择时间范围" onClose={onClose}>
+      <div className="date-range-sheet">
+        <div className="quick-dates">
+          <Button type="button" variant="outline" onClick={() => applyPreset("today")}>
+            今天
+          </Button>
+          <Button type="button" variant="outline" onClick={() => applyPreset("week")}>
+            本周
+          </Button>
+          <Button type="button" variant="outline" onClick={() => applyPreset("month")}>
+            本月
+          </Button>
+          <Button type="button" variant="outline" onClick={() => applyPreset("year")}>
+            今年
+          </Button>
+        </div>
+        <div className="date-range-fields">
+          <Button
+            type="button"
+            variant="outline"
+            className={activeField === "start" ? "selected" : ""}
+            onClick={() => setActiveField("start")}
+          >
+            <small>开始日期</small>
+            <b>{draftStart || "请选择"}</b>
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className={activeField === "end" ? "selected" : ""}
+            onClick={() => setActiveField("end")}
+          >
+            <small>结束日期</small>
+            <b>{draftEnd || "请选择"}</b>
+          </Button>
+        </div>
+        <div className="date-panel-header">
+          <Button type="button" variant="ghost" onClick={() => setCalendarValue(shiftMonth(calendarValue, -1))}>
+            上月
+          </Button>
+          <b>{formatMonthLabel(calendarValue)}</b>
+          <Button type="button" variant="ghost" onClick={() => setCalendarValue(shiftMonth(calendarValue, 1))}>
+            下月
+          </Button>
+        </div>
+        <div className="date-grid">
+          {["一", "二", "三", "四", "五", "六", "日"].map((day) => (
+            <span key={day}>{day}</span>
+          ))}
+          {monthDays.map((day, index) =>
+            day ? (
+              <Button
+                type="button"
+                variant="ghost"
+                className={day.value === draftStart || day.value === draftEnd ? "selected" : ""}
+                key={day.value}
+                onClick={() => pickDate(day.value)}
+              >
+                {day.label}
+              </Button>
+            ) : (
+              <i key={`range-blank-${index}`} />
+            ),
+          )}
+        </div>
+        <div className="record-filter-actions">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              setDraftStart("");
+              setDraftEnd("");
+            }}
+          >
+            清除
+          </Button>
+          <Button type="button" onClick={() => onChange({ start: draftStart, end: draftEnd })}>
+            确定
+          </Button>
+        </div>
+      </div>
+    </SelectionModal>
+  );
+}
+
+const recordTypeFilterOptions: Array<{ label: string; value: RecordFilterType }> = [
+  { label: "全部", value: "all" },
+  { label: "支出", value: "expense" },
+  { label: "收入", value: "income" },
+];
+
+function readRecordFilters(searchParams: URLSearchParams): RecordFilters {
+  const type = searchParams.get("type");
+  return {
+    q: searchParams.get("q") ?? "",
+    type: type === "expense" || type === "income" ? type : "all",
+    start: searchParams.get("start") ?? "",
+    end: searchParams.get("end") ?? "",
+    min: searchParams.get("min") ?? "",
+    max: searchParams.get("max") ?? "",
+  };
+}
+
+function writeRecordFilters(searchParams: URLSearchParams, filters: RecordFilters) {
+  const next = new URLSearchParams(searchParams);
+  setParam(next, "q", filters.q.trim());
+  setParam(next, "type", filters.type === "all" ? "" : filters.type);
+  setParam(next, "start", filters.start);
+  setParam(next, "end", filters.end);
+  setParam(next, "min", filters.min.trim());
+  setParam(next, "max", filters.max.trim());
+  return next;
+}
+
+function setParam(searchParams: URLSearchParams, key: string, value: string) {
+  if (value) searchParams.set(key, value);
+  else searchParams.delete(key);
+}
+
+function hasActiveRecordFilters(filters: RecordFilters) {
+  return Boolean(filters.q || filters.type !== "all" || filters.start || filters.end || filters.min || filters.max);
+}
+
+function formatFilterSummary(filters: RecordFilters) {
+  const parts = [
+    filters.type !== "all" ? recordTypeFilterOptions.find((item) => item.value === filters.type)?.label : "",
+    filters.q ? `关键词：${filters.q}` : "",
+    filters.start || filters.end ? formatDateRangeLabel(filters.start, filters.end) : "",
+    filters.min || filters.max ? `金额 ${filters.min || "不限"} - ${filters.max || "不限"}` : "",
+  ].filter(Boolean);
+  return parts.join(" / ");
+}
+
+function formatDateRangeLabel(start: string, end: string) {
+  if (!start && !end) return "全部时间";
+  if (start && end) return `${start} 至 ${end}`;
+  if (start) return `${start} 之后`;
+  return `${end} 之前`;
+}
+
+function matchesRecordFilters(
+  transaction: LedgerTransaction,
+  filters: RecordFilters,
+  categoryNames: Record<string, string>,
+) {
+  if (filters.type !== "all" && transaction.type !== filters.type) return false;
+  const occurredAt = transaction.occurredAt.slice(0, 10);
+  if (filters.start && occurredAt < filters.start) return false;
+  if (filters.end && occurredAt > filters.end) return false;
+  const min = Number(filters.min);
+  const max = Number(filters.max);
+  if (filters.min && Number.isFinite(min) && transaction.amount < min) return false;
+  if (filters.max && Number.isFinite(max) && transaction.amount > max) return false;
+  const keyword = filters.q.trim().toLowerCase();
+  if (!keyword) return true;
+  const category = transaction.categoryName ?? (transaction.categoryId ? categoryNames[transaction.categoryId] : "");
+  const searchable = [transaction.note, category, transaction.categoryId].filter(Boolean).join(" ").toLowerCase();
+  return searchable.includes(keyword);
+}
+
 function formatDateLabel(value: string) {
   return new Date(`${value}T00:00:00`).toLocaleDateString("zh-CN", {
     month: "long",
@@ -766,12 +1192,111 @@ function createImportAttachment(file: File): ImportAttachmentView {
     ...(canPreview ? { previewUrl: URL.createObjectURL(file) } : {}),
   };
 }
+
+function formatActiveImportSummary(imports: ImportJobStatus[]) {
+  const first = imports[0];
+  if (!first) return "";
+  if (first.status === "ai_processing") return imports.length > 1 ? `${imports.length} 个文件，AI 分析中` : "AI 分析中";
+  if (typeof first.currentPage === "number" && typeof first.totalPages === "number") {
+    return imports.length > 1
+      ? `${imports.length} 个文件，第 ${first.currentPage}/${first.totalPages} 页`
+      : `第 ${first.currentPage}/${first.totalPages} 页`;
+  }
+  if (typeof first.progress === "number" && first.progress > 0) {
+    return imports.length > 1 ? `${imports.length} 个文件，OCR ${first.progress}%` : `OCR ${first.progress}%`;
+  }
+  return `${imports.length} 个文件正在识别`;
+}
+
+function getRecordDraftKey(id: string | undefined, bookId: string | null | undefined) {
+  return `shared-ledger:record-draft:${id ?? "new"}:${bookId ?? "default"}`;
+}
+
+function readRecordDraft(key: string): RecordDraft | undefined {
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw) as Partial<RecordDraft>;
+    if (parsed.type !== "income" && parsed.type !== "expense") return undefined;
+    return {
+      type: parsed.type,
+      amount: typeof parsed.amount === "number" || parsed.amount === "" ? parsed.amount : undefined,
+      occurredAt: typeof parsed.occurredAt === "string" ? parsed.occurredAt : toDateInputValue(new Date()),
+      note: typeof parsed.note === "string" ? parsed.note : "",
+      categoryId: typeof parsed.categoryId === "string" ? parsed.categoryId : undefined,
+      items: Array.isArray(parsed.items) ? normalizeLineItemPayload(parsed.items) : [],
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function writeRecordDraft(key: string, value: RecordDraft) {
+  try {
+    window.sessionStorage.setItem(
+      key,
+      JSON.stringify({
+        type: value.type,
+        amount: value.amount,
+        occurredAt: value.occurredAt,
+        note: value.note ?? "",
+        categoryId: value.categoryId,
+        items: normalizeLineItemPayload(value.items),
+      }),
+    );
+  } catch {
+    // Session storage is only used to keep the local form draft while moving between record subpages.
+  }
+}
+
+function clearRecordDraft(key: string) {
+  try {
+    window.sessionStorage.removeItem(key);
+  } catch {
+    // Ignore storage cleanup failures.
+  }
+}
+
+function normalizeLineItemPayload(items: unknown): LineItemValue[] {
+  if (!Array.isArray(items)) return [];
+  return items.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const candidate = item as { name?: unknown; amount?: unknown; categoryId?: unknown; note?: unknown };
+    const name = String(candidate.name ?? "").trim();
+    const amount = Number(candidate.amount);
+    if (!name || !Number.isFinite(amount) || amount <= 0) return [];
+    return [
+      {
+        name,
+        amount,
+        ...(typeof candidate.categoryId === "string" && candidate.categoryId ? { categoryId: candidate.categoryId } : {}),
+        ...(typeof candidate.note === "string" && candidate.note.trim() ? { note: candidate.note.trim() } : {}),
+      },
+    ];
+  });
+}
+
+function normalizeLineItemRows(items: Array<{ name: string; amount: string }>) {
+  return normalizeLineItemPayload(items);
+}
+
+function getInitialLineItemRows(items: LineItemValue[] | undefined) {
+  if (!items?.length) return [{ id: "empty", name: "", amount: "" }];
+  return items.map((item) => ({
+    id: crypto.randomUUID(),
+    name: item.name,
+    amount: String(item.amount),
+  }));
+}
+
 export function AddLineItemsPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const total = Number(searchParams.get("total") ?? "");
+  const draftKey = searchParams.get("draft") ?? getRecordDraftKey(undefined, searchParams.get("bookId"));
+  const savedDraft = readRecordDraft(draftKey);
+  const total = Number(searchParams.get("total") ?? savedDraft?.amount ?? "");
   const hasTotal = Number.isFinite(total) && total > 0;
-  const [items, setItems] = useState([{ id: "empty", name: "", amount: "" }]);
+  const [items, setItems] = useState(() => getInitialLineItemRows(savedDraft?.items));
   const assigned = items.reduce((sum, item) => sum + Number(item.amount || 0), 0);
   const updateItem = (id: string, field: "name" | "amount", value: string) =>
     setItems((current) => current.map((item) => (item.id === id ? { ...item, [field]: value } : item)));
@@ -783,6 +1308,25 @@ export function AddLineItemsPage() {
         ? current.map((item) => (item.id === id ? { ...item, name: "", amount: "" } : item))
         : current.filter((item) => item.id !== id),
     );
+  const saveItems = () => {
+    const next = {
+      ...(savedDraft ?? {
+        type: "expense" as const,
+        amount: total,
+        occurredAt: toDateInputValue(new Date()),
+        note: "",
+      }),
+      amount: savedDraft?.amount ?? total,
+      items: normalizeLineItemRows(items),
+    };
+    writeRecordDraft(draftKey, next);
+    const params = new URLSearchParams();
+    const bookId = searchParams.get("bookId");
+    if (bookId) params.set("bookId", bookId);
+    params.set("amount", String(total));
+    params.set("draft", draftKey);
+    navigate(`/records/new?${params.toString()}`);
+  };
   return (
     <div className="line-items-screen">
       <Page title="添加明细" />
@@ -858,7 +1402,7 @@ export function AddLineItemsPage() {
             </Panel>
           </div>
           <div className="line-items-footer">
-            <Button type="button" onClick={() => navigate(-1)}>
+            <Button type="button" onClick={saveItems}>
               保存明细
             </Button>
           </div>

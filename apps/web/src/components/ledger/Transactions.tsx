@@ -9,14 +9,18 @@ export type LedgerTransaction = {
   note?: string;
   occurredAt: string;
   categoryId?: string;
+  categoryName?: string;
   memberId?: string;
+  items?: Array<{ id?: string; name: string; amount: number; categoryId?: string; note?: string }>;
 };
 export function TransactionList({
   transactions,
   compact = false,
+  categoryNames,
 }: {
   transactions: LedgerTransaction[];
   compact?: boolean;
+  categoryNames?: Record<string, string>;
 }) {
   const shown = compact ? transactions.slice(0, 3) : transactions;
   if (!shown.length) return <p className="muted">还没有记录，记下第一笔吧。</p>;
@@ -42,7 +46,7 @@ export function TransactionList({
             </span>
             <span className="transaction-copy">
               <strong>{transaction.note || "未命名记录"}</strong>
-              <small>{transaction.categoryId ?? "未分类"}</small>
+              <small>{getCategoryLabel(transaction, categoryNames)}</small>
             </span>
             <strong className={transaction.type}>
               {transaction.type === "income" ? "+" : "-"}
@@ -53,4 +57,10 @@ export function TransactionList({
       })}
     </div>
   );
+}
+
+function getCategoryLabel(transaction: LedgerTransaction, categoryNames?: Record<string, string>) {
+  if (transaction.categoryName) return transaction.categoryName;
+  if (transaction.categoryId && categoryNames?.[transaction.categoryId]) return categoryNames[transaction.categoryId];
+  return transaction.categoryId ?? "未分类";
 }

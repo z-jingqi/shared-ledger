@@ -1,12 +1,46 @@
+# Dependencies
 node_modules/
+.pnpm-store/
+
+# Build outputs
 dist/
+build/
+*.tsbuildinfo
+
+# Test & coverage
 coverage/
 playwright-report/
 test-results/
+blob-report/
+
+# Cloudflare Workers
 .wrangler/
+.mf/
 apps/*/wrangler.generated-*.json
+
+# Environment & secrets
 .env
 .env.*
 !.env.example
-apps/api/.dev.vars
+**/.dev.vars
+!**/.dev.vars.example
+
+# Logs
 *.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Tooling caches
+.eslintcache

@@ -8,9 +8,8 @@
   "vars": {
     "APP_ENV": "__ENV__",
     "WEB_ORIGIN": "__WEB_ORIGIN__",
+    "API_PUBLIC_ORIGIN": "https://__API_DOMAIN__",
     "ALEPH_OCR_BASE_URL": "__ALEPH_OCR_BASE_URL__",
-    "OCR_POLL_DELAY_SECONDS": "20",
-    "OCR_MAX_WAIT_MINUTES": "30",
   },
   "ai": { "binding": "AI" },
   "d1_databases": [

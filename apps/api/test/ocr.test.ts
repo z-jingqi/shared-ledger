@@ -1,27 +1,93 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AlephOcrClient, ocrConfidence } from "../src/services/ocr";
+import { verifyAlephWebhookSignature } from "../src/routes/imports";
+import { AlephOcrClient, AlephToolsError, ocrConfidence } from "../src/services/ocr";
 
 describe("Aleph-OCR client", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("sends bearer auth and unwraps successful responses", async () => {
-    const fetch = vi.fn(async () => Response.json({ success: true, data: { jobId: "ocr_1", status: "queued" } }));
-    vi.stubGlobal("fetch", fetch);
+    const fetchMock = vi.fn<typeof globalThis.fetch>(async () =>
+      Response.json({ success: true, data: { jobId: "ocr_1", status: "queued" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
 
-    const job = await new AlephOcrClient("https://ocr.example.com/", "secret").createJob({
-      bytes: new TextEncoder().encode("image").buffer,
-      filename: "receipt.png",
-      mimeType: "image/png",
-    });
+    const job = await new AlephOcrClient("https://ocr.example.com/", "secret").createJob(
+      {
+        bytes: new TextEncoder().encode("image").buffer,
+        filename: "receipt.png",
+        mimeType: "image/png",
+      },
+      {
+        callbackUrl: "https://api.example.com/imports/aleph-webhook",
+        metadata: { importJobId: "import_1" },
+        idempotencyKey: "import_1",
+      },
+    );
 
     expect(job).toEqual({ jobId: "ocr_1", status: "queued" });
-    expect(fetch).toHaveBeenCalledWith(
+    expect(fetchMock).toHaveBeenCalledWith(
       "https://ocr.example.com/v1/jobs",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ authorization: "Bearer secret", "Idempotency-Key": "import_1" }),
+      }),
+    );
+    const body = (fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.body as FormData;
+    expect(body.get("callbackUrl")).toBe("https://api.example.com/imports/aleph-webhook");
+    expect(JSON.parse(String(body.get("metadata")))).toEqual({ importJobId: "import_1" });
+  });
+
+  it("requests Aleph-OCR job cancellation", async () => {
+    const fetchMock = vi.fn<typeof globalThis.fetch>(async () =>
+      Response.json({ success: true, data: { jobId: "ocr_1", status: "cancel_requested" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const job = await new AlephOcrClient("https://ocr.example.com/", "secret").cancelJob("ocr_1");
+
+    expect(job).toEqual({ jobId: "ocr_1", status: "cancel_requested" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://ocr.example.com/v1/jobs/ocr_1/cancel",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({ authorization: "Bearer secret" }),
       }),
     );
+  });
+
+  it("creates async image conversion jobs with idempotency metadata", async () => {
+    const fetchMock = vi.fn<typeof globalThis.fetch>(async () =>
+      Response.json({ success: true, data: { jobId: "convert_1", status: "queued", operation: "image.convert" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const job = await new AlephOcrClient("https://ocr.example.com/", "secret").createImageConversionJob(
+      {
+        bytes: new TextEncoder().encode("heic").buffer,
+        filename: "receipt.heic",
+        mimeType: "image/heic",
+      },
+      {
+        callbackUrl: "https://api.example.com/imports/aleph-webhook",
+        metadata: { importJobId: "import_1", phase: "convert" },
+        idempotencyKey: "convert:import_1:0",
+      },
+    );
+
+    expect(job).toEqual({ jobId: "convert_1", status: "queued", operation: "image.convert" });
+    const body = (fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.body as FormData;
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://ocr.example.com/v1/tools/image/convert",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          authorization: "Bearer secret",
+          "Idempotency-Key": "convert:import_1:0",
+        }),
+      }),
+    );
+    expect(body.get("targetFormat")).toBe("jpeg");
+    expect(JSON.parse(String(body.get("metadata")))).toEqual({ importJobId: "import_1", phase: "convert" });
   });
 
   it("surfaces Aleph-OCR API errors", async () => {
@@ -30,6 +96,38 @@ describe("Aleph-OCR client", () => {
     await expect(new AlephOcrClient("https://ocr.example.com", "bad").getJob("ocr_1")).rejects.toThrow(
       "Unauthorized",
     );
+  });
+
+  it("preserves structured Aleph Tools error fields", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json(
+          {
+            success: false,
+            error: {
+              code: "RATE_LIMITED",
+              message: "Too many active jobs",
+              httpStatus: 429,
+              requestId: "req_1",
+              stage: "ocr",
+              retryable: true,
+              terminal: false,
+            },
+            requestId: "req_1",
+          },
+          { status: 429 },
+        ),
+      ),
+    );
+
+    await expect(new AlephOcrClient("https://ocr.example.com", "bad").getJob("ocr_1")).rejects.toMatchObject({
+      name: "AlephToolsError",
+      code: "RATE_LIMITED",
+      requestId: "req_1",
+      retryable: true,
+      terminal: false,
+    } satisfies Partial<AlephToolsError>);
   });
 
   it("averages page confidence and defaults to high confidence when absent", () => {
@@ -45,4 +143,25 @@ describe("Aleph-OCR client", () => {
     ).toBeCloseTo(0.8);
     expect(ocrConfidence({ plainText: "text", markdown: "text", pages: [{ text: "a" }] })).toBe(1);
   });
+
+  it("verifies Aleph-OCR webhook HMAC signatures", async () => {
+    const timestamp = new Date().toISOString();
+    const body = JSON.stringify({ event: "ocr.job.ready", jobId: "ocr_1", metadata: { importJobId: "import_1" } });
+    const signature = `sha256=${await hmacSha256Hex("webhook-secret", `${timestamp}.${body}`)}`;
+
+    await expect(verifyAlephWebhookSignature("webhook-secret", timestamp, signature, body)).resolves.toBe(true);
+    await expect(verifyAlephWebhookSignature("webhook-secret", timestamp, "sha256=bad", body)).resolves.toBe(false);
+    await expect(
+      verifyAlephWebhookSignature("webhook-secret", new Date(Date.now() - 10 * 60_000).toISOString(), signature, body),
+    ).resolves.toBe(false);
+  });
 });
+
+async function hmacSha256Hex(secret: string, value: string) {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, [
+    "sign",
+  ]);
+  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(value));
+  return [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}

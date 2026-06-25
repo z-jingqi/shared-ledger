@@ -3,10 +3,10 @@ import {
   BookOpenIcon,
   CaretDownIcon,
   CaretRightIcon,
-  ChartPieSliceIcon,
   CircleNotchIcon,
   GearIcon,
   PlusIcon,
+  CheckIcon,
   UsersIcon,
   WalletIcon,
 } from "@phosphor-icons/react";
@@ -21,43 +21,92 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Switch,
   Textarea,
 } from "@shared-ledger/ui";
 import { useForm } from "react-hook-form";
 import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { TransactionList, type LedgerTransaction } from "../components/ledger/Transactions";
 import { Page } from "../components/layout/Page";
+import { useActiveBook, writeLastActiveBookId } from "../hooks/useActiveBook";
 import { useApi } from "../hooks/useApi";
 import { api, money } from "../lib";
 
 type Book = { id: string; name: string; currency: string };
 type TransactionResponse = { transactions: LedgerTransaction[] };
-type ImportResponse = { imports: Array<{ status: string }> };
+type ImportResponse = {
+  imports: Array<{
+    id?: string;
+    fileName?: string;
+    status: string;
+    progress?: number;
+    stage?: string;
+    currentPage?: number;
+    totalPages?: number;
+  }>;
+};
 export function BookHomePage() {
-  const { id } = useParams();
-  const { data: bookData } = useApi<{ book: Book }>(id ? `/books/${id}` : undefined);
-  const { data: txData } = useApi<TransactionResponse>(id ? `/books/${id}/transactions` : undefined);
-  const { data: imports } = useApi<ImportResponse>(id ? `/books/${id}/imports` : undefined);
+  const { book, books, loading, error, setActiveBook } = useActiveBook();
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const { data: txData } = useApi<TransactionResponse>(book ? `/books/${book.id}/transactions` : undefined);
+  const { data: imports } = useApi<ImportResponse>(book ? `/books/${book.id}/imports` : undefined);
+  if (loading) return <p className="muted auth-loading">正在读取账本…</p>;
+  if (error) return <p className="field-error">{error}</p>;
+  if (!book)
+    return (
+      <section className="home-empty" aria-label="暂无账本">
+        <p>还没有账本</p>
+        <Link to="/books/new">创建一个</Link>
+      </section>
+    );
   const transactions = txData?.transactions ?? [];
-  const income = transactions
+  const monthTransactions = transactions.filter((item) => isSameMonth(item.occurredAt, new Date()));
+  const todayTransactions = transactions.filter((item) => isSameDay(item.occurredAt, new Date()));
+  const recentTransactions = [...transactions]
+    .sort((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime())
+    .slice(0, 5);
+  const income = monthTransactions
     .filter((item) => item.type === "income")
     .reduce((sum, item) => sum + item.amount, 0);
-  const expense = transactions
+  const expense = monthTransactions
     .filter((item) => item.type === "expense")
     .reduce((sum, item) => sum + item.amount, 0);
-  const pending = imports?.imports.filter((item) => item.status === "pending_confirmation").length ?? 0;
+  const todayExpense = todayTransactions
+    .filter((item) => item.type === "expense")
+    .reduce((sum, item) => sum + item.amount, 0);
+  const importJobs = imports?.imports ?? [];
+  const pending = importJobs.filter((item) => item.status === "pending_confirmation").length;
+  const processingJobs = importJobs.filter((item) =>
+    ["uploaded", "parsing", "converting", "ocr_processing", "ai_processing"].includes(item.status),
+  );
+  const processing = processingJobs.length;
+  const failed = importJobs.filter((item) => item.status === "failed").length;
   return (
     <>
       <header className="book-home-title">
-        <h1>
-          {bookData?.book.name ?? "账本"} <CaretDownIcon size={22} />
-        </h1>
-        <Link className="icon-link" to={`/books/${id}/settings`} aria-label="账本设置">
+        <button
+          className="book-switcher-trigger"
+          type="button"
+          aria-label={`切换账本，当前账本 ${book.name}`}
+          aria-expanded={switcherOpen}
+          onClick={() => setSwitcherOpen(true)}
+        >
+          {book.name} <CaretDownIcon size={18} />
+        </button>
+        <Link className="icon-link" to={`/books/${book.id}/settings`} aria-label="账本设置">
           <GearIcon size={29} />
         </Link>
       </header>
+      {processing > 0 && (
+        <Link className="processing-strip" to="/records/imports">
+          <CircleNotchIcon size={22} weight="fill" />
+          <span>
+            <b>正在处理</b>
+            <small>{formatHomeImportProgress(processingJobs)}</small>
+          </span>
+          <CaretRightIcon size={20} />
+        </Link>
+      )}
       <Panel className="summary">
         <div>
           <span>
@@ -78,13 +127,28 @@ export function BookHomePage() {
           </p>
         </section>
       </Panel>
-      <Link className="pending-strip" to="/imports/pending">
-        <CircleNotchIcon size={22} weight="fill" />
-        <b>
-          待确认 <em>{pending}</em>
-        </b>
-        <CaretRightIcon size={22} />
-      </Link>
+      <Panel className="today-overview">
+        <h2>今日概览</h2>
+        <section>
+          <p>
+            <span>记录笔数</span>
+            <b>{todayTransactions.length} 笔</b>
+          </p>
+          <p>
+            <span>今日支出</span>
+            <b>{money(todayExpense)}</b>
+          </p>
+        </section>
+      </Panel>
+      {(pending > 0 || failed > 0) && (
+        <Link className="pending-strip" to={pending > 0 ? "/records/pending" : "/records/imports"}>
+          <CircleNotchIcon size={22} weight="fill" />
+          <b>
+            {pending > 0 ? "待确认记录" : "文件处理失败"} <em>{pending > 0 ? pending : failed}</em>
+          </b>
+          <CaretRightIcon size={22} />
+        </Link>
+      )}
       <Panel>
         <header className="section-header">
           <h2>最近记录</h2>
@@ -92,21 +156,29 @@ export function BookHomePage() {
             查看全部 <CaretRightIcon />
           </Link>
         </header>
-        <TransactionList transactions={transactions} compact />
+        <TransactionList transactions={recentTransactions} compact />
       </Panel>
-      <Link to={`/records/new?bookId=${id}`} className="primary-wide">
-        <PlusIcon size={24} weight="bold" />
-        记一笔
-      </Link>
+      {switcherOpen && (
+        <BookSwitcherSheet
+          books={books}
+          currentBookId={book.id}
+          onSelect={(bookId) => {
+            setActiveBook(bookId);
+            setSwitcherOpen(false);
+          }}
+          close={() => setSwitcherOpen(false)}
+        />
+      )}
     </>
   );
 }
 export function BooksPage() {
-  const { data, loading, error } = useApi<{ books: Book[] }>("/books");
-  const books = data?.books ?? [];
+  const { book, books, loading, error } = useActiveBook();
+  const location = useLocation();
+  const isManageRoute = location.pathname === "/books/manage";
   return (
     <>
-      <Page title="账本" back={false} />
+      <Page title={isManageRoute ? "账本管理" : "账本"} back={false} />
       {loading && <p className="muted">正在读取账本…</p>}
       {error && <p className="field-error">{error}</p>}
       {!loading && !error && books.length === 0 && (
@@ -119,23 +191,20 @@ export function BooksPage() {
         <section className="books-layout">
           <h2 className="section-kicker">我加入的账本</h2>
           <div className="book-list-scroll">
-            {books.map((book) => (
-              <Link className="book-card" to={`/books/${book.id}`} key={book.id}>
+            {books.map((item) => (
+              <Link
+                className={`book-card${item.id === book?.id ? " current" : ""}`}
+                to={`/home?bookId=${item.id}`}
+                onClick={() => writeLastActiveBookId(item.id)}
+                key={item.id}
+              >
                 <span className="book-card-icon">
                   <BookOpenIcon size={36} weight="fill" />
                 </span>
                 <div className="book-card-main">
-                  <h2>{book.name}</h2>
-                  <p>日常生活收支记录</p>
-                  <small>
-                    <UsersIcon size={16} /> 1 位成员
-                  </small>
-                </div>
-                <div className="book-card-money">
-                  <span>
-                    本月收入 <b>{money(0)}</b>
-                  </span>
-                  <span>本月支出 {money(0)}</span>
+                  <h2>{item.name}</h2>
+                  <p>{item.currency}</p>
+                  {item.id === book?.id && <small>当前账本</small>}
                 </div>
                 <CaretRightIcon />
               </Link>
@@ -157,14 +226,13 @@ export function CreateBookPage() {
     defaultValues: { name: "", currency: "CNY", note: "" },
   });
   const [error, setError] = useState("");
-  const [shared, setShared] = useState(false);
-  const [budgetEnabled, setBudgetEnabled] = useState(false);
   const currency = form.watch("currency");
   const note = form.watch("note") ?? "";
   const submit = form.handleSubmit(async (value) => {
     try {
       const result = await api<{ book: Book }>("/books", { method: "POST", body: JSON.stringify(value) });
-      navigate(`/books/${result.book.id}`);
+      writeLastActiveBookId(result.book.id);
+      navigate(`/home?bookId=${result.book.id}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "创建失败");
     }
@@ -208,31 +276,89 @@ export function CreateBookPage() {
             <span className="note-count">{note.length}/100</span>
           </label>
         </Panel>
-        <Panel className="book-option-list">
-          <span>
-            <UsersIcon size={25} />
-            <b>多人共享</b>
-            <small>邀请家人或朋友一起管理账本</small>
-            <Switch
-              aria-label="多人共享"
-              checked={shared}
-              onCheckedChange={setShared}
-            />
-          </span>
-          <span>
-            <ChartPieSliceIcon size={25} />
-            <b>启用预算</b>
-            <small>为收支设置预算，帮助控制开销</small>
-            <Switch
-              aria-label="启用预算"
-              checked={budgetEnabled}
-              onCheckedChange={setBudgetEnabled}
-            />
-          </span>
-        </Panel>
         {error && <p className="field-error">{error}</p>}
       </div>
       <Button type="submit">创建账本</Button>
     </form>
   );
+}
+
+function BookSwitcherSheet({
+  books,
+  currentBookId,
+  onSelect,
+  close,
+}: {
+  books: Book[];
+  currentBookId: string;
+  onSelect: (bookId: string) => void;
+  close: () => void;
+}) {
+  return (
+    <>
+      <button className="book-switcher-backdrop" type="button" aria-label="关闭账本切换器" onClick={close} />
+      <section className="book-switcher-sheet" role="dialog" aria-modal="true" aria-label="切换账本">
+        <span className="sheet-grabber" aria-hidden="true" />
+        <h2>切换账本</h2>
+        <div className="book-switcher-list">
+          {books.map((book) => (
+            <button
+              className={book.id === currentBookId ? "selected" : ""}
+              type="button"
+              onClick={() => onSelect(book.id)}
+              key={book.id}
+            >
+              <span className="book-switcher-icon">
+                <BookOpenIcon size={20} weight="fill" />
+              </span>
+              <span>
+                <b>{book.name}</b>
+                {book.id === currentBookId && <small>当前账本</small>}
+              </span>
+              {book.id === currentBookId && <CheckIcon size={19} weight="bold" />}
+            </button>
+          ))}
+        </div>
+        <div className="book-switcher-actions">
+          <Link to="/books/new" onClick={close}>
+            <PlusIcon size={20} weight="bold" />
+            创建新账本
+          </Link>
+          <Link to="/books/manage" onClick={close}>
+            <UsersIcon size={20} />
+            管理账本
+          </Link>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function isSameMonth(value: string, now: Date) {
+  const date = new Date(value);
+  return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+}
+
+function isSameDay(value: string, now: Date) {
+  const date = new Date(value);
+  return (
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate()
+  );
+}
+
+function formatHomeImportProgress(jobs: ImportResponse["imports"]) {
+  const first = jobs[0];
+  if (!first) return "";
+  if (first.status === "ai_processing") return jobs.length > 1 ? `${jobs.length} 个文件，AI 分析中` : "AI 分析中";
+  if (typeof first.currentPage === "number" && typeof first.totalPages === "number") {
+    return jobs.length > 1
+      ? `${jobs.length} 个文件，第 ${first.currentPage}/${first.totalPages} 页`
+      : `第 ${first.currentPage}/${first.totalPages} 页`;
+  }
+  if (typeof first.progress === "number" && first.progress > 0) {
+    return jobs.length > 1 ? `${jobs.length} 个文件，OCR ${first.progress}%` : `OCR ${first.progress}%`;
+  }
+  return `${jobs.length} 个文件正在识别`;
 }

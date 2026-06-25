@@ -1,127 +1,33 @@
 import {
-  CaretRightIcon,
-  CheckCircleIcon,
-  CloudArrowUpIcon,
-  FileArrowUpIcon,
   FilePdfIcon,
   ImageSquareIcon,
-  ScanIcon,
   ShoppingCartIcon,
 } from "@phosphor-icons/react";
-import { Button, Input, Panel } from "@shared-ledger/ui";
-import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Button, Panel } from "@shared-ledger/ui";
+import { useEffect, useState } from "react";
 import { Page } from "../components/layout/Page";
-import { supportedFileAccept } from "../features/imports/files";
 import { useActiveBook } from "../hooks/useActiveBook";
 import { useApi } from "../hooks/useApi";
 import { api, money } from "../lib";
+import { retryImportJob } from "../features/imports/upload";
 
-type Job = { id: string; fileName: string; fileType: string; status: string; createdAt: string };
+type Job = {
+  id: string;
+  fileName: string;
+  fileType: string;
+  status: string;
+  createdAt: string;
+  errorMessage?: string;
+  errorRequestId?: string;
+  retryable?: boolean;
+};
 type Record = {
   id: string;
   importJobId: string;
   suggestedTransaction: { note?: string; amount: number; confidence: number; warnings: string[] };
   status: string;
 };
-export function ImportsPage() {
-  const input = useRef<HTMLInputElement>(null);
-  const { book } = useActiveBook();
-  const { data, reload } = useApi<{ imports: Job[] }>(book ? `/books/${book.id}/imports` : undefined);
-  const [error, setError] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const upload = async (file?: File) => {
-    if (!file || !book) return;
-    setUploading(true);
-    try {
-      const form = new FormData();
-      form.append("file", file);
-      await api(`/books/${book.id}/imports`, { method: "POST", body: form });
-      await reload();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "上传失败");
-    } finally {
-      setUploading(false);
-    }
-  };
-  const pending = data?.imports.filter((item) => item.status === "pending_confirmation").length ?? 0;
-  const recent = data?.imports.slice(0, 3) ?? [];
-  return (
-    <>
-      <Page title="导入" back={false} />
-      <Panel className="upload-zone">
-        <FileArrowUpIcon size={58} weight="duotone" />
-        <h2>上传账单或图片</h2>
-        <p>图片 / PDF / Excel / CSV</p>
-        <Input
-          ref={input}
-          type="file"
-          hidden
-          accept={supportedFileAccept}
-          onChange={(event) => void upload(event.target.files?.[0])}
-        />
-      </Panel>
-      {error && <p className="field-error">{error}</p>}
-      <section className="import-steps">
-        <h2>导入说明</h2>
-        <ImportStep index={1} Icon={CloudArrowUpIcon} title="上传文件" desc="支持图片、PDF、Excel、CSV 格式" />
-        <ImportStep index={2} Icon={ScanIcon} title="智能识别" desc="自动识别账单信息并分类" />
-        <ImportStep index={3} Icon={CheckCircleIcon} title="确认入账" desc="核对信息后，确认导入账本" />
-      </section>
-      <Link className="sub-action" to="/imports/pending">
-        待确认记录 <b>{pending}</b>
-        <CaretRightIcon />
-      </Link>
-      <section className="recent-imports">
-        <header className="section-header">
-          <h2>最近导入</h2>
-          <Link to="/imports/history">
-            全部记录 <CaretRightIcon />
-          </Link>
-        </header>
-        <Panel>
-          {recent.map((job) => (
-            <div className="history-row" key={job.id}>
-              {job.fileType.includes("pdf") ? <FilePdfIcon size={27} /> : <ImageSquareIcon size={27} />}
-              <div>
-                <strong>{job.fileName}</strong>
-                <small>{new Date(job.createdAt).toLocaleString("zh-CN")}</small>
-              </div>
-              <span className={job.status === "completed" ? "status success" : "status"}>{job.status}</span>
-              <CaretRightIcon />
-            </div>
-          ))}
-          {!recent.length && <p className="muted">还没有导入记录</p>}
-        </Panel>
-      </section>
-      <Button className="primary-wide" disabled={uploading || !book} onClick={() => input.current?.click()}>
-        {uploading ? "正在上传…" : "选择文件"}
-      </Button>
-    </>
-  );
-}
-function ImportStep({
-  index,
-  Icon,
-  title,
-  desc,
-}: {
-  index: number;
-  Icon: typeof CloudArrowUpIcon;
-  title: string;
-  desc: string;
-}) {
-  return (
-    <div>
-      <em>{index}</em>
-      <Icon size={28} />
-      <span>
-        <strong>{title}</strong>
-        <small>{desc}</small>
-      </span>
-    </div>
-  );
-}
+
 function usePendingRecords() {
   const { book } = useActiveBook();
   const { data: jobs, reload: reloadJobs } = useApi<{ imports: Job[] }>(
@@ -202,7 +108,17 @@ export function PendingImportsPage() {
 }
 export function ImportHistoryPage() {
   const { book } = useActiveBook();
-  const { data, error } = useApi<{ imports: Job[] }>(book ? `/books/${book.id}/imports` : undefined);
+  const { data, error, reload } = useApi<{ imports: Job[] }>(book ? `/books/${book.id}/imports` : undefined);
+  const [retryingId, setRetryingId] = useState("");
+  const retry = async (jobId: string) => {
+    setRetryingId(jobId);
+    try {
+      await retryImportJob(jobId);
+      await reload();
+    } finally {
+      setRetryingId("");
+    }
+  };
   return (
     <>
       <Page title="导入历史" />
@@ -210,12 +126,17 @@ export function ImportHistoryPage() {
         {error && <p className="field-error">{error}</p>}
         {data?.imports.map((job) => (
           <div className="history-row" key={job.id}>
-            <FileArrowUpIcon size={25} />
+            {job.fileType.includes("pdf") ? <FilePdfIcon size={25} /> : <ImageSquareIcon size={25} />}
             <div>
               <strong>{job.fileName}</strong>
-              <small>{new Date(job.createdAt).toLocaleString("zh-CN")}</small>
+              <small>{job.errorMessage || new Date(job.createdAt).toLocaleString("zh-CN")}</small>
             </div>
             <span className={job.status === "completed" ? "status success" : "status"}>{job.status}</span>
+            {job.status === "failed" && job.retryable && (
+              <Button type="button" size="sm" disabled={retryingId === job.id} onClick={() => void retry(job.id)}>
+                {retryingId === job.id ? "重试中" : "重试"}
+              </Button>
+            )}
           </div>
         ))}
         {!data?.imports.length && <p className="muted">还没有导入记录</p>}

@@ -1,20 +1,23 @@
-import { Robot } from "@phosphor-icons/react";
-import { Page } from "../components/layout/Page";
+import { XIcon } from "@phosphor-icons/react";
+import { Button } from "@shared-ledger/ui";
+import { useNavigate } from "react-router-dom";
 import { AiChat } from "../components/ai/AiChat";
-import { useAuth } from "../features/auth/AuthProvider";
 import { useActiveBook } from "../hooks/useActiveBook";
 export function AiPage() {
-  const { user } = useAuth();
+  const navigate = useNavigate();
   const { book } = useActiveBook();
   return (
-    <>
-      <Page title="AI 助手" />
-      <div className="ai-page-shell">
-        <Robot size={42} weight="fill" />
-        <h2>你好，{user?.name ?? "用户"}</h2>
-        <p>我已准备好帮你理解这个账本。</p>
-        <AiChat bookId={book?.id} page="AI 助手" />
-      </div>
-    </>
+    <div className="ai-standalone-workspace">
+      <header className="ai-workspace-header">
+        <h1>AI 助手</h1>
+        <span className="ai-book-pill" aria-label={`当前账本 ${book?.name ?? "未选择账本"}`}>
+          {book?.name ?? "未选择账本"}
+        </span>
+        <Button type="button" variant="ghost" size="icon" aria-label="关闭 AI 助手" onClick={() => navigate(-1)}>
+          <XIcon size={20} />
+        </Button>
+      </header>
+      <AiChat bookId={book?.id} page="AI 助手" />
+    </div>
   );
 }

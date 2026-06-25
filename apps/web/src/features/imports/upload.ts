@@ -8,6 +8,16 @@ export type ImportBatchJob = {
   id: string;
   fileName: string;
   status: string;
+  errorMessage?: string;
+  errorCode?: string;
+  errorRequestId?: string;
+  errorStage?: string;
+  retryable?: boolean;
+  cancelable?: boolean;
+  progress?: number;
+  stage?: string;
+  currentPage?: number;
+  totalPages?: number;
 };
 
 export async function uploadImportFiles(bookId: string, files: File[], options?: { autoConfirm?: boolean }) {
@@ -18,4 +28,12 @@ export async function uploadImportFiles(bookId: string, files: File[], options?:
     method: "POST",
     body,
   });
+}
+
+export async function cancelImportJob(jobId: string) {
+  return api<{ ok: true }>(`/imports/${jobId}/cancel`, { method: "POST" });
+}
+
+export async function retryImportJob(jobId: string) {
+  return api<{ job: ImportBatchJob }>(`/imports/${jobId}/retry`, { method: "POST" });
 }

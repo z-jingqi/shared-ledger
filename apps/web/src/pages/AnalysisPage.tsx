@@ -19,6 +19,7 @@ import { money } from "../lib";
 
 export function AnalysisPage() {
   const [expanded, setExpanded] = useState(false);
+  const [period, setPeriod] = useState<"month" | "quarter" | "year">("month");
   const [searchParams, setSearchParams] = useSearchParams();
   const { book, books, loading: booksLoading } = useActiveBook();
   const { data } = useApi<{ transactions: LedgerTransaction[] }>(
@@ -57,65 +58,74 @@ export function AnalysisPage() {
     }, {}),
   ).sort((left, right) => right.value - left.value);
   const colors = ["#ff681c", "#ffae75", "#315a9c", "#d8dee9"];
+  const periodOptions = [
+    { label: "本月", value: "month" as const },
+    { label: "3 个月", value: "quarter" as const },
+    { label: "年度", value: "year" as const },
+  ];
   return (
-    <>
-      <Page title="分析" back={false} />
-      {booksLoading && <p className="muted">正在读取账本…</p>}
-      {!booksLoading && !book && (
-        <Panel className="analysis-empty">
-          <BookOpenIcon size={32} weight="fill" />
-          <h2>当前还没有账本</h2>
-          <p>创建账本后，就可以查看收支趋势、分类占比和成员排行。</p>
-        </Panel>
-      )}
+    <section className="analysis-screen">
+      <div className="analysis-fixed">
+        <Page title="分析" back={false} />
+        {booksLoading && <p className="muted">正在读取账本…</p>}
+        {!booksLoading && !book && (
+          <Panel className="analysis-empty">
+            <BookOpenIcon size={32} weight="fill" />
+            <h2>当前还没有账本</h2>
+            <p>创建账本后，就可以查看收支趋势、分类占比和成员排行。</p>
+          </Panel>
+        )}
+        {book && (
+          <Panel className="analysis-book-picker">
+            <Button
+              type="button"
+              variant="ghost"
+              aria-expanded={expanded}
+              aria-controls="analysis-book-list"
+              onClick={() => setExpanded((current) => !current)}
+            >
+              <span>
+                <small>当前账本</small>
+                <b>{book.name}</b>
+              </span>
+              <CaretDownIcon className={expanded ? "open" : ""} size={22} />
+            </Button>
+            {expanded && (
+              <div id="analysis-book-list" className="analysis-book-list">
+                {books.map((item) => (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className={item.id === book.id ? "selected" : ""}
+                    onClick={() => selectBook(item.id)}
+                    key={item.id}
+                  >
+                    <BookOpenIcon size={20} weight={item.id === book.id ? "fill" : "regular"} />
+                    <span>{item.name}</span>
+                    {item.id === book.id && <CheckIcon size={18} weight="bold" />}
+                  </Button>
+                ))}
+              </div>
+            )}
+          </Panel>
+        )}
+      </div>
       {book && (
-        <Panel className="analysis-book-picker">
-          <Button
-            type="button"
-            variant="ghost"
-            aria-expanded={expanded}
-            aria-controls="analysis-book-list"
-            onClick={() => setExpanded((current) => !current)}
-          >
-            <span>
-              <small>当前账本</small>
-              <b>{book.name}</b>
-            </span>
-            <CaretDownIcon className={expanded ? "open" : ""} size={22} />
-          </Button>
-          {expanded && (
-            <div id="analysis-book-list" className="analysis-book-list">
-              {books.map((item) => (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className={item.id === book.id ? "selected" : ""}
-                  onClick={() => selectBook(item.id)}
-                  key={item.id}
-                >
-                  <BookOpenIcon size={20} weight={item.id === book.id ? "fill" : "regular"} />
-                  <span>{item.name}</span>
-                  {item.id === book.id && <CheckIcon size={18} weight="bold" />}
-                </Button>
-              ))}
-            </div>
-          )}
-        </Panel>
-      )}
-      {book && (
-        <>
+        <div className="analysis-scroll">
           <Panel className="analysis-period">
             <span>{new Date().toLocaleDateString("zh-CN", { year: "numeric", month: "long" })}</span>
             <div>
-              <Button className="selected" variant="ghost" type="button">
-                本月
-              </Button>
-              <Button variant="ghost" type="button">
-                3 个月
-              </Button>
-              <Button variant="ghost" type="button">
-                年度
-              </Button>
+              {periodOptions.map((item) => (
+                <Button
+                  className={period === item.value ? "selected" : ""}
+                  variant="ghost"
+                  type="button"
+                  onClick={() => setPeriod(item.value)}
+                  key={item.value}
+                >
+                  {item.label}
+                </Button>
+              ))}
             </div>
           </Panel>
           <div className="analysis-summary">
@@ -191,8 +201,8 @@ export function AnalysisPage() {
             ))}
             {!members.length && <p className="muted">暂无支出记录</p>}
           </Panel>
-        </>
+        </div>
       )}
-    </>
+    </section>
   );
 }

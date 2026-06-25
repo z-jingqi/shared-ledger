@@ -8,9 +8,9 @@
   "vars": {
     "APP_ENV": "local",
     "WEB_ORIGIN": "http://localhost:5175",
+    "API_PUBLIC_ORIGIN": "http://127.0.0.1:8789",
     "ALEPH_OCR_BASE_URL": "http://127.0.0.1:8787",
-    "OCR_POLL_DELAY_SECONDS": "5",
-    "OCR_MAX_WAIT_MINUTES": "30",
+    "ALEPH_OCR_WEBHOOK_SECRET": "aleph-ocr-local-webhook-secret",
   },
   "ai": { "binding": "AI" },
   "d1_databases": [

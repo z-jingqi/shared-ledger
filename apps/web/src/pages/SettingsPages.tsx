@@ -1,16 +1,13 @@
 import {
   BookOpenIcon,
   CaretRightIcon,
-  ChartPieSliceIcon,
-  MoonIcon,
   SignOutIcon,
   SquaresFourIcon,
-  TagIcon,
   TrashIcon,
   UsersThreeIcon,
   WalletIcon,
 } from "@phosphor-icons/react";
-import { Button, Input, Panel, Switch } from "@shared-ledger/ui";
+import { Button, Input, Panel } from "@shared-ledger/ui";
 import { useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Page } from "../components/layout/Page";
@@ -32,12 +29,7 @@ export function SettingsPage() {
     <>
       <Page title="设置" back={false} />
       <SettingsGroup links={primaryLinks} />
-      <SettingsGroup links={secondaryLinks} />
-      <Panel className="settings-toggle-row">
-        <MoonIcon size={25} />
-        <span>深色模式</span>
-        <Switch aria-label="深色模式" />
-      </Panel>
+      {secondaryLinks.length > 0 && <SettingsGroup links={secondaryLinks} />}
       <Button className="logout" variant="ghost" onClick={() => void logout()}>
         <SignOutIcon size={20} />
         退出登录
@@ -64,17 +56,13 @@ export function ManagementSettingsPage() {
   const navigate = useNavigate();
   const { id: routeBookId } = useParams();
   const { book } = useActiveBook();
-  const path = location.pathname.includes("categories")
-    ? "categories"
-    : location.pathname.includes("tags")
-      ? "tags"
-      : undefined;
+  const path = location.pathname.includes("categories") ? "categories" : undefined;
   const settingsTitle = settingsLinks.find((item) => location.pathname === item.to)?.label;
   const title = settingsTitle ?? (routeBookId ? "账本设置" : "设置");
   const { data, reload } = useApi<Record<string, Resource[]>>(
     path && book ? `/books/${book.id}/${path}` : undefined,
   );
-  const { data: directBookData } = useApi<{ book: { name: string; currency: string } }>(
+  const { data: directBookData } = useApi<{ book: { name: string; currency: string }; role?: string }>(
     !path && routeBookId ? `/books/${routeBookId}` : undefined,
   );
   const [name, setName] = useState("");
@@ -82,10 +70,7 @@ export function ManagementSettingsPage() {
   const items = path ? (data?.[path] ?? []) : [];
   const create = async () => {
     if (!path || !book || !name.trim()) return;
-    const body =
-      path === "categories"
-        ? { name, type: "expense", icon: "tag", sortOrder: items.length }
-        : { name, color: "#ff681c" };
+    const body = { name, type: "expense", icon: "tag", sortOrder: items.length };
     try {
       await api(`/books/${book.id}/${path}`, { method: "POST", body: JSON.stringify(body) });
       setName("");
@@ -112,7 +97,7 @@ export function ManagementSettingsPage() {
         <Page title={title} />
         <Panel>
           <h2>导出账本数据</h2>
-          <p className="muted">下载账本、成员、记录、分类、标签和邀请的 JSON 备份。</p>
+          <p className="muted">下载账本、成员、记录、分类和邀请的 JSON 备份。</p>
           <Button onClick={() => void exportBook()} disabled={!book}>
             下载 JSON 备份
           </Button>
@@ -131,79 +116,39 @@ export function ManagementSettingsPage() {
       <>
         <Page title="账本设置" />
         <Panel className="settings-list book-settings-list">
-          <Button variant="ghost" type="button">
+          <div className="settings-info-row">
             <BookOpenIcon size={24} />
             <span>账本名称</span>
             <small>{directBookData?.book.name ?? "我的日常账本"}</small>
-            <CaretRightIcon />
-          </Button>
-          <Button variant="ghost" type="button">
+          </div>
+          <div className="settings-info-row">
             <WalletIcon size={24} />
             <span>默认货币</span>
             <small>{directBookData?.book.currency === "USD" ? "美元（USD）" : "人民币（CNY）"}</small>
-            <CaretRightIcon />
-          </Button>
+          </div>
           <Link to="/members">
             <UsersThreeIcon size={24} />
             <span>成员与权限</span>
             <small>成员管理</small>
             <CaretRightIcon />
           </Link>
-          <Button variant="ghost" type="button">
-            <ChartPieSliceIcon size={24} />
-            <span>预算设置</span>
-            <small>未设置</small>
-            <CaretRightIcon />
-          </Button>
           <Link to="/settings/categories">
             <SquaresFourIcon size={24} />
             <span>分类管理</span>
             <small>分类</small>
             <CaretRightIcon />
           </Link>
-          <Link to="/settings/tags">
-            <TagIcon size={24} />
-            <span>标签管理</span>
-            <small>标签</small>
-            <CaretRightIcon />
-          </Link>
         </Panel>
-        <Button className="logout danger-outline" variant="ghost" onClick={() => void remove()}>
-          <TrashIcon size={22} />
-          删除账本
-          <CaretRightIcon />
-        </Button>
+        {directBookData?.role === "creator" && (
+          <Button className="logout danger-outline" variant="ghost" onClick={() => void remove()}>
+            <TrashIcon size={22} />
+            删除账本
+            <CaretRightIcon />
+          </Button>
+        )}
       </>
     );
   }
-  if (!path && !routeBookId && location.pathname.includes("/settings/privacy"))
-    return (
-      <>
-        <Page title={title} />
-        <Panel className="settings-list">
-          {["隐藏金额", "隐藏收入", "仅本人可见记录", "保存导入文件", "允许智能分析"].map((item) => (
-            <Button variant="ghost" type="button" key={item}>
-              <span>{item}</span>
-              <small>已关闭</small>
-            </Button>
-          ))}
-        </Panel>
-      </>
-    );
-  if (!path && !routeBookId && location.pathname.includes("/settings/notifications"))
-    return (
-      <>
-        <Page title={title} />
-        <Panel className="settings-list">
-          {["邀请通知", "导入完成提醒", "每周账本摘要"].map((item) => (
-            <Button variant="ghost" type="button" key={item}>
-              <span>{item}</span>
-              <small>已开启</small>
-            </Button>
-          ))}
-        </Panel>
-      </>
-    );
   if (!path && !routeBookId && location.pathname.includes("/settings/about"))
     return (
       <>
@@ -214,16 +159,7 @@ export function ManagementSettingsPage() {
         </Panel>
       </>
     );
-  if (!path)
-    return (
-      <>
-        <Page title={title} />
-        <Panel>
-          <h2>{title}</h2>
-          <p className="muted">该设置项暂未开放。</p>
-        </Panel>
-      </>
-    );
+  if (!path) return null;
   return (
     <>
       <Page title={title} />

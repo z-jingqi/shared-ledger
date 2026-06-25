@@ -2,7 +2,6 @@ import {
   CaretRightIcon,
   CheckCircleIcon,
   EnvelopeSimpleIcon,
-  LinkIcon,
   PhoneIcon,
   ShieldCheckIcon,
   UserCircleIcon,
@@ -118,7 +117,7 @@ export function InviteMemberPage() {
   const { book } = useActiveBook();
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [method, setMethod] = useState<"email" | "phone" | "link">("email");
+  const [method, setMethod] = useState<"email" | "phone">("email");
   const [role, setRole] = useState<"member" | "admin">("member");
   const [message, setMessage] = useState("");
   const send = async () => {
@@ -139,10 +138,10 @@ export function InviteMemberPage() {
       <Panel className="invite-intro">
         <UserPlusIcon size={34} weight="fill" />
         <b>邀请成员一起记账</b>
-        <small>支持邮箱、手机号或复制邀请链接，成员接受后即可加入。</small>
+        <small>支持邮箱或手机号邀请，成员接受后即可加入。</small>
       </Panel>
       <div className="invite-tabs">
-        {(["email", "phone", "link"] as const).map((value) => (
+        {(["email", "phone"] as const).map((value) => (
           <Button
             className={method === value ? "selected" : ""}
             type="button"
@@ -150,24 +149,22 @@ export function InviteMemberPage() {
             onClick={() => setMethod(value)}
             key={value}
           >
-            {value === "email" ? "邮箱" : value === "phone" ? "手机号" : "链接"}
+            {value === "email" ? "邮箱" : "手机号"}
           </Button>
         ))}
       </div>
       <div className="form invite-form">
-        {method !== "link" && (
-          <label>
-            {method === "email" ? <EnvelopeSimpleIcon size={20} /> : <PhoneIcon size={20} />}
-            {method === "email" ? "邮箱" : "手机号"}
-            <Input
-              value={method === "email" ? email : phone}
-              onChange={(event) =>
-                method === "email" ? setEmail(event.target.value) : setPhone(event.target.value)
-              }
-              placeholder={method === "email" ? "输入对方邮箱" : "输入对方手机号"}
-            />
-          </label>
-        )}
+        <label>
+          {method === "email" ? <EnvelopeSimpleIcon size={20} /> : <PhoneIcon size={20} />}
+          {method === "email" ? "邮箱" : "手机号"}
+          <Input
+            value={method === "email" ? email : phone}
+            onChange={(event) =>
+              method === "email" ? setEmail(event.target.value) : setPhone(event.target.value)
+            }
+            placeholder={method === "email" ? "输入对方邮箱" : "输入对方手机号"}
+          />
+        </label>
         <label>
           <ShieldCheckIcon size={20} />
           成员角色
@@ -183,13 +180,6 @@ export function InviteMemberPage() {
             </SelectContent>
           </Select>
         </label>
-        {method === "link" && (
-          <Button className="sub-action invite-link-row" type="button" variant="ghost">
-            <LinkIcon size={21} />
-            复制邀请链接
-            <CaretRightIcon />
-          </Button>
-        )}
         <Button onClick={() => void send()}>发送邀请</Button>
         {message && (
           <p className="success-note">

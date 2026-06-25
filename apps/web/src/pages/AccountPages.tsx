@@ -1,11 +1,9 @@
 import {
-  BellIcon,
   CheckIcon,
   CaretRightIcon,
   CreditCardIcon,
   EyeIcon,
   EyeSlashIcon,
-  GlobeHemisphereEastIcon,
   LockKeyIcon,
   NotebookIcon,
   SignOutIcon,
@@ -29,10 +27,6 @@ export function AccountSettingsPage() {
     setUser(undefined);
   };
   const links = [
-    { label: "个人资料", Icon: UserCircleIcon, to: "/account" },
-    { label: "安全与登录", Icon: LockKeyIcon, to: "/account" },
-    { label: "通知设置", Icon: BellIcon, to: "/settings/notifications" },
-    { label: "语言与主题", Icon: GlobeHemisphereEastIcon, to: "/account" },
     { label: "订阅与套餐", Icon: CreditCardIcon, to: "/subscription" },
   ];
   return (
@@ -132,29 +126,62 @@ export function SubscriptionPage() {
 function AuthShell({ children }: { children: ReactNode }) {
   return (
     <>
-      <div className="brand">
-        <NotebookIcon size={38} weight="fill" />
-        <h1>一起记</h1>
-        <p>和重要的人，一起记下生活</p>
+      <div className="auth-brand">
+        <span className="auth-brand-icon" aria-hidden="true">
+          <NotebookIcon size={32} weight="duotone" />
+        </span>
+        <h1>Shared Ledger</h1>
+        <p>共享账本，清晰生活</p>
       </div>
       {children}
     </>
   );
 }
 
-function PasswordField({
+function AuthField({
+  autoComplete,
   label,
   placeholder,
   registration,
 }: {
+  autoComplete?: string;
+  label: string;
+  placeholder: string;
+  registration: UseFormRegisterReturn;
+}) {
+  return (
+    <label className="auth-field">
+      <span className="sr-only">{label}</span>
+      <span className="auth-input-shell">
+        <UserCircleIcon className="auth-input-icon" size={19} weight="regular" />
+        <Input aria-label={label} autoComplete={autoComplete} placeholder={placeholder} {...registration} />
+      </span>
+    </label>
+  );
+}
+
+function PasswordField({
+  autoComplete,
+  label,
+  placeholder,
+  registration,
+}: {
+  autoComplete?: string;
   label: string;
   placeholder: string;
   registration: UseFormRegisterReturn;
 }) {
   const [visible, setVisible] = useState(false);
   return (
-    <span className="password-field">
-      <Input aria-label={label} type={visible ? "text" : "password"} placeholder={placeholder} {...registration} />
+    <span className="auth-input-shell password-field">
+      <LockKeyIcon className="auth-input-icon" size={19} weight="regular" />
+      <Input
+        aria-label={label}
+        autoComplete={autoComplete}
+        type={visible ? "text" : "password"}
+        placeholder={placeholder}
+        {...registration}
+      />
       <Button
         type="button"
         className="password-toggle"
@@ -192,19 +219,28 @@ export function LoginPage() {
   return (
     <AuthShell>
       <form className="form auth-form" onSubmit={submit}>
-        <label>
-          用户名
-          <Input type="text" placeholder="请输入用户名" {...form.register("identifier")} />
-        </label>
-        <label>
-          密码
-          <PasswordField label="密码" placeholder="请输入密码" registration={form.register("password")} />
+        <AuthField
+          autoComplete="username"
+          label="用户名"
+          placeholder="用户名"
+          registration={form.register("identifier")}
+        />
+        <label className="auth-field">
+          <span className="sr-only">密码</span>
+          <PasswordField
+            autoComplete="current-password"
+            label="密码"
+            placeholder="密码"
+            registration={form.register("password")}
+          />
         </label>
         {error && <p className="field-error">{error}</p>}
-        <Button type="submit">登录</Button>
+        <Button className="auth-submit" disabled={form.formState.isSubmitting} type="submit">
+          {form.formState.isSubmitting ? "登录中..." : "登录"}
+        </Button>
       </form>
       <p className="auth-switch">
-        还没有账号？
+        还没有账号？立即
         <Link to="/register">注册</Link>
       </p>
     </AuthShell>
@@ -241,20 +277,34 @@ export function RegisterPage() {
   return (
     <AuthShell>
       <form className="form auth-form" onSubmit={submit}>
-        <label>
-          用户名
-          <Input placeholder="请输入用户名" {...form.register("name")} />
+        <AuthField
+          autoComplete="username"
+          label="用户名"
+          placeholder="用户名"
+          registration={form.register("name")}
+        />
+        <label className="auth-field">
+          <span className="sr-only">密码</span>
+          <PasswordField
+            autoComplete="new-password"
+            label="密码"
+            placeholder="密码（至少 6 位）"
+            registration={form.register("password")}
+          />
         </label>
-        <label>
-          密码
-          <PasswordField label="密码" placeholder="至少 6 位" registration={form.register("password")} />
-        </label>
-        <label>
-          确认密码
-          <PasswordField label="确认密码" placeholder="再次输入密码" registration={form.register("confirmPassword")} />
+        <label className="auth-field">
+          <span className="sr-only">确认密码</span>
+          <PasswordField
+            autoComplete="new-password"
+            label="确认密码"
+            placeholder="确认密码"
+            registration={form.register("confirmPassword")}
+          />
         </label>
         {error && <p className="field-error">{error}</p>}
-        <Button type="submit">创建账号</Button>
+        <Button className="auth-submit" disabled={form.formState.isSubmitting} type="submit">
+          {form.formState.isSubmitting ? "创建中..." : "创建账号"}
+        </Button>
       </form>
       <p className="auth-switch">
         已有账号？

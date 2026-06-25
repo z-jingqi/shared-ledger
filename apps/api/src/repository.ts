@@ -57,12 +57,35 @@ const mapImportJob = (row: Row): ImportJob => ({
   status: row.status,
   autoConfirm: Boolean(row.autoConfirm),
   ...(row.errorMessage ? { errorMessage: row.errorMessage } : {}),
+  ...(row.errorCode ? { errorCode: row.errorCode } : {}),
+  ...(row.errorStage ? { errorStage: row.errorStage } : {}),
+  ...(row.errorRequestId ? { errorRequestId: row.errorRequestId } : {}),
+  errorRetryable: Boolean(row.errorRetryable),
+  errorTerminal: Boolean(row.errorTerminal),
+  ...(row.failedExternalJobId ? { failedExternalJobId: row.failedExternalJobId } : {}),
+  cancelable: Boolean(row.cancelable),
+  retryable: Boolean(row.retryable),
+  retryCount: row.retryCount ?? 0,
+  ...(row.convertJobId ? { convertJobId: row.convertJobId } : {}),
+  convertEventSequence: row.convertEventSequence ?? 0,
+  ...(row.convertedR2Key ? { convertedR2Key: row.convertedR2Key } : {}),
+  ...(row.convertedFileType ? { convertedFileType: row.convertedFileType } : {}),
   ...(row.ocrJobId ? { ocrJobId: row.ocrJobId } : {}),
   ...(row.ocrSubmittedAt ? { ocrSubmittedAt: row.ocrSubmittedAt } : {}),
-  ocrPollCount: row.ocrPollCount ?? 0,
+  ocrProgress: row.ocrProgress ?? 0,
+  ...(row.ocrStage ? { ocrStage: row.ocrStage } : {}),
+  ...(row.ocrCurrentPage !== null && row.ocrCurrentPage !== undefined
+    ? { ocrCurrentPage: row.ocrCurrentPage }
+    : {}),
+  ...(row.ocrTotalPages !== null && row.ocrTotalPages !== undefined ? { ocrTotalPages: row.ocrTotalPages } : {}),
+  ...(row.ocrCompletedAt ? { ocrCompletedAt: row.ocrCompletedAt } : {}),
+  ocrEventSequence: row.ocrEventSequence ?? 0,
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
 });
+
+const importJobColumns =
+  "id,book_id AS bookId,user_id AS userId,file_name AS fileName,file_type AS fileType,r2_key AS r2Key,status,auto_confirm AS autoConfirm,error_message AS errorMessage,error_code AS errorCode,error_stage AS errorStage,error_request_id AS errorRequestId,error_retryable AS errorRetryable,error_terminal AS errorTerminal,failed_external_job_id AS failedExternalJobId,cancelable,retryable,retry_count AS retryCount,convert_job_id AS convertJobId,convert_event_sequence AS convertEventSequence,converted_r2_key AS convertedR2Key,converted_file_type AS convertedFileType,ocr_job_id AS ocrJobId,ocr_submitted_at AS ocrSubmittedAt,ocr_progress AS ocrProgress,ocr_stage AS ocrStage,ocr_current_page AS ocrCurrentPage,ocr_total_pages AS ocrTotalPages,ocr_completed_at AS ocrCompletedAt,ocr_event_sequence AS ocrEventSequence,created_at AS createdAt,updated_at AS updatedAt";
 
 const mapRecord = (row: Row): ImportedRecord => ({
   id: row.id,
@@ -627,12 +650,18 @@ export class D1LedgerRepository {
       ...input,
       id: id("import"),
       status: "uploaded",
+      cancelable: false,
+      retryable: false,
+      retryCount: 0,
+      convertEventSequence: 0,
+      ocrProgress: 0,
+      ocrEventSequence: 0,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
     await this.db
       .prepare(
-        "INSERT INTO import_jobs (id,book_id,user_id,file_name,file_type,r2_key,status,auto_confirm,ocr_poll_count,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO import_jobs (id,book_id,user_id,file_name,file_type,r2_key,status,auto_confirm,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
       )
       .bind(
         job.id,
@@ -643,7 +672,6 @@ export class D1LedgerRepository {
         job.r2Key,
         job.status,
         job.autoConfirm ? 1 : 0,
-        0,
         timestamp,
         timestamp,
       )
@@ -652,41 +680,201 @@ export class D1LedgerRepository {
   }
   async listImportJobs(bookId: string) {
     const result = await this.db
-      .prepare(
-        "SELECT id,book_id AS bookId,user_id AS userId,file_name AS fileName,file_type AS fileType,r2_key AS r2Key,status,auto_confirm AS autoConfirm,error_message AS errorMessage,ocr_job_id AS ocrJobId,ocr_submitted_at AS ocrSubmittedAt,ocr_poll_count AS ocrPollCount,created_at AS createdAt,updated_at AS updatedAt FROM import_jobs WHERE book_id=? ORDER BY created_at DESC",
-      )
+      .prepare(`SELECT ${importJobColumns} FROM import_jobs WHERE book_id=? ORDER BY created_at DESC`)
       .bind(bookId)
       .all<Row>();
     return result.results.map(mapImportJob);
   }
   async getImportJob(jobId: string) {
     const row = await this.db
-      .prepare(
-        "SELECT id,book_id AS bookId,user_id AS userId,file_name AS fileName,file_type AS fileType,r2_key AS r2Key,status,auto_confirm AS autoConfirm,error_message AS errorMessage,ocr_job_id AS ocrJobId,ocr_submitted_at AS ocrSubmittedAt,ocr_poll_count AS ocrPollCount,created_at AS createdAt,updated_at AS updatedAt FROM import_jobs WHERE id=?",
-      )
+      .prepare(`SELECT ${importJobColumns} FROM import_jobs WHERE id=?`)
       .bind(jobId)
       .first<Row>();
     return row ? mapImportJob(row) : null;
   }
   async updateImportJob(jobId: string, status: string, errorMessage?: string) {
+    const terminal = ["completed", "pending_confirmation", "failed", "cancelled"].includes(status) ? 1 : 0;
     await this.db
-      .prepare("UPDATE import_jobs SET status=?,error_message=?,updated_at=? WHERE id=?")
-      .bind(status, errorMessage ?? null, now(), jobId)
+      .prepare(
+        "UPDATE import_jobs SET status=?,error_message=?,cancelable=CASE WHEN ? THEN 0 ELSE cancelable END,retryable=CASE WHEN ? THEN 0 ELSE retryable END,updated_at=? WHERE id=?",
+      )
+      .bind(status, errorMessage ?? null, terminal, terminal, now(), jobId)
       .run();
     return this.getImportJob(jobId);
   }
   async attachOcrJob(jobId: string, ocrJobId: string) {
     await this.db
       .prepare(
-        "UPDATE import_jobs SET status=?,ocr_job_id=?,ocr_submitted_at=?,ocr_poll_count=0,error_message=NULL,updated_at=? WHERE id=?",
+        "UPDATE import_jobs SET status=?,ocr_job_id=?,ocr_submitted_at=?,ocr_progress=0,ocr_stage=?,ocr_event_sequence=0,error_message=NULL,error_code=NULL,error_stage=NULL,error_request_id=NULL,error_retryable=0,error_terminal=0,failed_external_job_id=NULL,cancelable=1,retryable=1,updated_at=? WHERE id=?",
       )
-      .bind("ocr_processing", ocrJobId, now(), now(), jobId)
+      .bind("ocr_processing", ocrJobId, now(), "queued", now(), jobId)
       .run();
     return this.getImportJob(jobId);
   }
-  async incrementOcrPoll(jobId: string) {
+  async attachConvertJob(jobId: string, convertJobId: string) {
     await this.db
-      .prepare("UPDATE import_jobs SET ocr_poll_count=ocr_poll_count+1,updated_at=? WHERE id=?")
+      .prepare(
+        "UPDATE import_jobs SET status=?,convert_job_id=?,convert_event_sequence=0,ocr_progress=0,ocr_stage=?,error_message=NULL,error_code=NULL,error_stage=NULL,error_request_id=NULL,error_retryable=0,error_terminal=0,failed_external_job_id=NULL,cancelable=1,retryable=1,updated_at=? WHERE id=?",
+      )
+      .bind("converting", convertJobId, "queued", now(), jobId)
+      .run();
+    return this.getImportJob(jobId);
+  }
+  async attachConvertedFile(jobId: string, input: { r2Key: string; fileType: string }) {
+    await this.db
+      .prepare("UPDATE import_jobs SET converted_r2_key=?,converted_file_type=?,updated_at=? WHERE id=?")
+      .bind(input.r2Key, input.fileType, now(), jobId)
+      .run();
+    return this.getImportJob(jobId);
+  }
+  async updateOcrProgress(
+    jobId: string,
+    input: {
+      progress?: number;
+      stage?: string;
+      currentPage?: number | null;
+      totalPages?: number | null;
+      completedAt?: string | null;
+      eventSequence?: number;
+    },
+  ) {
+    const timestamp = now();
+    const updates = ["updated_at=?"];
+    const values: unknown[] = [timestamp];
+    if (input.progress !== undefined) {
+      updates.unshift("ocr_progress=?");
+      values.unshift(input.progress);
+    }
+    if (input.stage !== undefined) {
+      updates.unshift("ocr_stage=?");
+      values.unshift(input.stage);
+    }
+    if (input.currentPage !== undefined) {
+      updates.unshift("ocr_current_page=?");
+      values.unshift(input.currentPage);
+    }
+    if (input.totalPages !== undefined) {
+      updates.unshift("ocr_total_pages=?");
+      values.unshift(input.totalPages);
+    }
+    if (input.completedAt !== undefined) {
+      updates.unshift("ocr_completed_at=?");
+      values.unshift(input.completedAt);
+    }
+    if (input.eventSequence !== undefined) {
+      updates.unshift("ocr_event_sequence=MAX(ocr_event_sequence, ?)");
+      values.unshift(input.eventSequence);
+    }
+    await this.db
+      .prepare(`UPDATE import_jobs SET ${updates.join(",")} WHERE id=?`)
+      .bind(...values, jobId)
+      .run();
+    return this.getImportJob(jobId);
+  }
+  async updateAlephState(
+    jobId: string,
+    input: {
+      phase: "convert" | "ocr";
+      progress?: number;
+      stage?: string;
+      currentPage?: number | null;
+      totalPages?: number | null;
+      completedAt?: string | null;
+      eventSequence?: number;
+      cancelable?: boolean;
+      retryable?: boolean;
+    },
+  ) {
+    const timestamp = now();
+    const updates = ["updated_at=?"];
+    const values: unknown[] = [timestamp];
+    if (input.progress !== undefined) {
+      updates.unshift("ocr_progress=?");
+      values.unshift(input.progress);
+    }
+    if (input.stage !== undefined) {
+      updates.unshift("ocr_stage=?");
+      values.unshift(input.stage);
+    }
+    if (input.currentPage !== undefined) {
+      updates.unshift("ocr_current_page=?");
+      values.unshift(input.currentPage);
+    }
+    if (input.totalPages !== undefined) {
+      updates.unshift("ocr_total_pages=?");
+      values.unshift(input.totalPages);
+    }
+    if (input.completedAt !== undefined) {
+      updates.unshift("ocr_completed_at=?");
+      values.unshift(input.completedAt);
+    }
+    if (input.cancelable !== undefined) {
+      updates.unshift("cancelable=?");
+      values.unshift(input.cancelable ? 1 : 0);
+    }
+    if (input.retryable !== undefined) {
+      updates.unshift("retryable=?");
+      values.unshift(input.retryable ? 1 : 0);
+    }
+    if (input.eventSequence !== undefined) {
+      updates.unshift(
+        input.phase === "convert"
+          ? "convert_event_sequence=MAX(convert_event_sequence, ?)"
+          : "ocr_event_sequence=MAX(ocr_event_sequence, ?)",
+      );
+      values.unshift(input.eventSequence);
+    }
+    await this.db
+      .prepare(`UPDATE import_jobs SET ${updates.join(",")} WHERE id=?`)
+      .bind(...values, jobId)
+      .run();
+    return this.getImportJob(jobId);
+  }
+  async markImportJobFailed(
+    jobId: string,
+    input: {
+      message: string;
+      code?: string;
+      stage?: string;
+      requestId?: string;
+      retryable?: boolean;
+      terminal?: boolean;
+      externalJobId?: string;
+    },
+  ) {
+    await this.db
+      .prepare(
+        "UPDATE import_jobs SET status='failed',error_message=?,error_code=?,error_stage=?,error_request_id=?,error_retryable=?,error_terminal=?,failed_external_job_id=?,cancelable=0,retryable=?,updated_at=? WHERE id=?",
+      )
+      .bind(
+        input.message,
+        input.code ?? null,
+        input.stage ?? null,
+        input.requestId ?? null,
+        input.retryable ? 1 : 0,
+        input.terminal ? 1 : 0,
+        input.externalJobId ?? null,
+        input.retryable ? 1 : 0,
+        now(),
+        jobId,
+      )
+      .run();
+    return this.getImportJob(jobId);
+  }
+  async prepareImportJobRetry(jobId: string) {
+    await this.db
+      .prepare(
+        "UPDATE import_jobs SET retry_count=retry_count+1,status='uploaded',convert_job_id=NULL,convert_event_sequence=0,ocr_job_id=NULL,ocr_submitted_at=NULL,ocr_progress=0,ocr_stage=NULL,ocr_current_page=NULL,ocr_total_pages=NULL,ocr_completed_at=NULL,ocr_event_sequence=0,error_message=NULL,error_code=NULL,error_stage=NULL,error_request_id=NULL,error_retryable=0,error_terminal=0,failed_external_job_id=NULL,cancelable=0,retryable=0,updated_at=? WHERE id=?",
+      )
+      .bind(now(), jobId)
+      .run();
+    return this.getImportJob(jobId);
+  }
+  async prepareImportJobAiRetry(jobId: string) {
+    await this.db
+      .prepare(
+        "UPDATE import_jobs SET retry_count=retry_count+1,status='ai_processing',error_message=NULL,error_code=NULL,error_stage=NULL,error_request_id=NULL,error_retryable=0,error_terminal=0,failed_external_job_id=NULL,cancelable=0,retryable=0,updated_at=? WHERE id=?",
+      )
       .bind(now(), jobId)
       .run();
     return this.getImportJob(jobId);

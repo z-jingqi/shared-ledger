@@ -6,8 +6,8 @@ export type Env = {
   AI_PROVIDER_KEYS?: string;
   ALEPH_OCR_BASE_URL?: string;
   ALEPH_OCR_API_KEY?: string;
-  OCR_POLL_DELAY_SECONDS?: string;
-  OCR_MAX_WAIT_MINUTES?: string;
+  ALEPH_OCR_WEBHOOK_SECRET?: string;
+  API_PUBLIC_ORIGIN?: string;
   APP_ENV?: string;
   WEB_ORIGIN?: string;
   GOOGLE_CLIENT_ID?: string;
