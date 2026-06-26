@@ -5,6 +5,7 @@ import {
   CircleNotchIcon,
   FileArrowUpIcon,
   FunnelSimpleIcon,
+  MagnifyingGlassIcon,
   NotePencilIcon,
   PlusCircleIcon,
   PlusIcon,
@@ -15,7 +16,7 @@ import {
 } from "@phosphor-icons/react";
 import { createTransactionSchema } from "@shared-ledger/shared";
 import { Button, Input, Panel } from "@shared-ledger/ui";
-import type { ReactNode } from "react";
+import type { FormEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -23,6 +24,7 @@ import { toast } from "sonner";
 import { ImportAttachmentCards, type ImportAttachmentView } from "../components/imports/ImportAttachmentCards";
 import { TransactionList, type LedgerTransaction } from "../components/ledger/Transactions";
 import { Page } from "../components/layout/Page";
+import { searchTransactionsWithAi, type AiTransactionSearchResponse } from "../features/ai/search";
 import {
   isSupportedAttachment,
   isOcrAttachment,
@@ -39,6 +41,8 @@ import { api, money } from "../lib";
 
 type RecordPicker = "type" | "category" | "date";
 type RecordFilterType = "all" | "expense" | "income";
+type RecordSort = "latest" | "amount_desc";
+type RecordFilterSource = "" | "ai";
 type CategoryOption = { id: string; name: string; type?: "expense" | "income" };
 type LineItemValue = { name: string; amount: number; categoryId?: string; note?: string };
 type RecordDraft = {
@@ -52,18 +56,26 @@ type RecordDraft = {
 type RecordFilters = {
   q: string;
   type: RecordFilterType;
+  sort: RecordSort;
   start: string;
   end: string;
   min: string;
   max: string;
+  category: string;
+  source: RecordFilterSource;
+  chips: string[];
+  minStrict: boolean;
+  maxStrict: boolean;
 };
 
 export function RecordsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = readRecordFilters(searchParams);
   const [filterOpen, setFilterOpen] = useState(false);
-  const [rangeOpen, setRangeOpen] = useState(false);
+  const [searchText, setSearchText] = useState(filters.q);
+  const [aiSearching, setAiSearching] = useState(false);
   const [draftFilters, setDraftFilters] = useState<RecordFilters>(filters);
+  const isAiFilter = filters.source === "ai";
   const [attachments, setAttachments] = useState<ImportAttachmentView[]>([]);
   const [uploadingAttachments, setUploadingAttachments] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -87,7 +99,7 @@ export function RecordsPage() {
     [];
   const transactions = (data?.transactions ?? [])
     .filter((item) => matchesRecordFilters(item, filters, categoryNames))
-    .sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
+    .sort((a, b) => compareRecordTransactions(a, b, filters.sort));
   const groups = transactions.reduce<Record<string, LedgerTransaction[]>>((result, transaction) => {
     const key = new Date(transaction.occurredAt).toLocaleDateString("zh-CN", {
       year: "numeric",
@@ -98,10 +110,7 @@ export function RecordsPage() {
     result[key] = [...(result[key] ?? []), transaction];
     return result;
   }, {});
-  const updateFilters = (changes: Partial<RecordFilters>) => {
-    const next = writeRecordFilters(searchParams, { ...filters, ...changes });
-    setSearchParams(next);
-  };
+  const filterChips = getVisibleFilterChips(filters, categoryNames);
   const openFilters = () => {
     setDraftFilters(filters);
     setFilterOpen(true);
@@ -111,11 +120,45 @@ export function RecordsPage() {
     setFilterOpen(false);
   };
   const resetFilters = () => {
-    const empty = { q: "", type: "all" as const, start: "", end: "", min: "", max: "" };
+    const empty = emptyRecordFilters();
     setDraftFilters(empty);
-    setSearchParams(writeRecordFilters(searchParams, empty));
+    setSearchText("");
+    setSearchParams(clearRecordFilterParams(searchParams));
     setFilterOpen(false);
   };
+  const submitAiSearch = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const query = searchText.trim();
+    if (!query) {
+      resetFilters();
+      return;
+    }
+    if (!book) {
+      toast.error("请先选择账本", { duration: 3000, closeButton: true });
+      return;
+    }
+    setAiSearching(true);
+    try {
+      const result = await searchTransactionsWithAi({
+        bookId: book.id,
+        query,
+        baseFilters: buildAiBaseFilters(filters),
+        timeZone: getClientTimeZone(),
+      });
+      const nextFilters = mergeAiSearchResult(filters, query, result);
+      setSearchParams(writeRecordFilters(searchParams, nextFilters));
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "AI 搜索失败", {
+        duration: 3000,
+        closeButton: true,
+      });
+    } finally {
+      setAiSearching(false);
+    }
+  };
+  useEffect(() => {
+    setSearchText(filters.q);
+  }, [filters.q]);
   useEffect(() => {
     attachments.forEach((attachment) => {
       if (attachment.previewUrl) previewUrlsRef.current.add(attachment.previewUrl);
@@ -388,18 +431,39 @@ export function RecordsPage() {
           <CaretRightIcon size={22} />
         </Link>
       )}
-      <Input
-        className="search"
-        placeholder="搜索记录、分类或备注"
-        value={filters.q}
-        onChange={(event) => updateFilters({ q: event.target.value })}
-      />
+      <form className="record-ai-search" onSubmit={(event) => void submitAiSearch(event)}>
+        <Input
+          className="search"
+          aria-label="自然语言搜索记录"
+          placeholder="用自然语言搜索记录，例如：今年大于 100 的餐饮支出"
+          value={searchText}
+          onChange={(event) => setSearchText(event.target.value)}
+        />
+        <Button
+          className="record-ai-search-submit"
+          type="submit"
+          variant="ghost"
+          size="icon"
+          aria-label="AI 搜索记录"
+          disabled={aiSearching || !book}
+        >
+          {aiSearching ? <CircleNotchIcon size={20} weight="bold" /> : <MagnifyingGlassIcon size={21} weight="bold" />}
+        </Button>
+      </form>
       {hasActiveRecordFilters(filters) && (
-        <div className="active-filter-summary">
-          <span>{formatFilterSummary(filters)}</span>
+        <div className={`active-filter-summary ${isAiFilter ? "ai-filter" : ""}`}>
+          {isAiFilter && <b>AI 已筛选</b>}
+          <span>{`已筛选：${formatFilterSummary(filters, categoryNames)}`}</span>
           <Button type="button" variant="ghost" onClick={resetFilters}>
-            重置
+            清除
           </Button>
+        </div>
+      )}
+      {isAiFilter && filterChips.length > 0 && (
+        <div className="ai-filter-chips" aria-label="AI 筛选条件">
+          {filterChips.map((chip) => (
+            <span key={chip}>{chip}</span>
+          ))}
         </div>
       )}
       <div className="record-groups">
@@ -487,40 +551,20 @@ export function RecordsPage() {
               </div>
             </section>
             <section>
-              <h3>时间范围</h3>
-              <Button className="filter-value-row" type="button" variant="outline" onClick={() => setRangeOpen(true)}>
-                <span>{formatDateRangeLabel(draftFilters.start, draftFilters.end)}</span>
-                <CaretRightIcon size={18} />
-              </Button>
-            </section>
-            <section>
-              <h3>金额范围</h3>
-              <div className="filter-number-row">
-                <Input
-                  aria-label="最低金额"
-                  inputMode="decimal"
-                  value={draftFilters.min}
-                  placeholder="最低金额"
-                  onChange={(event) => setDraftFilters((current) => ({ ...current, min: event.target.value }))}
-                />
-                <span>—</span>
-                <Input
-                  aria-label="最高金额"
-                  inputMode="decimal"
-                  value={draftFilters.max}
-                  placeholder="最高金额"
-                  onChange={(event) => setDraftFilters((current) => ({ ...current, max: event.target.value }))}
-                />
+              <h3>排序</h3>
+              <div className="filter-segment sort-segment">
+                {recordSortOptions.map((item) => (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className={draftFilters.sort === item.value ? "selected" : ""}
+                    key={item.value}
+                    onClick={() => setDraftFilters((current) => ({ ...current, sort: item.value }))}
+                  >
+                    {item.label}
+                  </Button>
+                ))}
               </div>
-            </section>
-            <section>
-              <h3>关键词</h3>
-              <Input
-                aria-label="筛选关键词"
-                value={draftFilters.q}
-                placeholder="搜索备注或分类"
-                onChange={(event) => setDraftFilters((current) => ({ ...current, q: event.target.value }))}
-              />
             </section>
             <div className="record-filter-actions">
               <Button type="button" variant="outline" onClick={resetFilters}>
@@ -532,17 +576,6 @@ export function RecordsPage() {
             </div>
           </div>
         </SelectionModal>
-      )}
-      {rangeOpen && (
-        <DateRangeModal
-          start={draftFilters.start}
-          end={draftFilters.end}
-          onClose={() => setRangeOpen(false)}
-          onChange={(range) => {
-            setDraftFilters((current) => ({ ...current, ...range }));
-            setRangeOpen(false);
-          }}
-        />
       )}
     </>
   );
@@ -921,151 +954,56 @@ function SelectionModal({
   );
 }
 
-function DateRangeModal({
-  start,
-  end,
-  onChange,
-  onClose,
-}: {
-  start: string;
-  end: string;
-  onChange: (range: { start: string; end: string }) => void;
-  onClose: () => void;
-}) {
-  const initial = start || end || toDateInputValue(new Date());
-  const [draftStart, setDraftStart] = useState(start);
-  const [draftEnd, setDraftEnd] = useState(end);
-  const [activeField, setActiveField] = useState<"start" | "end">("start");
-  const [calendarValue, setCalendarValue] = useState(initial);
-  const monthDays = getMonthDays(calendarValue);
-  const pickDate = (value: string) => {
-    if (activeField === "start") {
-      setDraftStart(value);
-      if (draftEnd && value > draftEnd) setDraftEnd(value);
-      setActiveField("end");
-    } else {
-      setDraftEnd(value);
-      if (draftStart && value < draftStart) setDraftStart(value);
-    }
-    setCalendarValue(value);
-  };
-  const applyPreset = (preset: "today" | "week" | "month" | "year") => {
-    const today = new Date();
-    let rangeStart = toDateInputValue(today);
-    const rangeEnd = toDateInputValue(today);
-    if (preset === "week") {
-      const day = today.getDay() || 7;
-      const first = new Date(today);
-      first.setDate(today.getDate() - day + 1);
-      rangeStart = toDateInputValue(first);
-    }
-    if (preset === "month") rangeStart = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-01`;
-    if (preset === "year") rangeStart = `${today.getFullYear()}-01-01`;
-    setDraftStart(rangeStart);
-    setDraftEnd(rangeEnd);
-    setCalendarValue(rangeEnd);
-  };
-  return (
-    <SelectionModal title="选择时间范围" onClose={onClose}>
-      <div className="date-range-sheet">
-        <div className="quick-dates">
-          <Button type="button" variant="outline" onClick={() => applyPreset("today")}>
-            今天
-          </Button>
-          <Button type="button" variant="outline" onClick={() => applyPreset("week")}>
-            本周
-          </Button>
-          <Button type="button" variant="outline" onClick={() => applyPreset("month")}>
-            本月
-          </Button>
-          <Button type="button" variant="outline" onClick={() => applyPreset("year")}>
-            今年
-          </Button>
-        </div>
-        <div className="date-range-fields">
-          <Button
-            type="button"
-            variant="outline"
-            className={activeField === "start" ? "selected" : ""}
-            onClick={() => setActiveField("start")}
-          >
-            <small>开始日期</small>
-            <b>{draftStart || "请选择"}</b>
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            className={activeField === "end" ? "selected" : ""}
-            onClick={() => setActiveField("end")}
-          >
-            <small>结束日期</small>
-            <b>{draftEnd || "请选择"}</b>
-          </Button>
-        </div>
-        <div className="date-panel-header">
-          <Button type="button" variant="ghost" onClick={() => setCalendarValue(shiftMonth(calendarValue, -1))}>
-            上月
-          </Button>
-          <b>{formatMonthLabel(calendarValue)}</b>
-          <Button type="button" variant="ghost" onClick={() => setCalendarValue(shiftMonth(calendarValue, 1))}>
-            下月
-          </Button>
-        </div>
-        <div className="date-grid">
-          {["一", "二", "三", "四", "五", "六", "日"].map((day) => (
-            <span key={day}>{day}</span>
-          ))}
-          {monthDays.map((day, index) =>
-            day ? (
-              <Button
-                type="button"
-                variant="ghost"
-                className={day.value === draftStart || day.value === draftEnd ? "selected" : ""}
-                key={day.value}
-                onClick={() => pickDate(day.value)}
-              >
-                {day.label}
-              </Button>
-            ) : (
-              <i key={`range-blank-${index}`} />
-            ),
-          )}
-        </div>
-        <div className="record-filter-actions">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => {
-              setDraftStart("");
-              setDraftEnd("");
-            }}
-          >
-            清除
-          </Button>
-          <Button type="button" onClick={() => onChange({ start: draftStart, end: draftEnd })}>
-            确定
-          </Button>
-        </div>
-      </div>
-    </SelectionModal>
-  );
-}
-
 const recordTypeFilterOptions: Array<{ label: string; value: RecordFilterType }> = [
   { label: "全部", value: "all" },
   { label: "支出", value: "expense" },
   { label: "收入", value: "income" },
 ];
 
+const recordSortOptions: Array<{ label: string; value: RecordSort }> = [
+  { label: "最新优先", value: "latest" },
+  { label: "金额最高", value: "amount_desc" },
+];
+
+function emptyRecordFilters(): RecordFilters {
+  return {
+    q: "",
+    type: "all",
+    sort: "latest",
+    start: "",
+    end: "",
+    min: "",
+    max: "",
+    category: "",
+    source: "",
+    chips: [],
+    minStrict: false,
+    maxStrict: false,
+  };
+}
+
 function readRecordFilters(searchParams: URLSearchParams): RecordFilters {
   const type = searchParams.get("type");
+  const sort = searchParams.get("sort");
+  const source = searchParams.get("source") === "ai" || searchParams.get("aiFilter") === "1" ? "ai" : "";
+  const min = searchParams.get("min") ?? "";
+  const max = searchParams.get("max") ?? "";
+  const strict = booleanValue(searchParams.get("strict"));
+  const minStrict = booleanValue(searchParams.get("minStrict") ?? searchParams.get("strictMin"));
+  const maxStrict = booleanValue(searchParams.get("maxStrict") ?? searchParams.get("strictMax"));
   return {
     q: searchParams.get("q") ?? "",
     type: type === "expense" || type === "income" ? type : "all",
+    sort: sort === "amount_desc" ? sort : "latest",
     start: searchParams.get("start") ?? "",
     end: searchParams.get("end") ?? "",
-    min: searchParams.get("min") ?? "",
-    max: searchParams.get("max") ?? "",
+    min,
+    max,
+    category: searchParams.get("category") ?? "",
+    source,
+    chips: readChips(searchParams.get("chips")),
+    minStrict: source === "ai" && Boolean(min) ? minStrict ?? strict ?? true : false,
+    maxStrict: source === "ai" && Boolean(max) ? maxStrict ?? strict ?? true : false,
   };
 }
 
@@ -1073,10 +1011,30 @@ function writeRecordFilters(searchParams: URLSearchParams, filters: RecordFilter
   const next = new URLSearchParams(searchParams);
   setParam(next, "q", filters.q.trim());
   setParam(next, "type", filters.type === "all" ? "" : filters.type);
+  setParam(next, "sort", filters.sort === "latest" && filters.source !== "ai" ? "" : filters.sort);
   setParam(next, "start", filters.start);
   setParam(next, "end", filters.end);
   setParam(next, "min", filters.min.trim());
   setParam(next, "max", filters.max.trim());
+  setParam(next, "category", filters.category.trim());
+  setParam(next, "source", filters.source);
+  next.delete("aiFilter");
+  const chips = filters.source === "ai" ? filters.chips.length ? filters.chips : buildFilterChips(filters, {}) : [];
+  setParam(next, "chips", writeChips(chips));
+  if (filters.source === "ai" && filters.min.trim()) next.set("minStrict", filters.minStrict ? "1" : "0");
+  else next.delete("minStrict");
+  if (filters.source === "ai" && filters.max.trim()) next.set("maxStrict", filters.maxStrict ? "1" : "0");
+  else next.delete("maxStrict");
+  next.delete("strict");
+  next.delete("strictMin");
+  next.delete("strictMax");
+  return next;
+}
+
+function clearRecordFilterParams(searchParams: URLSearchParams) {
+  const next = new URLSearchParams();
+  const bookId = searchParams.get("bookId");
+  if (bookId) next.set("bookId", bookId);
   return next;
 }
 
@@ -1086,24 +1044,63 @@ function setParam(searchParams: URLSearchParams, key: string, value: string) {
 }
 
 function hasActiveRecordFilters(filters: RecordFilters) {
-  return Boolean(filters.q || filters.type !== "all" || filters.start || filters.end || filters.min || filters.max);
+  return Boolean(
+    filters.q ||
+      filters.type !== "all" ||
+      filters.sort !== "latest" ||
+      filters.start ||
+      filters.end ||
+      filters.min ||
+      filters.max ||
+      filters.category ||
+      filters.chips.length,
+  );
 }
 
-function formatFilterSummary(filters: RecordFilters) {
+function formatFilterSummary(filters: RecordFilters, categoryNames: Record<string, string>) {
+  const parts = getVisibleFilterChips(filters, categoryNames);
+  return parts.length ? parts.join(" · ") : "全部记录";
+}
+
+function getVisibleFilterChips(filters: RecordFilters, categoryNames: Record<string, string>) {
+  if (filters.source === "ai" && filters.chips.length) return filters.chips;
+  return buildFilterChips(filters, categoryNames);
+}
+
+function buildFilterChips(filters: RecordFilters, categoryNames: Record<string, string>) {
   const parts = [
-    filters.type !== "all" ? recordTypeFilterOptions.find((item) => item.value === filters.type)?.label : "",
-    filters.q ? `关键词：${filters.q}` : "",
     filters.start || filters.end ? formatDateRangeLabel(filters.start, filters.end) : "",
-    filters.min || filters.max ? `金额 ${filters.min || "不限"} - ${filters.max || "不限"}` : "",
-  ].filter(Boolean);
-  return parts.join(" / ");
+    filters.type !== "all" ? recordTypeFilterOptions.find((item) => item.value === filters.type)?.label : "",
+    filters.category ? `分类：${formatCategoryFilter(filters.category, categoryNames)}` : "",
+    filters.min || filters.max ? formatAmountRangeLabel(filters) : "",
+    filters.sort === "amount_desc" ? "金额最高" : "",
+    filters.q ? `${filters.source === "ai" ? "搜索" : "关键词"}：${filters.q}` : "",
+  ].filter((part): part is string => Boolean(part));
+  return parts;
 }
 
 function formatDateRangeLabel(start: string, end: string) {
   if (!start && !end) return "全部时间";
+  const today = new Date();
+  const currentYear = today.getFullYear();
+  if (start === `${currentYear}-01-01` && end === `${currentYear}-12-31`) return "今年";
   if (start && end) return `${start} 至 ${end}`;
   if (start) return `${start} 之后`;
   return `${end} 之前`;
+}
+
+function formatCategoryFilter(category: string, categoryNames: Record<string, string>) {
+  return categoryNames[category] ?? category;
+}
+
+function formatAmountRangeLabel(filters: RecordFilters) {
+  const min = filters.min.trim();
+  const max = filters.max.trim();
+  const minSign = filters.minStrict ? ">" : ">=";
+  const maxSign = filters.maxStrict ? "<" : "<=";
+  if (min && max) return `金额 ${minSign} ${min} 且 ${maxSign} ${max}`;
+  if (min) return `金额 ${minSign} ${min}`;
+  return `金额 ${maxSign} ${max}`;
 }
 
 function matchesRecordFilters(
@@ -1117,13 +1114,147 @@ function matchesRecordFilters(
   if (filters.end && occurredAt > filters.end) return false;
   const min = Number(filters.min);
   const max = Number(filters.max);
-  if (filters.min && Number.isFinite(min) && transaction.amount < min) return false;
-  if (filters.max && Number.isFinite(max) && transaction.amount > max) return false;
-  const keyword = filters.q.trim().toLowerCase();
-  if (!keyword) return true;
   const category = transaction.categoryName ?? (transaction.categoryId ? categoryNames[transaction.categoryId] : "");
+  if (filters.min && Number.isFinite(min)) {
+    if (filters.minStrict ? transaction.amount <= min : transaction.amount < min) return false;
+  }
+  if (filters.max && Number.isFinite(max)) {
+    if (filters.maxStrict ? transaction.amount >= max : transaction.amount > max) return false;
+  }
+  if (filters.category) {
+    const target = filters.category.trim().toLowerCase();
+    const categoryText = [transaction.categoryId, category].filter(Boolean).join(" ").toLowerCase();
+    if (!categoryText.includes(target)) return false;
+  }
+  const keyword = filters.source === "ai" ? "" : filters.q.trim().toLowerCase();
+  if (!keyword) return true;
   const searchable = [transaction.note, category, transaction.categoryId].filter(Boolean).join(" ").toLowerCase();
   return searchable.includes(keyword);
+}
+
+function compareRecordTransactions(a: LedgerTransaction, b: LedgerTransaction, sort: RecordSort) {
+  if (sort === "amount_desc" && b.amount !== a.amount) return b.amount - a.amount;
+  const dateDiff = new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime();
+  if (dateDiff !== 0) return dateDiff;
+  return a.id.localeCompare(b.id);
+}
+
+function buildAiBaseFilters(filters: RecordFilters) {
+  return {
+    ...(filters.type === "all" ? {} : { type: filters.type }),
+    sort: filters.sort,
+  };
+}
+
+function getClientTimeZone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Shanghai";
+}
+
+function mergeAiSearchResult(current: RecordFilters, query: string, result: AiTransactionSearchResponse): RecordFilters {
+  const urlFilters = filtersFromAiSearchUrl(result.href ?? result.url);
+  const extracted = extractAiSearchFilters(result);
+  const next: RecordFilters = {
+    ...emptyRecordFilters(),
+    type: current.type,
+    sort: current.sort,
+    ...urlFilters,
+    ...extracted,
+    q: query,
+    source: "ai",
+  };
+  if (!next.chips.length) next.chips = buildFilterChips(next, {});
+  return next;
+}
+
+function filtersFromAiSearchUrl(value: string | undefined) {
+  if (!value) return undefined;
+  try {
+    return readRecordFilters(new URL(value, window.location.origin).searchParams);
+  } catch {
+    return undefined;
+  }
+}
+
+function extractAiSearchFilters(result: AiTransactionSearchResponse): Partial<RecordFilters> {
+  const payload = objectValue(result.filters) ?? objectValue(result.filter) ?? {};
+  const amount = objectValue(payload.amount);
+  const minSource = payload.min ?? payload.minAmount ?? amount?.min;
+  const maxSource = payload.max ?? payload.maxAmount ?? amount?.max;
+  const strict = booleanValue(payload.strict);
+  const strictObject = objectValue(payload.strict);
+  const minObject = objectValue(minSource);
+  const maxObject = objectValue(maxSource);
+  const type = stringValue(payload.type);
+  const sort = stringValue(payload.sort);
+  const category =
+    stringValue(payload.category) ?? stringValue(payload.categoryId) ?? stringValue(payload.categoryName);
+  const chips = normalizeChips(result.chips ?? payload.chips);
+  const extracted: Partial<RecordFilters> = {};
+  if (type === "expense" || type === "income") extracted.type = type;
+  if (sort === "latest" || sort === "amount_desc") extracted.sort = sort;
+  if (chips.length) extracted.chips = chips;
+  const start = stringValue(payload.start) ?? stringValue(payload.from);
+  const end = stringValue(payload.end) ?? stringValue(payload.to);
+  const min = numberStringValue(minSource);
+  const max = numberStringValue(maxSource);
+  if (start) extracted.start = start;
+  if (end) extracted.end = end;
+  if (min) extracted.min = min;
+  if (max) extracted.max = max;
+  if (category) extracted.category = category;
+  const minStrict =
+    booleanValue(payload.minStrict ?? payload.strictMin ?? strictObject?.min ?? minObject?.strict) ?? strict;
+  const maxStrict =
+    booleanValue(payload.maxStrict ?? payload.strictMax ?? strictObject?.max ?? maxObject?.strict) ?? strict;
+  if (minStrict !== undefined) extracted.minStrict = minStrict;
+  if (maxStrict !== undefined) extracted.maxStrict = maxStrict;
+  return extracted;
+}
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function numberStringValue(value: unknown): string | undefined {
+  const object = objectValue(value);
+  if (object) return numberStringValue(object.value ?? object.amount);
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) return value.trim();
+  return undefined;
+}
+
+function booleanValue(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes"].includes(normalized)) return true;
+  if (["0", "false", "no"].includes(normalized)) return false;
+  return undefined;
+}
+
+function normalizeChips(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
+  if (typeof value === "string") return readChips(value);
+  return [];
+}
+
+function readChips(value: string | null) {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (Array.isArray(parsed)) return parsed.map((item) => String(item).trim()).filter(Boolean);
+  } catch {
+    // Fall through to the compact URL format.
+  }
+  return value.split("|").map((item) => item.trim()).filter(Boolean);
+}
+
+function writeChips(chips: string[]) {
+  return chips.map((item) => item.trim()).filter(Boolean).join("|");
 }
 
 function formatDateLabel(value: string) {

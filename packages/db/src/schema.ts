@@ -189,6 +189,62 @@ export const aiProviderConfigs = sqliteTable("ai_provider_configs", {
   baseUrl: text("base_url"),
   ...timestamps,
 });
+export const aiConfirmations = sqliteTable(
+  "ai_confirmations",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    bookId: text("book_id"),
+    action: text("action").notNull(),
+    status: text("status").notNull(),
+    payload: text("payload").notNull(),
+    result: text("result"),
+    expiresAt: text("expires_at").notNull(),
+    confirmedAt: text("confirmed_at"),
+    cancelledAt: text("cancelled_at"),
+    ...timestamps,
+  },
+  (t) => [index("ai_confirmations_user_status").on(t.userId, t.status)],
+);
+export const aiActionAuditLogs = sqliteTable(
+  "ai_action_audit_logs",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    bookId: text("book_id"),
+    action: text("action").notNull(),
+    targetType: text("target_type"),
+    targetId: text("target_id"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    status: text("status").notNull(),
+    payload: text("payload").notNull(),
+    result: text("result"),
+    errorMessage: text("error_message"),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("ai_action_audit_idempotency").on(t.idempotencyKey),
+    index("ai_action_audit_book").on(t.bookId),
+  ],
+);
+export const aiTasks = sqliteTable(
+  "ai_tasks",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    bookId: text("book_id"),
+    kind: text("kind").notNull(),
+    status: text("status").notNull(),
+    sourceType: text("source_type"),
+    sourceId: text("source_id"),
+    payload: text("payload"),
+    result: text("result"),
+    errorMessage: text("error_message"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [index("ai_tasks_user_status").on(t.userId, t.status), index("ai_tasks_source").on(t.sourceType, t.sourceId)],
+);
 export const refreshTokens = sqliteTable(
   "refresh_tokens",
   {

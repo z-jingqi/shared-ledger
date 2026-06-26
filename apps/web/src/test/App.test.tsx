@@ -1,10 +1,12 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LedgerTransaction } from "../components/ledger/Transactions";
 
+type MockAiPart = { type: string; text?: string; [key: string]: unknown };
+
 const aiMocks = vi.hoisted(() => ({
-  messages: [] as Array<{ id: string; role: "user" | "assistant"; parts: Array<{ type: "text"; text: string }> }>,
+  messages: [] as Array<{ id: string; role: "user" | "assistant"; parts: MockAiPart[] }>,
   sendMessage: vi.fn(),
   stop: vi.fn(),
   status: "ready",
@@ -47,6 +49,21 @@ let importBatchRequests: Array<{
   autoConfirm: FormDataEntryValue | null;
 }> = [];
 let importCancelRequests: string[] = [];
+let aiSearchRequests: Array<{
+  bookId?: string;
+  query?: string;
+  baseFilters?: Record<string, unknown>;
+  timeZone?: string;
+}> = [];
+let aiChatRequests: Array<{
+  message?: string;
+  bookId?: string;
+  page?: string;
+  conversationId?: string;
+  attachmentRequestId?: string;
+  attachments?: Array<{ id: string; name: string; type: string; size: number; lastModified: number }>;
+}> = [];
+let aiConfirmationRequests: string[] = [];
 const json = (data: unknown) =>
   new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/json" } });
 const errorJson = (status: number, error: string) =>
@@ -80,6 +97,9 @@ describe("shared ledger mobile UI", () => {
     transactionRequests = [];
     importBatchRequests = [];
     importCancelRequests = [];
+    aiSearchRequests = [];
+    aiChatRequests = [];
+    aiConfirmationRequests = [];
     aiMocks.messages = [];
     aiMocks.sendMessage.mockReset();
     aiMocks.stop.mockReset();
@@ -136,6 +156,140 @@ describe("shared ledger mobile UI", () => {
           );
         }
         if (path.includes("/auth/login") && loginError) return Promise.resolve(errorJson(401, loginError));
+        if (path.includes("/ai/search/transactions")) {
+          const body = JSON.parse(bodyText ?? "{}") as (typeof aiSearchRequests)[number];
+          aiSearchRequests.push(body);
+          return Promise.resolve(
+            json({
+              filters: {
+                type: "expense",
+                sort: body.baseFilters?.sort ?? "latest",
+                start: "2026-01-01",
+                end: "2026-12-31",
+                min: { value: 100, strict: true },
+                category: "cat_food",
+              },
+              chips: ["今年", "支出", "餐饮", "金额 > 100"],
+            }),
+          );
+        }
+        if (path.includes("/ai/chat")) {
+          const body = JSON.parse(bodyText ?? "{}") as (typeof aiChatRequests)[number];
+          aiChatRequests.push(body);
+          if (body.attachments?.length) {
+            if (body.message?.includes("backend-save")) {
+              return Promise.resolve(json({ conversationId: "conversation_test", attachmentAction: { action: "save" }, parts: [] }));
+            }
+            if (body.message?.includes("backend-ignore")) {
+              return Promise.resolve(json({ conversationId: "conversation_test", attachmentAction: { action: "ignore" }, parts: [] }));
+            }
+            return Promise.resolve(
+              json({
+                conversationId: "conversation_test",
+                parts: [
+                  {
+                    type: "confirmation-card",
+                    confirmation: {
+                      id: "local_attachment",
+                      action: "save-attachments",
+                      status: "pending",
+                      expiresAt: new Date(Date.now() + 10_000).toISOString(),
+                      summary: "保存这些附件？",
+                      confirmLabel: "保存",
+                      cancelLabel: "取消",
+                    },
+                  },
+                ],
+              }),
+            );
+          }
+          if (body.message?.includes("确认动作")) {
+            return Promise.resolve(
+              json({
+                conversationId: "conversation_test",
+                message: {
+                  id: "ai_generic_confirmation",
+                  role: "assistant",
+                  parts: [
+                    { type: "tool-status", tool: "analyze-records", status: "pending_confirmation", message: "请确认结算动作" },
+                    {
+                      type: "confirmation-card",
+                      confirmation: {
+                        id: "confirmation_generic",
+                        action: "close-period",
+                        status: "pending",
+                        expiresAt: new Date(Date.now() + 10_000).toISOString(),
+                        summary: "确认结算本月账本",
+                        confirmLabel: "确认结算",
+                        cancelLabel: "取消",
+                      },
+                    },
+                  ],
+                },
+              }),
+            );
+          }
+          if (body.message?.includes("搜索")) {
+            return Promise.resolve(
+              json({
+                conversationId: "conversation_test",
+                message: {
+                  id: "ai_search",
+                  role: "assistant",
+                  parts: [
+                    { type: "tool-status", tool: "search-records", status: "success", message: "找到 1 条记录" },
+                    {
+                      type: "search-result-card",
+                      title: "搜索结果",
+                      summary: "找到 1 条记录",
+                      results: [{ id: "tx_home", title: "餐饮", description: "餐饮 · 2026-06-01", amount: 100 }],
+                      pageName: "记录页",
+                      href: "/records?bookId=book_test&source=ai",
+                    },
+                    { type: "navigation-card", pageName: "记录页", href: "/records?bookId=book_test&source=ai" },
+                  ],
+                },
+              }),
+            );
+          }
+          return Promise.resolve(
+            json({
+              conversationId: "conversation_test",
+              message: {
+                id: "ai_record",
+                role: "assistant",
+                parts: [
+                  { type: "tool-status", tool: "create-record", status: "success", message: "记录已保存" },
+                  {
+                    type: "record-card",
+                    title: "已记录",
+                    amount: 38,
+                    categoryName: "餐饮",
+                    note: body.message,
+                    occurredAt: "2026-06-25",
+                    pageName: "记录详情",
+                    href: "/records/tx_ai",
+                  },
+                ],
+              },
+            }),
+          );
+        }
+        if (path.includes("/ai/confirmations/confirmation_generic/confirm")) {
+          aiConfirmationRequests.push(path);
+          return Promise.resolve(
+            json({
+              parts: [
+                { type: "tool-status", tool: "analyze-records", status: "success", label: "结算已确认", message: "后端已完成确认动作" },
+                { type: "navigation-card", pageName: "分析", description: "查看结算结果", href: "/analysis?bookId=book_test" },
+              ],
+            }),
+          );
+        }
+        if (path.includes("/ai/confirmations/confirmation_generic/cancel")) {
+          aiConfirmationRequests.push(path);
+          return Promise.resolve(json({ confirmation: { id: "confirmation_generic", status: "cancelled" } }));
+        }
         if (path.includes("/books/book_test/categories")) {
           if (method === "POST") {
             const body = JSON.parse(bodyText ?? "{}") as { name?: string; type?: "expense" | "income" };
@@ -227,6 +381,9 @@ describe("shared ledger mobile UI", () => {
       }),
     );
   });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
   it("loads a real book response and hides AI for a free user", async () => {
     render(<App />);
     expect(await screen.findByRole("button", { name: /切换账本，当前账本 家庭账本/ })).toBeInTheDocument();
@@ -289,6 +446,74 @@ describe("shared ledger mobile UI", () => {
     expect(screen.getByText("已筛选出 12 笔记录。").closest("article")).toHaveClass("ai-message", "ai-assistant");
     expect(container.querySelector(".ai-message time")).toBeNull();
   });
+  it("renders AI navigation parts as page-name cards instead of raw URLs", async () => {
+    const user = userEvent.setup();
+    plan = "pro";
+    aiMocks.messages = [
+      { id: "assistant_message", role: "assistant", parts: [{ type: "navigation-card", pageName: "待确认记录", href: "/records/pending?bookId=book_test" }] },
+    ];
+    render(<App />);
+
+    await user.click(await screen.findByLabelText("打开 AI 助手"));
+
+    expect(await screen.findByRole("button", { name: "打开待确认记录" })).toBeInTheDocument();
+    expect(screen.getByText("待确认记录")).toBeInTheDocument();
+    expect(screen.queryByText("/records/pending?bookId=book_test")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "打开待确认记录" }));
+    expect(window.location.pathname).toBe("/records/pending");
+  });
+  it("sends AI text to the action API and renders structured response cards", async () => {
+    const user = userEvent.setup();
+    plan = "pro";
+    render(<App />);
+
+    await user.click(await screen.findByLabelText("打开 AI 助手"));
+    await user.type(await screen.findByPlaceholderText("输入消息..."), "昨天午饭 38");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => expect(aiChatRequests).toHaveLength(1));
+    expect(aiChatRequests[0]).toMatchObject({ message: "昨天午饭 38", bookId: "book_test" });
+    expect(await screen.findByText("已记录")).toBeInTheDocument();
+    expect(screen.getByText("餐饮 · 昨天午饭 38 · 2026-06-25")).toBeInTheDocument();
+  });
+  it("renders AI search result parts as structured cards without raw links", async () => {
+    const user = userEvent.setup();
+    plan = "pro";
+    render(<App />);
+
+    await user.click(await screen.findByLabelText("打开 AI 助手"));
+    await user.type(await screen.findByPlaceholderText("输入消息..."), "搜索餐饮");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(await screen.findByText("搜索结果")).toBeInTheDocument();
+    expect(screen.getAllByText("找到 1 条记录").length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "打开记录页" }).length).toBeGreaterThan(0);
+    expect(screen.queryByText("/records?bookId=book_test&source=ai")).not.toBeInTheDocument();
+  });
+  it("moves generic AI confirmations to the composer confirmation bar and renders confirm response parts", async () => {
+    const user = userEvent.setup();
+    plan = "pro";
+    render(<App />);
+
+    await user.click(await screen.findByLabelText("打开 AI 助手"));
+    await user.type(await screen.findByPlaceholderText("输入消息..."), "确认动作");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    const confirmation = await screen.findByLabelText("AI 操作确认");
+    expect(within(confirmation).getByText("确认结算本月账本")).toBeInTheDocument();
+    expect(within(confirmation).getByRole("button", { name: "确认结算" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "确认" })).not.toBeInTheDocument();
+
+    await user.click(within(confirmation).getByRole("button", { name: "确认结算" }));
+    await waitFor(() =>
+      expect(aiConfirmationRequests).toEqual(
+        expect.arrayContaining([expect.stringContaining("/ai/confirmations/confirmation_generic/confirm")]),
+      ),
+    );
+    expect(await screen.findByText("结算已确认")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "打开分析" })).toBeInTheDocument();
+  });
   it("shows image and document attachment previews inside the AI composer and removes them", async () => {
     const user = userEvent.setup();
     plan = "pro";
@@ -304,6 +529,7 @@ describe("shared ledger mobile UI", () => {
     expect(screen.getByAltText("receipt.jpg")).toBeInTheDocument();
     expect(screen.getByText("PDF")).toBeInTheDocument();
     expect(screen.getByText("invoice.pdf")).toBeInTheDocument();
+    expect(container.querySelector(".ai-composer .import-attachment-card")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "移除 receipt.jpg" }));
     expect(screen.queryByAltText("receipt.jpg")).not.toBeInTheDocument();
@@ -322,7 +548,7 @@ describe("shared ledger mobile UI", () => {
     expect(container.querySelector(".ai-composer .import-attachment-card")).toBeNull();
     expect(importBatchRequests).toHaveLength(0);
   });
-  it("asks before saving AI attachments and confirmation calls the real import upload API", async () => {
+  it("shows a pending confirmation bar before saving AI attachments and calls the real import upload API", async () => {
     const user = userEvent.setup();
     plan = "pro";
     const { container } = render(<App />);
@@ -332,10 +558,16 @@ describe("shared ledger mobile UI", () => {
     await user.upload(fileInput, new File(["pdf"], "invoice.pdf", { type: "application/pdf" }));
     await user.click(screen.getByRole("button", { name: "发送" }));
 
-    expect(await screen.findByText("我已收到 1 个文件。需要保存到当前账本吗？")).toBeInTheDocument();
+    const confirmation = await screen.findByLabelText("附件保存确认");
+    expect(aiChatRequests.at(-1)?.attachments?.[0]).toMatchObject({ name: "invoice.pdf", type: "application/pdf" });
+    expect(within(confirmation).getByText("保存这些附件？")).toBeInTheDocument();
+    expect(within(confirmation).getByText("invoice.pdf")).toBeInTheDocument();
+    expect(within(confirmation).getByRole("button", { name: "保存" })).toBeInTheDocument();
+    expect(within(confirmation).getByRole("button", { name: "取消" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "保存并识别" })).not.toBeInTheDocument();
     expect(importBatchRequests).toHaveLength(0);
 
-    await user.click(screen.getByRole("button", { name: "保存并识别" }));
+    await user.click(within(confirmation).getByRole("button", { name: "保存" }));
 
     await waitFor(() => expect(importBatchRequests).toHaveLength(1));
     expect(importBatchRequests[0]).toMatchObject({
@@ -344,6 +576,79 @@ describe("shared ledger mobile UI", () => {
     });
     expect(await screen.findByText("文件已提交，正在等待真实处理状态。")).toBeInTheDocument();
     expect(await screen.findByText("OCR 12%")).toBeInTheDocument();
+  });
+  it("uses backend save intent for AI attachments before uploading", async () => {
+    const user = userEvent.setup();
+    plan = "pro";
+    const { container } = render(<App />);
+    await user.click(await screen.findByLabelText("打开 AI 助手"));
+    const fileInput = container.querySelector('.ai-composer input[type="file"]') as HTMLInputElement;
+
+    await user.upload(fileInput, new File(["pdf"], "invoice.pdf", { type: "application/pdf" }));
+    await user.type(await screen.findByPlaceholderText("输入消息..."), "backend-save");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => expect(aiChatRequests.at(-1)?.attachments?.[0]).toMatchObject({ name: "invoice.pdf" }));
+    await waitFor(() => expect(importBatchRequests).toHaveLength(1));
+    expect(screen.queryByLabelText("附件保存确认")).not.toBeInTheDocument();
+    expect(importBatchRequests[0].files).toEqual(["invoice.pdf"]);
+  });
+  it("uses backend ignore intent to remove pending AI attachments without uploading", async () => {
+    const user = userEvent.setup();
+    plan = "pro";
+    const { container } = render(<App />);
+    await user.click(await screen.findByLabelText("打开 AI 助手"));
+    const fileInput = container.querySelector('.ai-composer input[type="file"]') as HTMLInputElement;
+
+    await user.upload(fileInput, new File(["pdf"], "invoice.pdf", { type: "application/pdf" }));
+    await user.click(screen.getByRole("button", { name: "发送" }));
+    expect(await screen.findByLabelText("附件保存确认")).toBeInTheDocument();
+
+    await user.type(await screen.findByPlaceholderText("输入消息..."), "backend-ignore");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => expect(screen.queryByLabelText("附件保存确认")).not.toBeInTheDocument());
+    expect(importBatchRequests).toHaveLength(0);
+    expect(container.querySelector(".ai-composer .import-attachment-card")).toBeNull();
+  });
+  it("cancels pending AI attachment confirmation without uploading", async () => {
+    const user = userEvent.setup();
+    plan = "pro";
+    const { container } = render(<App />);
+    await user.click(await screen.findByLabelText("打开 AI 助手"));
+    const fileInput = container.querySelector('.ai-composer input[type="file"]') as HTMLInputElement;
+
+    await user.upload(fileInput, new File(["pdf"], "invoice.pdf", { type: "application/pdf" }));
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    const confirmation = await screen.findByLabelText("附件保存确认");
+    await user.click(within(confirmation).getByRole("button", { name: "取消" }));
+
+    expect(screen.queryByLabelText("附件保存确认")).not.toBeInTheDocument();
+    expect(importBatchRequests).toHaveLength(0);
+    expect(container.querySelector(".ai-composer .import-attachment-card")).toBeNull();
+  });
+  it("times out pending AI attachment confirmation and removes it", async () => {
+    const user = userEvent.setup();
+    plan = "pro";
+    const { container } = render(<App />);
+    await user.click(await screen.findByLabelText("打开 AI 助手"));
+    const fileInput = container.querySelector('.ai-composer input[type="file"]') as HTMLInputElement;
+
+    await user.upload(fileInput, new File(["pdf"], "invoice.pdf", { type: "application/pdf" }));
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(await screen.findByLabelText("附件保存确认")).toBeInTheDocument();
+    vi.useFakeTimers();
+    act(() => {
+      fireEvent.change(screen.getByPlaceholderText("输入消息..."), { target: { value: " " } });
+    });
+    act(() => {
+      vi.advanceTimersByTime(10_500);
+    });
+
+    expect(screen.queryByLabelText("附件保存确认")).not.toBeInTheDocument();
+    expect(importBatchRequests).toHaveLength(0);
   });
   it("falls back to the first book when the last active book is unavailable", async () => {
     window.localStorage.setItem("shared-ledger:last-active-book-id", "missing_book");
@@ -448,7 +753,7 @@ describe("shared ledger mobile UI", () => {
     await waitFor(() => expect(importCancelRequests).toHaveLength(1));
     await waitFor(() => expect(screen.queryByAltText("receipt.png")).not.toBeInTheDocument());
   });
-  it("filters records through URL parameters", async () => {
+  it("keeps base record filters and sort in URL parameters", async () => {
     const user = userEvent.setup();
     transactionsByBook = {
       ...transactionsByBook,
@@ -459,7 +764,7 @@ describe("shared ledger mobile UI", () => {
       ],
     };
     window.history.pushState({}, "", "/records?bookId=book_test");
-    render(<App />);
+    const { container } = render(<App />);
 
     expect(await screen.findByRole("heading", { name: "家庭账本" })).toBeInTheDocument();
     await waitFor(() =>
@@ -470,23 +775,111 @@ describe("shared ledger mobile UI", () => {
 
     await user.click(screen.getByRole("button", { name: "筛选记录" }));
     await user.click(await screen.findByRole("button", { name: "支出" }));
+    await user.click(screen.getByRole("button", { name: "金额最高" }));
     await user.click(screen.getByRole("button", { name: "应用筛选" }));
     expect(window.location.search).toContain("type=expense");
+    expect(window.location.search).toContain("sort=amount_desc");
     expect((await screen.findAllByText("早餐")).length).toBeGreaterThan(0);
-    expect(screen.queryByText("工资")).not.toBeInTheDocument();
-
-    await user.clear(screen.getByPlaceholderText("搜索记录、分类或备注"));
-    await user.type(screen.getByPlaceholderText("搜索记录、分类或备注"), "打车");
-    expect(window.location.search).toContain("q=%E6%89%93%E8%BD%A6");
     expect(screen.getByText("打车")).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByText("早餐")).not.toBeInTheDocument());
+    expect(screen.queryByText("工资")).not.toBeInTheDocument();
+    const rowTitles = [...container.querySelectorAll(".transaction-copy strong")].map((item) => item.textContent);
+    expect(rowTitles.slice(0, 2)).toEqual(["早餐", "打车"]);
 
     await user.click(screen.getByRole("button", { name: "筛选记录" }));
     const resetButtons = await screen.findAllByRole("button", { name: "重置" });
     await user.click(resetButtons[resetButtons.length - 1]);
     expect(window.location.search).not.toContain("type=");
+    expect(window.location.search).not.toContain("sort=");
     expect(window.location.search).not.toContain("q=");
     expect((await screen.findAllByText("工资")).length).toBeGreaterThan(0);
+  });
+  it("runs natural language AI record search and persists returned filters", async () => {
+    const user = userEvent.setup();
+    transactionsByBook = {
+      ...transactionsByBook,
+      book_test: [
+        { id: "tx_breakfast", type: "expense", amount: 100, note: "早餐", occurredAt: "2026-06-01", categoryId: "cat_food" },
+        { id: "tx_party", type: "expense", amount: 120, note: "年会餐费", occurredAt: "2026-06-15", categoryId: "cat_food" },
+        { id: "tx_salary", type: "income", amount: 8000, note: "工资", occurredAt: "2026-06-20", categoryId: "cat_salary" },
+        { id: "tx_old", type: "expense", amount: 300, note: "去年餐费", occurredAt: "2025-12-31", categoryId: "cat_food" },
+      ],
+    };
+    window.history.pushState({}, "", "/records?bookId=book_test");
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "家庭账本" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "筛选记录" }));
+    await user.click(await screen.findByRole("button", { name: "支出" }));
+    await user.click(screen.getByRole("button", { name: "金额最高" }));
+    await user.click(screen.getByRole("button", { name: "应用筛选" }));
+
+    await user.type(screen.getByLabelText("自然语言搜索记录"), "今年大于100的餐饮支出");
+    await user.click(screen.getByRole("button", { name: "AI 搜索记录" }));
+
+    await waitFor(() => expect(aiSearchRequests).toHaveLength(1));
+    expect(aiSearchRequests[0]).toMatchObject({
+      bookId: "book_test",
+      query: "今年大于100的餐饮支出",
+      baseFilters: { type: "expense", sort: "amount_desc" },
+    });
+    expect(aiSearchRequests[0]?.timeZone).toEqual(expect.any(String));
+    expect(window.location.search).toContain("source=ai");
+    expect(window.location.search).toContain("q=%E4%BB%8A%E5%B9%B4%E5%A4%A7%E4%BA%8E100");
+    expect(window.location.search).toContain("min=100");
+    expect(window.location.search).toContain("minStrict=1");
+    expect(window.location.search).toContain("category=cat_food");
+    expect(await screen.findByText("AI 已筛选")).toBeInTheDocument();
+    expect(await screen.findByText("年会餐费")).toBeInTheDocument();
+    expect(screen.queryByText("早餐")).not.toBeInTheDocument();
+    expect(screen.queryByText("工资")).not.toBeInTheDocument();
+    expect(screen.queryByText("去年餐费")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("AI 筛选条件")).toHaveTextContent("餐饮");
+  });
+  it("shows and clears AI record filters from URL parameters", async () => {
+    const user = userEvent.setup();
+    transactionsByBook = {
+      ...transactionsByBook,
+      book_test: [
+        { id: "tx_breakfast", type: "expense", amount: 100, note: "早餐", occurredAt: "2026-06-01", categoryId: "cat_food" },
+        { id: "tx_party", type: "expense", amount: 120, note: "年会餐费", occurredAt: "2026-06-15", categoryId: "cat_food" },
+        { id: "tx_salary", type: "income", amount: 8000, note: "工资", occurredAt: "2026-06-20", categoryId: "cat_salary" },
+        { id: "tx_old", type: "expense", amount: 300, note: "去年餐费", occurredAt: "2025-12-31", categoryId: "cat_food" },
+      ],
+    };
+    const aiParams = new URLSearchParams({
+      bookId: "book_test",
+      type: "expense",
+      start: "2026-01-01",
+      end: "2026-12-31",
+      min: "100",
+      source: "ai",
+      sort: "latest",
+      chips: "今年|支出|金额 > 100",
+      minStrict: "1",
+    });
+    window.history.pushState({}, "", `/records?${aiParams.toString()}`);
+    const firstRender = render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "家庭账本" })).toBeInTheDocument();
+    const summary = await screen.findByText("已筛选：今年 · 支出 · 金额 > 100");
+    expect(summary.closest(".active-filter-summary")).toHaveClass("ai-filter");
+    expect(await screen.findByText("年会餐费")).toBeInTheDocument();
+    expect(screen.queryByText("早餐")).not.toBeInTheDocument();
+    expect(screen.queryByText("工资")).not.toBeInTheDocument();
+    expect(screen.queryByText("去年餐费")).not.toBeInTheDocument();
+
+    firstRender.unmount();
+    render(<App />);
+    expect(await screen.findByText("已筛选：今年 · 支出 · 金额 > 100")).toBeInTheDocument();
+    expect(await screen.findByText("年会餐费")).toBeInTheDocument();
+    expect(screen.queryByText("工资")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "清除" }));
+    expect(window.location.search).toBe("?bookId=book_test");
+    expect(await screen.findByText("早餐")).toBeInTheDocument();
+    expect((await screen.findAllByText("工资")).length).toBeGreaterThan(0);
+    expect(await screen.findByText("去年餐费")).toBeInTheDocument();
+    expect(screen.queryByText("已筛选：今年 · 支出 · 金额 > 100")).not.toBeInTheDocument();
   });
   it("renders the redesigned record form without native category and date fields", async () => {
     const user = userEvent.setup();

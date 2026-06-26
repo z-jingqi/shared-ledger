@@ -1,6 +1,6 @@
 import type { AiProviderName } from "@shared-ledger/shared";
 import type { Book, Member, Transaction } from "./types";
-import type { ImportedRecord, ImportJob, Invitation, SimpleEntity } from "./store";
+import type { AiActionAuditLog, AiConfirmation, AiTask, ImportedRecord, ImportJob, Invitation, SimpleEntity } from "./store";
 
 type Row = Record<string, any>;
 const now = () => new Date().toISOString();
@@ -47,6 +47,62 @@ const mapInvitation = (row: Row): Invitation => ({
   ...(row.lastRemindedAt ? { lastRemindedAt: row.lastRemindedAt } : {}),
 });
 
+const parseJson = (value: unknown) => {
+  if (typeof value !== "string" || !value) return undefined;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+};
+
+const escapeLike = (value: string) => value.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
+
+const mapAiConfirmation = (row: Row): AiConfirmation => ({
+  id: row.id,
+  userId: row.userId,
+  ...(row.bookId ? { bookId: row.bookId } : {}),
+  action: row.action,
+  status: row.status,
+  payload: parseJson(row.payload) ?? {},
+  ...(row.result ? { result: parseJson(row.result) ?? {} } : {}),
+  expiresAt: row.expiresAt,
+  ...(row.confirmedAt ? { confirmedAt: row.confirmedAt } : {}),
+  ...(row.cancelledAt ? { cancelledAt: row.cancelledAt } : {}),
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
+});
+
+const mapAiActionAuditLog = (row: Row): AiActionAuditLog => ({
+  id: row.id,
+  userId: row.userId,
+  ...(row.bookId ? { bookId: row.bookId } : {}),
+  action: row.action,
+  ...(row.targetType ? { targetType: row.targetType } : {}),
+  ...(row.targetId ? { targetId: row.targetId } : {}),
+  idempotencyKey: row.idempotencyKey,
+  status: row.status,
+  payload: parseJson(row.payload) ?? {},
+  ...(row.result ? { result: parseJson(row.result) ?? {} } : {}),
+  ...(row.errorMessage ? { errorMessage: row.errorMessage } : {}),
+  createdAt: row.createdAt,
+});
+
+const mapAiTask = (row: Row): AiTask => ({
+  id: row.id,
+  userId: row.userId,
+  ...(row.bookId ? { bookId: row.bookId } : {}),
+  kind: row.kind,
+  status: row.status,
+  ...(row.sourceType ? { sourceType: row.sourceType } : {}),
+  ...(row.sourceId ? { sourceId: row.sourceId } : {}),
+  ...(row.payload ? { payload: parseJson(row.payload) ?? {} } : {}),
+  ...(row.result ? { result: parseJson(row.result) ?? {} } : {}),
+  ...(row.errorMessage ? { errorMessage: row.errorMessage } : {}),
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
+});
+
 const mapImportJob = (row: Row): ImportJob => ({
   id: row.id,
   bookId: row.bookId,
@@ -86,6 +142,12 @@ const mapImportJob = (row: Row): ImportJob => ({
 
 const importJobColumns =
   "id,book_id AS bookId,user_id AS userId,file_name AS fileName,file_type AS fileType,r2_key AS r2Key,status,auto_confirm AS autoConfirm,error_message AS errorMessage,error_code AS errorCode,error_stage AS errorStage,error_request_id AS errorRequestId,error_retryable AS errorRetryable,error_terminal AS errorTerminal,failed_external_job_id AS failedExternalJobId,cancelable,retryable,retry_count AS retryCount,convert_job_id AS convertJobId,convert_event_sequence AS convertEventSequence,converted_r2_key AS convertedR2Key,converted_file_type AS convertedFileType,ocr_job_id AS ocrJobId,ocr_submitted_at AS ocrSubmittedAt,ocr_progress AS ocrProgress,ocr_stage AS ocrStage,ocr_current_page AS ocrCurrentPage,ocr_total_pages AS ocrTotalPages,ocr_completed_at AS ocrCompletedAt,ocr_event_sequence AS ocrEventSequence,created_at AS createdAt,updated_at AS updatedAt";
+const aiConfirmationColumns =
+  "id,user_id AS userId,book_id AS bookId,action,status,payload,result,expires_at AS expiresAt,confirmed_at AS confirmedAt,cancelled_at AS cancelledAt,created_at AS createdAt,updated_at AS updatedAt";
+const aiActionAuditColumns =
+  "id,user_id AS userId,book_id AS bookId,action,target_type AS targetType,target_id AS targetId,idempotency_key AS idempotencyKey,status,payload,result,error_message AS errorMessage,created_at AS createdAt";
+const aiTaskColumns =
+  "id,user_id AS userId,book_id AS bookId,kind,status,source_type AS sourceType,source_id AS sourceId,payload,result,error_message AS errorMessage,created_at AS createdAt,updated_at AS updatedAt";
 
 const mapRecord = (row: Row): ImportedRecord => ({
   id: row.id,
@@ -467,6 +529,85 @@ export class D1LedgerRepository {
     return row ? mapSimple(row) : null;
   }
 
+  async findOrCreateCategory(bookId: string, name: string, type: "income" | "expense") {
+    const existing = await this.findCategoryByName(bookId, name);
+    if (existing) return existing;
+    return this.createSimple("categories", bookId, {
+      name,
+      type,
+      icon: type === "income" ? "wallet" : "tag",
+      sortOrder: 0,
+    });
+  }
+
+  async searchTransactions(
+    bookId: string,
+    filters: {
+      type?: "income" | "expense";
+      minAmount?: number;
+      maxAmount?: number;
+      from?: string;
+      to?: string;
+      categoryId?: string;
+      categoryName?: string;
+      q?: string;
+      sort?: "date_desc" | "date_asc" | "amount_desc" | "amount_asc";
+    },
+  ) {
+    const clauses = ["book_id = ?", "deleted_at IS NULL"];
+    const values: unknown[] = [bookId];
+    if (filters.type) {
+      clauses.push("type = ?");
+      values.push(filters.type);
+    }
+    if (filters.minAmount !== undefined) {
+      clauses.push("amount_cents > ?");
+      values.push(Math.round(filters.minAmount * 100));
+    }
+    if (filters.maxAmount !== undefined) {
+      clauses.push("amount_cents < ?");
+      values.push(Math.round(filters.maxAmount * 100));
+    }
+    if (filters.from) {
+      clauses.push("occurred_at >= ?");
+      values.push(filters.from);
+    }
+    if (filters.to) {
+      clauses.push("occurred_at <= ?");
+      values.push(filters.to);
+    }
+    if (filters.categoryId) {
+      clauses.push("category_id = ?");
+      values.push(filters.categoryId);
+    }
+    if (filters.categoryName) {
+      clauses.push("category_id IN (SELECT id FROM categories WHERE book_id = ? AND name = ?)");
+      values.push(bookId, filters.categoryName);
+    }
+    if (filters.q) {
+      const keyword = `%${escapeLike(filters.q)}%`;
+      clauses.push(
+        `(note LIKE ? ESCAPE '\\' OR EXISTS (
+          SELECT 1 FROM transaction_items
+          WHERE transaction_items.transaction_id = transactions.id
+            AND (name LIKE ? ESCAPE '\\' OR note LIKE ? ESCAPE '\\')
+        ))`,
+      );
+      values.push(keyword, keyword, keyword);
+    }
+    const orderBy = {
+      date_desc: "occurred_at DESC, created_at DESC",
+      date_asc: "occurred_at ASC, created_at ASC",
+      amount_desc: "amount_cents DESC, occurred_at DESC",
+      amount_asc: "amount_cents ASC, occurred_at DESC",
+    }[filters.sort ?? "date_desc"];
+    const result = await this.db
+      .prepare(`${this.transactionSelect} WHERE ${clauses.join(" AND ")} ORDER BY ${orderBy}`)
+      .bind(...values)
+      .all<Row>();
+    return Promise.all(result.results.map((row) => this.mapTransaction(row)));
+  }
+
   async findMember(bookId: string, userId: string) {
     const row = await this.db
       .prepare(
@@ -610,10 +751,11 @@ export class D1LedgerRepository {
   async findPendingInvitation(bookId: string, email?: string, phone?: string) {
     return this.db
       .prepare(
-        "SELECT id FROM invitations WHERE book_id=? AND status='pending' AND (invitee_email=? OR invitee_phone=?) LIMIT 1",
+        "SELECT id,book_id AS bookId,inviter_user_id AS inviterUserId,invitee_email AS inviteeEmail,invitee_phone AS inviteePhone,invitee_user_id AS inviteeUserId,role,status,expires_at AS expiresAt,last_reminded_at AS lastRemindedAt FROM invitations WHERE book_id=? AND status='pending' AND ((? != '' AND invitee_email=?) OR (? != '' AND invitee_phone=?)) LIMIT 1",
       )
-      .bind(bookId, email ?? "", phone ?? "")
-      .first();
+      .bind(bookId, email ?? "", email ?? "", phone ?? "", phone ?? "")
+      .first<Row>()
+      .then((row) => (row ? mapInvitation(row) : null));
   }
   async updateInvitation(
     invitationId: string,
@@ -682,6 +824,13 @@ export class D1LedgerRepository {
     const result = await this.db
       .prepare(`SELECT ${importJobColumns} FROM import_jobs WHERE book_id=? ORDER BY created_at DESC`)
       .bind(bookId)
+      .all<Row>();
+    return result.results.map(mapImportJob);
+  }
+  async listImportJobsForUser(userId: string) {
+    const result = await this.db
+      .prepare(`SELECT ${importJobColumns} FROM import_jobs WHERE user_id=? ORDER BY created_at DESC`)
+      .bind(userId)
       .all<Row>();
     return result.results.map(mapImportJob);
   }
@@ -952,6 +1101,202 @@ export class D1LedgerRepository {
       .bind(JSON.stringify(updated.suggestedTransaction), updated.status, now(), recordId)
       .run();
     return updated;
+  }
+
+  async createAiConfirmation(input: {
+    userId: string;
+    bookId?: string;
+    action: AiConfirmation["action"];
+    payload: Record<string, unknown>;
+    expiresAt?: string;
+  }) {
+    const timestamp = now();
+    const confirmation: AiConfirmation = {
+      id: id("ai_confirmation"),
+      userId: input.userId,
+      ...(input.bookId ? { bookId: input.bookId } : {}),
+      action: input.action,
+      status: "pending",
+      payload: input.payload,
+      expiresAt: input.expiresAt ?? new Date(Date.now() + 10 * 60_000).toISOString(),
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    await this.db
+      .prepare(
+        "INSERT INTO ai_confirmations (id,user_id,book_id,action,status,payload,expires_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+      )
+      .bind(
+        confirmation.id,
+        confirmation.userId,
+        confirmation.bookId ?? null,
+        confirmation.action,
+        confirmation.status,
+        JSON.stringify(confirmation.payload),
+        confirmation.expiresAt,
+        timestamp,
+        timestamp,
+      )
+      .run();
+    return confirmation;
+  }
+
+  async getAiConfirmation(userId: string, confirmationId: string) {
+    const row = await this.db
+      .prepare(`SELECT ${aiConfirmationColumns} FROM ai_confirmations WHERE id=? AND user_id=?`)
+      .bind(confirmationId, userId)
+      .first<Row>();
+    return row ? mapAiConfirmation(row) : null;
+  }
+
+  async findPendingAiInviteConfirmation(bookId: string, email?: string, phone?: string) {
+    const rows = await this.db
+      .prepare(
+        `SELECT ${aiConfirmationColumns} FROM ai_confirmations WHERE book_id=? AND action='invite-member' AND status='pending' ORDER BY created_at DESC LIMIT 20`,
+      )
+      .bind(bookId)
+      .all<Row>();
+    const matched = rows.results
+      .map(mapAiConfirmation)
+      .find((confirmation) => {
+        const payload = confirmation.payload as { email?: string; phone?: string };
+        return Boolean((email && payload.email === email) || (phone && payload.phone === phone));
+      });
+    return matched ?? null;
+  }
+
+  async updateAiConfirmation(
+    confirmationId: string,
+    fields: {
+      status: "pending" | "confirmed" | "cancelled";
+      result?: Record<string, unknown>;
+      confirmedAt?: string | null;
+      cancelledAt?: string | null;
+    },
+  ) {
+    const timestamp = now();
+    await this.db
+      .prepare(
+        "UPDATE ai_confirmations SET status=?,result=?,confirmed_at=?,cancelled_at=?,updated_at=? WHERE id=?",
+      )
+      .bind(
+        fields.status,
+        fields.result ? JSON.stringify(fields.result) : null,
+        fields.confirmedAt ?? null,
+        fields.cancelledAt ?? null,
+        timestamp,
+        confirmationId,
+      )
+      .run();
+  }
+
+  async getAiActionAuditLog(idempotencyKey: string) {
+    const row = await this.db
+      .prepare(`SELECT ${aiActionAuditColumns} FROM ai_action_audit_logs WHERE idempotency_key=?`)
+      .bind(idempotencyKey)
+      .first<Row>();
+    return row ? mapAiActionAuditLog(row) : null;
+  }
+
+  async createAiActionAuditLog(input: {
+    userId: string;
+    bookId?: string;
+    action: string;
+    targetType?: string;
+    targetId?: string;
+    idempotencyKey: string;
+    status: "success" | "error";
+    payload: Record<string, unknown>;
+    result?: Record<string, unknown>;
+    errorMessage?: string;
+  }) {
+    const timestamp = now();
+    const log: AiActionAuditLog = {
+      id: id("ai_audit"),
+      userId: input.userId,
+      ...(input.bookId ? { bookId: input.bookId } : {}),
+      action: input.action,
+      ...(input.targetType ? { targetType: input.targetType } : {}),
+      ...(input.targetId ? { targetId: input.targetId } : {}),
+      idempotencyKey: input.idempotencyKey,
+      status: input.status,
+      payload: input.payload,
+      ...(input.result ? { result: input.result } : {}),
+      ...(input.errorMessage ? { errorMessage: input.errorMessage } : {}),
+      createdAt: timestamp,
+    };
+    await this.db
+      .prepare(
+        `INSERT OR IGNORE INTO ai_action_audit_logs
+         (id,user_id,book_id,action,target_type,target_id,idempotency_key,status,payload,result,error_message,created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+      )
+      .bind(
+        log.id,
+        log.userId,
+        log.bookId ?? null,
+        log.action,
+        log.targetType ?? null,
+        log.targetId ?? null,
+        log.idempotencyKey,
+        log.status,
+        JSON.stringify(log.payload),
+        log.result ? JSON.stringify(log.result) : null,
+        log.errorMessage ?? null,
+        timestamp,
+      )
+      .run();
+    return (await this.getAiActionAuditLog(input.idempotencyKey)) ?? log;
+  }
+
+  async createAiTask(input: {
+    userId: string;
+    bookId?: string;
+    kind: string;
+    status: string;
+    sourceType?: string;
+    sourceId?: string;
+    payload?: Record<string, unknown>;
+  }) {
+    const timestamp = now();
+    const task: AiTask = {
+      id: id("ai_task"),
+      userId: input.userId,
+      ...(input.bookId ? { bookId: input.bookId } : {}),
+      kind: input.kind,
+      status: input.status,
+      ...(input.sourceType ? { sourceType: input.sourceType } : {}),
+      ...(input.sourceId ? { sourceId: input.sourceId } : {}),
+      ...(input.payload ? { payload: input.payload } : {}),
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    await this.db
+      .prepare(
+        "INSERT INTO ai_tasks (id,user_id,book_id,kind,status,source_type,source_id,payload,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+      )
+      .bind(
+        task.id,
+        task.userId,
+        task.bookId ?? null,
+        task.kind,
+        task.status,
+        task.sourceType ?? null,
+        task.sourceId ?? null,
+        task.payload ? JSON.stringify(task.payload) : null,
+        timestamp,
+        timestamp,
+      )
+      .run();
+    return task;
+  }
+
+  async listAiTasks(userId: string) {
+    const result = await this.db
+      .prepare(`SELECT ${aiTaskColumns} FROM ai_tasks WHERE user_id=? ORDER BY created_at DESC`)
+      .bind(userId)
+      .all<Row>();
+    return result.results.map(mapAiTask);
   }
 
   async createConversation(userId: string, bookId: string | undefined, title: string) {

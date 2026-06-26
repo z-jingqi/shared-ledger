@@ -65,6 +65,55 @@ export type SimpleEntity = {
   color?: string;
   sortOrder?: number;
 };
+export type AiConfirmationAction =
+  | "invite-member"
+  | "save-attachments"
+  | "confirm-import-batch"
+  | "cancel-task"
+  | "retry-task"
+  | (string & {});
+export type AiConfirmation = {
+  id: string;
+  userId: string;
+  bookId?: string;
+  action: AiConfirmationAction;
+  status: "pending" | "confirmed" | "cancelled";
+  payload: Record<string, unknown>;
+  result?: Record<string, unknown>;
+  expiresAt: string;
+  confirmedAt?: string;
+  cancelledAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+export type AiActionAuditLog = {
+  id: string;
+  userId: string;
+  bookId?: string;
+  action: string;
+  targetType?: string;
+  targetId?: string;
+  idempotencyKey: string;
+  status: "success" | "error";
+  payload: Record<string, unknown>;
+  result?: Record<string, unknown>;
+  errorMessage?: string;
+  createdAt: string;
+};
+export type AiTask = {
+  id: string;
+  userId: string;
+  bookId?: string;
+  kind: string;
+  status: string;
+  sourceType?: string;
+  sourceId?: string;
+  payload?: Record<string, unknown>;
+  result?: Record<string, unknown>;
+  errorMessage?: string;
+  createdAt: string;
+  updatedAt: string;
+};
 
 export class MemoryLedgerStore {
   users: LedgerUser[] = [{ id: "user_demo", name: "张三", email: "demo@ledger.local", plan: "free" }];
@@ -119,6 +168,9 @@ export class MemoryLedgerStore {
   invitations: Invitation[] = [];
   imports: ImportJob[] = [];
   records: ImportedRecord[] = [];
+  aiConfirmations: AiConfirmation[] = [];
+  aiActionAuditLogs: AiActionAuditLog[] = [];
+  aiTasks: AiTask[] = [];
   categories: SimpleEntity[] = [
     { id: "cat_food", bookId: "book_home", name: "餐饮", type: "expense", icon: "fork-knife", sortOrder: 1 },
     { id: "cat_salary", bookId: "book_home", name: "工资", type: "income", icon: "wallet", sortOrder: 1 },
@@ -171,5 +223,11 @@ export class MemoryLedgerStore {
     const value = { ...data, id: id(kind.slice(0, 3)), bookId };
     this[kind].push(value);
     return value;
+  }
+  findCategoryByName(bookId: string, name?: string) {
+    return name ? this.categories.find((category) => category.bookId === bookId && category.name === name) : undefined;
+  }
+  findMember(bookId: string, userId: string) {
+    return this.members.find((member) => member.bookId === bookId && member.userId === userId);
   }
 }

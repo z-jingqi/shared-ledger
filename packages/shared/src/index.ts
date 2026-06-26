@@ -136,8 +136,224 @@ export const aiImportRecordSchema = z.object({
   confidence: z.number().min(0).max(1),
   warnings: z.array(z.string()).default([]),
 });
+export const aiActionNames = [
+  "create-record",
+  "search-records",
+  "analyze-records",
+  "invite-member",
+  "save-attachments",
+  "confirm-import-batch",
+  "cancel-task",
+  "retry-task",
+] as const;
+export type AiActionName = (typeof aiActionNames)[number];
+export const aiIntentNames = aiActionNames;
+export type AiIntentName = AiActionName;
+export const aiConfirmationActionSchema = z.enum(aiActionNames);
+export type AiConfirmationAction = z.infer<typeof aiConfirmationActionSchema>;
+
+const aiEntityNameSchema = z.string().trim().min(1).max(80);
+const aiDateValueSchema = z.string().trim().min(1).max(40);
+const aiAmountFilterSchema = z.coerce.number().nonnegative().finite().multipleOf(0.01);
+const aiSortSchema = z.enum(["occurredAt_desc", "occurredAt_asc", "amount_desc", "amount_asc"]).default("occurredAt_desc");
+
+export const aiTransactionCandidateSchema = z.object({
+  type: z.enum(transactionTypes).optional(),
+  amount: moneySchema.optional(),
+  amountText: z.string().trim().max(80).optional(),
+  occurredAt: aiDateValueSchema.optional(),
+  dateExpression: z.string().trim().max(120).optional(),
+  currency: z.string().trim().length(3).optional(),
+  categoryId: idSchema.optional(),
+  categoryName: aiEntityNameSchema.optional(),
+  memberId: idSchema.optional(),
+  memberName: aiEntityNameSchema.optional(),
+  note: z.string().trim().max(500).optional(),
+  tagIds: z.array(idSchema).default([]),
+  tagNames: z.array(aiEntityNameSchema).default([]),
+  items: z
+    .array(
+      z.object({
+        name: z.string().trim().min(1).max(120),
+        amount: moneySchema,
+        categoryId: idSchema.optional(),
+        categoryName: aiEntityNameSchema.optional(),
+        note: z.string().trim().max(500).optional(),
+      }),
+    )
+    .default([]),
+  confidence: z.number().min(0).max(1).default(0),
+  warnings: z.array(z.string().trim().min(1).max(300)).default([]),
+});
+export type AiTransactionCandidate = z.infer<typeof aiTransactionCandidateSchema>;
+
+export const aiTransactionSearchSchema = z.object({
+  bookId: idSchema.optional(),
+  query: z.string().trim().max(500).optional(),
+  pageContext: z.string().trim().max(120).optional(),
+  timeZone: z.string().trim().min(1).max(80).optional(),
+  type: z.enum(transactionTypes).optional(),
+  from: aiDateValueSchema.optional(),
+  to: aiDateValueSchema.optional(),
+  minAmount: aiAmountFilterSchema.optional(),
+  maxAmount: aiAmountFilterSchema.optional(),
+  categoryIds: z.array(idSchema).default([]),
+  categoryNames: z.array(aiEntityNameSchema).default([]),
+  tagIds: z.array(idSchema).default([]),
+  tagNames: z.array(aiEntityNameSchema).default([]),
+  memberIds: z.array(idSchema).default([]),
+  memberNames: z.array(aiEntityNameSchema).default([]),
+  limit: z.number().int().min(1).max(100).default(20),
+  sort: aiSortSchema,
+});
+export type AiTransactionSearch = z.infer<typeof aiTransactionSearchSchema>;
+export type AiTransactionSearchInput = AiTransactionSearch;
+
+export const aiNormalizedSearchFiltersSchema = z.object({
+  bookId: idSchema.optional(),
+  query: z.string().trim().max(500).optional(),
+  type: z.enum(transactionTypes).optional(),
+  from: aiDateValueSchema.optional(),
+  to: aiDateValueSchema.optional(),
+  minAmount: aiAmountFilterSchema.optional(),
+  maxAmount: aiAmountFilterSchema.optional(),
+  categoryIds: z.array(idSchema).default([]),
+  tagIds: z.array(idSchema).default([]),
+  memberIds: z.array(idSchema).default([]),
+  limit: z.number().int().min(1).max(100).default(20),
+  sort: aiSortSchema,
+});
+export type AiNormalizedSearchFilters = z.infer<typeof aiNormalizedSearchFiltersSchema>;
+
+export const aiIngestionResultSchema = z.object({
+  status: z.enum(["not_requested", "pending", "ready", "needs_confirmation", "completed", "failed"]).default("not_requested"),
+  source: z.enum(["text", "attachment", "import-batch", "task"]).optional(),
+  attachmentIds: z.array(idSchema).default([]),
+  importJobIds: z.array(idSchema).default([]),
+  candidates: z.array(aiTransactionCandidateSchema).default([]),
+  transactionId: idSchema.optional(),
+  missingFields: z.array(z.string().trim().min(1).max(80)).default([]),
+  summary: z.string().trim().max(1000).optional(),
+  message: z.string().trim().max(1000).optional(),
+  warnings: z.array(z.string().trim().min(1).max(300)).default([]),
+});
+export type AiIngestionResult = z.infer<typeof aiIngestionResultSchema>;
+
+export const aiIntentSchema = z.object({
+  action: z.enum(aiActionNames),
+  confidence: z.number().min(0).max(1).default(0),
+  summary: z.string().trim().max(1000).optional(),
+  transaction: aiTransactionCandidateSchema.optional(),
+  search: aiTransactionSearchSchema.optional(),
+  normalizedSearchFilters: aiNormalizedSearchFiltersSchema.optional(),
+  ingestion: aiIngestionResultSchema.optional(),
+  invite: z
+    .object({
+      email: z.string().email().optional(),
+      phone: z.string().trim().min(6).max(30).optional(),
+      role: z.enum(["admin", "member"]).default("member"),
+    })
+    .optional(),
+  task: z
+    .object({
+      taskId: idSchema.optional(),
+      sourceType: z.string().trim().max(80).optional(),
+      sourceId: idSchema.optional(),
+      reason: z.string().trim().max(500).optional(),
+    })
+    .optional(),
+  requiresConfirmation: z.boolean().default(false),
+  confirmation: z
+    .object({
+      action: aiConfirmationActionSchema,
+      summary: z.string().trim().min(1).max(1000),
+      confirmLabel: z.string().trim().min(1).max(40).optional(),
+      cancelLabel: z.string().trim().min(1).max(40).optional(),
+      payload: z.record(z.unknown()).default({}),
+    })
+    .optional(),
+  missingFields: z.array(z.string().trim().min(1).max(80)).default([]),
+  followUpQuestion: z.string().trim().max(500).optional(),
+});
+export type AiIntent = z.infer<typeof aiIntentSchema>;
 export type CreateBookInput = z.infer<typeof createBookSchema>;
 export type CreateTransactionInput = z.infer<typeof createTransactionSchema>;
+
+export const aiConfirmationStatuses = ["pending", "confirmed", "cancelled"] as const;
+export type AiConfirmationStatus = (typeof aiConfirmationStatuses)[number];
+export const aiTaskStatuses = ["queued", "running", "pending_confirmation", "completed", "failed", "cancelled"] as const;
+export type AiTaskStatus = (typeof aiTaskStatuses)[number];
+
+export type AiToolStatusPart = {
+  type: "tool-status";
+  tool: AiActionName;
+  status: "success" | "error" | "pending_confirmation";
+  message: string;
+  label?: string;
+};
+export type AiRecordCardPart = {
+  type: "record-card";
+  title?: string;
+  transactionId: string;
+  transactionType: TransactionType;
+  amount: number;
+  categoryId?: string;
+  categoryName?: string;
+  note?: string;
+  occurredAt: string;
+  pageName?: string;
+  href?: string;
+};
+export type AiSearchResultCardPart = {
+  type: "search-result-card";
+  title: string;
+  summary?: string;
+  results: Array<{
+    id: string;
+    title: string;
+    description?: string;
+    amount?: number;
+  }>;
+  pageName?: string;
+  href?: string;
+};
+export type AiAnalysisCardPart = {
+  type: "analysis-card";
+  title: string;
+  summary?: string;
+  metrics: Array<{ label: string; value: string | number; hint?: string }>;
+};
+export type AiNavigationCardPart = {
+  type: "navigation-card";
+  pageName: string;
+  href: string;
+  description?: string;
+};
+export type AiConfirmationCardPart = {
+  type: "confirmation-card";
+  confirmation: {
+    id: string;
+    action: AiConfirmationAction;
+    status: AiConfirmationStatus;
+    expiresAt: string;
+    summary: string;
+    confirmLabel: string;
+    cancelLabel: string;
+  };
+};
+export type AiChatPart =
+  | { type: "text"; text: string }
+  | AiToolStatusPart
+  | AiRecordCardPart
+  | AiSearchResultCardPart
+  | AiAnalysisCardPart
+  | AiNavigationCardPart
+  | AiConfirmationCardPart;
+export type AiChatResponse = {
+  conversationId: string;
+  message: { id: string; role: "assistant"; parts: AiChatPart[] };
+  parts: AiChatPart[];
+};
 
 export type Actor = { id: string; plan: SubscriptionPlan };
 export function canDeleteBook(role: Role) {

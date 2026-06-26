@@ -1,11 +1,24 @@
-import { CaretRightIcon, CheckCircleIcon, PlusIcon, SparkleIcon, WarningCircleIcon, XIcon } from "@phosphor-icons/react";
+import { CheckCircleIcon, SparkleIcon, WarningCircleIcon } from "@phosphor-icons/react";
 import { useChat } from "@ai-sdk/react";
-import { Button, Textarea } from "@shared-ledger/ui";
 import { DefaultChatTransport } from "ai";
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Streamdown } from "streamdown";
 import { ImportAttachmentCards, type ImportAttachmentView } from "../imports/ImportAttachmentCards";
+import {
+  AiAnalysisCard,
+  AiConfirmation,
+  AiConversation,
+  AiImportJobCard,
+  AiInviteCard,
+  AiMarkdownText,
+  AiMessage,
+  AiNavigationCard,
+  AiPendingConfirmationBar,
+  AiPromptInput,
+  AiRecordCard,
+  AiSearchResultCard,
+  AiToolStatus,
+} from "./AiElements";
 import {
   cancelImportJob,
   maximumAttachmentFiles,
@@ -15,7 +28,8 @@ import {
 } from "../../features/imports/upload";
 import { isOcrAttachment, isSupportedAttachment, supportedFileDescription } from "../../features/imports/files";
 import { watchImportJobs } from "../../features/imports/status";
-import { API } from "../../lib";
+import { normalizeAiPart, type AiRenderableMessage, type AiStructuredPart } from "../../features/ai/types";
+import { API, api } from "../../lib";
 
 type AttachmentRequestStatus = "asking" | "uploading" | "processing" | "completed" | "failed" | "ignored";
 
@@ -24,8 +38,41 @@ type AttachmentRequest = {
   text: string;
   attachments: ImportAttachmentView[];
   status: AttachmentRequestStatus;
+  confirmationExpiresAt?: number;
   errorMessage?: string;
 };
+
+type PendingAiConfirmation = {
+  confirmationId: string;
+  title: string;
+  description?: string;
+  confirmLabel: string;
+  cancelLabel: string;
+  expiresAt: number;
+  busy?: boolean;
+};
+
+type AiChatResponse = {
+  conversationId?: string;
+  message?: AiRenderableMessage;
+  parts?: unknown[];
+  intent?: unknown;
+  action?: unknown;
+  attachmentIntent?: unknown;
+  attachmentAction?: unknown;
+  ingestion?: unknown;
+  importIntent?: unknown;
+};
+
+type AiConfirmationResponse = {
+  conversationId?: string;
+  message?: AiRenderableMessage;
+  parts?: unknown[];
+};
+
+type AttachmentDecision = "save" | "ignore" | "confirm";
+
+const attachmentConfirmationMs = 10_000;
 
 export function AiChat({
   bookId,
@@ -41,7 +88,11 @@ export function AiChat({
   const [attachmentRequests, setAttachmentRequests] = useState<AttachmentRequest[]>([]);
   const [attachmentError, setAttachmentError] = useState("");
   const [isUploading, setUploading] = useState(false);
-  const [composerExpanded, setComposerExpanded] = useState(false);
+  const [isAiSending, setAiSending] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const [conversationId, setConversationId] = useState<string | undefined>();
+  const [localMessages, setLocalMessages] = useState<AiRenderableMessage[]>([]);
+  const [pendingAiConfirmation, setPendingAiConfirmation] = useState<PendingAiConfirmation | undefined>();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const stopWatchingRef = useRef<(() => void) | undefined>(undefined);
@@ -50,8 +101,12 @@ export function AiChat({
     () => new DefaultChatTransport({ api: `${API}/ai/chat`, credentials: "include", body: { bookId, page } }),
     [bookId, page],
   );
-  const { messages, sendMessage, status, error, stop } = useChat({ transport, experimental_throttle: 50 });
-  const busy = status === "streaming" || status === "submitted" || isUploading;
+  const { messages, status, error, stop } = useChat({ transport, experimental_throttle: 50 });
+  const renderedMessages = useMemo(
+    () => [...(messages as AiRenderableMessage[]), ...localMessages],
+    [messages, localMessages],
+  );
+  const busy = status === "streaming" || status === "submitted" || isUploading || isAiSending;
   const pendingAttachmentRequest = useMemo(
     () => [...attachmentRequests].reverse().find((request) => request.status === "asking"),
     [attachmentRequests],
@@ -85,7 +140,6 @@ export function AiChat({
     const nextHeight = Math.min(textarea.scrollHeight, maximumHeight);
     textarea.style.height = `${nextHeight}px`;
     textarea.style.overflowY = textarea.scrollHeight > maximumHeight ? "auto" : "hidden";
-    setComposerExpanded(nextHeight > lineHeight * 1.5 || attachments.length > 0);
   }, [input, attachments.length]);
 
   const addAttachments = (files: FileList | null) => {
@@ -124,6 +178,7 @@ export function AiChat({
     }
     setAttachmentError("");
     setInput("");
+
     const uploadableAttachments = attachments.filter(
       (attachment) => attachment.status === "idle" || attachment.status === "failed",
     );
@@ -136,25 +191,133 @@ export function AiChat({
       };
       setAttachmentRequests((current) => [...current, request]);
       setAttachments([]);
-      const shouldSaveAttachments = hasAttachmentSaveIntent(text);
-      if (shouldSaveAttachments) {
-        await uploadAttachmentRequest(request.id, uploadableAttachments);
+      await resolveAttachmentIntent(request, text);
+      return;
+    }
+
+    if (pendingAttachmentRequest && text) {
+      await resolveAttachmentIntent(pendingAttachmentRequest, text);
+      return;
+    }
+    if (text) await sendStructuredMessage(text);
+  };
+
+  const requestAiChat = async (body: Record<string, unknown>) => {
+    const result = await api<AiChatResponse>("/ai/chat", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    if (result.conversationId) setConversationId(result.conversationId);
+    return result;
+  };
+
+  const sendStructuredMessage = async (text: string) => {
+    setAiError("");
+    const userMessage: AiRenderableMessage = {
+      id: `ai_user_${crypto.randomUUID()}`,
+      role: "user",
+      parts: [{ type: "text", text }],
+    };
+    setLocalMessages((current) => [...current, userMessage]);
+    try {
+      setAiSending(true);
+      const result = await requestAiChat({ message: text, bookId, page, conversationId });
+      const assistantMessage = assistantMessageFromResponse(result);
+      setLocalMessages((current) => [...current, assistantMessage]);
+      const pending = findPendingAiConfirmation(responseParts(result));
+      if (pending) setPendingAiConfirmation(pending);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "AI 助手暂时不可用";
+      setAiError(message);
+      setLocalMessages((current) => [
+        ...current,
+        {
+          id: `ai_error_${crypto.randomUUID()}`,
+          role: "assistant",
+          parts: [{ type: "text", text: message }],
+        },
+      ]);
+      toast.error(message, { duration: 3000, closeButton: true });
+    } finally {
+      setAiSending(false);
+    }
+  };
+
+  const resolveAttachmentIntent = async (request: AttachmentRequest, text: string) => {
+    setAiError("");
+    try {
+      setAiSending(true);
+      const result = await requestAiChat({
+        message: text || "上传附件",
+        bookId,
+        page,
+        conversationId,
+        attachmentRequestId: request.id,
+        attachments: request.attachments.map(attachmentMetadata),
+      });
+      const parts = responseParts(result);
+      const decision = findAttachmentDecision(result, parts) ?? "confirm";
+      if (decision === "save") {
+        await uploadAttachmentRequest(request.id, request.attachments);
+        return;
       }
-      return;
-    }
-    if (pendingAttachmentRequest && hasAttachmentSaveIntent(text)) {
-      await uploadAttachmentRequest(pendingAttachmentRequest.id, pendingAttachmentRequest.attachments);
-      return;
-    }
-    if (pendingAttachmentRequest && hasAttachmentDismissIntent(text)) {
+      if (decision === "ignore") {
+        dismissAttachmentRequest(request.id);
+        return;
+      }
       setAttachmentRequests((current) =>
-        current.map((request) =>
-          request.id === pendingAttachmentRequest.id ? { ...request, status: "ignored" } : request,
+        current.map((item) =>
+          item.id === request.id
+            ? { ...item, confirmationExpiresAt: Date.now() + attachmentConfirmationMs }
+            : item,
         ),
       );
-      return;
+      const pending = findPendingAiConfirmation(parts);
+      if (pending) setPendingAiConfirmation(pending);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "AI 助手暂时不可用";
+      setAiError(message);
+      setAttachmentRequests((current) =>
+        current.map((item) =>
+          item.id === request.id
+            ? { ...item, confirmationExpiresAt: Date.now() + attachmentConfirmationMs }
+            : item,
+        ),
+      );
+      toast.error(message, { duration: 3000, closeButton: true });
+    } finally {
+      setAiSending(false);
     }
-    if (text) void sendMessage({ text });
+  };
+
+  const confirmPendingAiAction = async () => {
+    const pending = pendingAiConfirmation;
+    if (!pending) return;
+    try {
+      setPendingAiConfirmation({ ...pending, busy: true });
+      const result = await api<AiConfirmationResponse>(`/ai/confirmations/${pending.confirmationId}/confirm`, {
+        method: "POST",
+      });
+      setPendingAiConfirmation(undefined);
+      if (result.conversationId) setConversationId(result.conversationId);
+      const parts = responseParts(result);
+      if (parts.length) setLocalMessages((current) => [...current, assistantMessageFromResponse(result, "ai_confirmed")]);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "确认操作失败";
+      setPendingAiConfirmation({ ...pending, busy: false });
+      toast.error(message, { duration: 3000, closeButton: true });
+    }
+  };
+
+  const cancelPendingAiAction = async () => {
+    const pending = pendingAiConfirmation;
+    if (!pending) return;
+    setPendingAiConfirmation(undefined);
+    try {
+      await api(`/ai/confirmations/${pending.confirmationId}/cancel`, { method: "POST" });
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "取消确认失败", { duration: 3000, closeButton: true });
+    }
   };
 
   const clearAttachments = (ids: string[]) => {
@@ -181,6 +344,17 @@ export function AiChat({
         };
       }),
     );
+  };
+
+  const dismissAttachmentRequest = (requestId: string) => {
+    setAttachmentRequests((current) => {
+      current
+        .find((request) => request.id === requestId)
+        ?.attachments.forEach((attachment) => {
+          if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+        });
+      return current.filter((request) => request.id !== requestId);
+    });
   };
 
   const discardRequestAttachment = (requestId: string, attachmentId: string) => {
@@ -225,6 +399,7 @@ export function AiChat({
           request.id === requestId
             ? {
                 ...request,
+                confirmationExpiresAt: undefined,
                 status: "uploading",
                 attachments: request.attachments.map((attachment) =>
                   uploadIds.has(attachment.id) ? { ...attachment, status: "uploading" } : attachment,
@@ -272,7 +447,7 @@ export function AiChat({
       const ocrJobIds = jobs
         .filter((job, index) => {
           const attachment = targetAttachments[index];
-          return Boolean(attachment && isOcrAttachment(attachment.file));
+          return Boolean(job && attachment && isOcrAttachment(attachment.file));
         })
         .map((job) => job.id);
       if (ocrJobIds.length) {
@@ -340,6 +515,7 @@ export function AiChat({
             ? {
                 ...request,
                 status: "failed",
+                confirmationExpiresAt: undefined,
                 errorMessage: message,
                 attachments: request.attachments.map((attachment) =>
                   uploadIds.has(attachment.id) ? { ...attachment, status: "failed", errorMessage: message } : attachment,
@@ -436,13 +612,8 @@ export function AiChat({
     }
   };
 
-  const renderMessageText = (message: (typeof messages)[number]) =>
-    message.parts
-      .filter((part) => part.type === "text")
-      .map((part) => (part.type === "text" ? part.text : ""))
-      .join("");
-
-  const hasConversation = messages.length > 0 || attachmentRequests.length > 0;
+  const visibleAttachmentRequests = attachmentRequests.filter((request) => request.status !== "asking");
+  const hasConversation = renderedMessages.length > 0 || visibleAttachmentRequests.length > 0;
 
   return (
     <div className={compact ? "ai-content" : "ai-page"}>
@@ -464,30 +635,20 @@ export function AiChat({
           </div>
         </div>
       ) : (
-        <div className="ai-messages" aria-live="polite">
-          {messages.map((message, index) => {
-            const text = renderMessageText(message);
-            return (
-              <article key={message.id} className={`ai-message ${message.role === "user" ? "ai-user" : "ai-assistant"}`}>
-                {message.role === "assistant" ? (
-                  <Streamdown
-                    className="ai-markdown"
-                    mode={status === "streaming" && index === messages.length - 1 ? "streaming" : "static"}
-                  >
-                    {text}
-                  </Streamdown>
-                ) : (
-                  <p>{text}</p>
-                )}
-              </article>
-            );
-          })}
-          {attachmentRequests.map((request) => (
-            <section className="ai-attachment-thread" key={request.id} aria-label="附件保存确认">
-              <article className="ai-message ai-user">
+        <AiConversation>
+          {renderedMessages.map((message, index) => (
+            <RenderedAiMessage
+              key={message.id}
+              message={message as AiRenderableMessage}
+              streaming={status === "streaming" && index === renderedMessages.length - 1}
+            />
+          ))}
+          {visibleAttachmentRequests.map((request) => (
+            <section className="ai-attachment-thread" key={request.id} aria-label="附件导入状态">
+              <AiMessage role="user">
                 <p>{request.text || `上传${request.attachments.length > 1 ? "这些" : "这个"}文件`}</p>
-              </article>
-              <article className="ai-message ai-assistant">
+              </AiMessage>
+              <AiMessage role="assistant">
                 <p>{attachmentAssistantText(request)}</p>
                 <div className="ai-result-card">
                   <ImportAttachmentCards
@@ -504,25 +665,6 @@ export function AiChat({
                     }
                     onRetry={(id) => retryRequestAttachment(request.id, id)}
                   />
-                  {request.status === "asking" && (
-                    <div className="ai-confirm-actions">
-                      <Button type="button" size="sm" onClick={() => uploadAttachmentRequest(request.id, request.attachments)}>
-                        保存并识别
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() =>
-                          setAttachmentRequests((current) =>
-                            current.map((item) => (item.id === request.id ? { ...item, status: "ignored" } : item)),
-                          )
-                        }
-                      >
-                        忽略
-                      </Button>
-                    </div>
-                  )}
                   {request.status === "completed" && (
                     <p className="ai-status success">
                       <CheckCircleIcon size={18} weight="fill" />
@@ -537,63 +679,119 @@ export function AiChat({
                   )}
                   {request.status === "ignored" && <p className="ai-status">已忽略这些附件，未保存到当前账本。</p>}
                 </div>
-              </article>
+              </AiMessage>
             </section>
           ))}
-        </div>
+        </AiConversation>
       )}
-      <form className={`ai-composer ${composerExpanded ? "expanded" : ""}`} onSubmit={submit}>
-        <ImportAttachmentCards attachments={attachments} onRemove={(id) => clearAttachments([id])} />
-        {attachmentError && <p className="ai-composer-notice">{attachmentError}</p>}
-        <input
-          ref={fileInputRef}
-          className="sr-only"
-          type="file"
-          multiple
-          accept={supportedImportAccept}
-          onChange={(event) => addAttachments(event.currentTarget.files)}
+      {pendingAttachmentRequest?.confirmationExpiresAt && (
+        <AiPendingConfirmationBar
+          attachments={pendingAttachmentRequest.attachments}
+          expiresAt={pendingAttachmentRequest.confirmationExpiresAt}
+          onCancel={() => dismissAttachmentRequest(pendingAttachmentRequest.id)}
+          onConfirm={() => void uploadAttachmentRequest(pendingAttachmentRequest.id, pendingAttachmentRequest.attachments)}
         />
-        <Button
-          aria-label="添加附件"
-          className="ai-composer-attach"
-          type="button"
-          variant="ghost"
-          size="icon"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={busy || attachments.length >= maximumAttachmentFiles}
-        >
-          <PlusIcon />
-        </Button>
-        <Textarea
-          ref={textareaRef}
-          className="ai-composer-textarea"
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          placeholder="输入消息..."
-          disabled={busy}
-          rows={1}
+      )}
+      {!pendingAttachmentRequest && pendingAiConfirmation && (
+        <AiPendingConfirmationBar
+          title={pendingAiConfirmation.title}
+          description={pendingAiConfirmation.description}
+          confirmLabel={pendingAiConfirmation.confirmLabel}
+          cancelLabel={pendingAiConfirmation.cancelLabel}
+          expiresAt={pendingAiConfirmation.expiresAt}
+          busy={pendingAiConfirmation.busy}
+          onCancel={() => void cancelPendingAiAction()}
+          onConfirm={() => void confirmPendingAiAction()}
         />
-        {status === "streaming" || status === "submitted" ? (
-          <Button className="ai-composer-send" type="button" size="icon" aria-label="停止" onClick={stop}>
-            <XIcon />
-          </Button>
-        ) : (
-          <Button className="ai-composer-send" aria-label="发送" size="icon" disabled={isUploading || (!input.trim() && attachments.length === 0)}>
-            <CaretRightIcon />
-          </Button>
-        )}
-      </form>
-      {error && <p className="field-error">{error.message}</p>}
+      )}
+      <AiPromptInput
+        attachments={attachments}
+        attachmentError={attachmentError}
+        busy={busy}
+        canAttach={attachments.length < maximumAttachmentFiles}
+        accept={supportedImportAccept}
+        input={input}
+        textareaRef={textareaRef}
+        fileInputRef={fileInputRef}
+        isStreaming={status === "streaming" || status === "submitted"}
+        onAddAttachments={addAttachments}
+        onClearAttachment={(id) => clearAttachments([id])}
+        onInputChange={setInput}
+        onStop={stop}
+        onSubmit={submit}
+      />
+      {(error || aiError) && <p className="field-error">{error?.message ?? aiError}</p>}
     </div>
   );
 }
 
-function hasAttachmentSaveIntent(text: string) {
-  return /保存|记账|入账|导入|记录|存到|添加到/.test(text);
+function RenderedAiMessage({ message, streaming }: { message: AiRenderableMessage; streaming: boolean }) {
+  const role = message.role === "user" ? "user" : "assistant";
+  const parts = (message.parts ?? []).map(normalizeAiPart).filter((part): part is AiStructuredPart => Boolean(part));
+  const text = parts
+    .filter((part) => part.type === "text")
+    .map((part) => (part.type === "text" ? part.text : ""))
+    .join("");
+
+  if (role === "user") {
+    return (
+      <AiMessage role="user">
+        <p>{text}</p>
+      </AiMessage>
+    );
+  }
+
+  return (
+    <AiMessage role="assistant">
+      <div className="ai-part-stack">
+        {parts.map((part, index) => (
+          <RenderedAiPart key={`${part.type}_${index}`} part={part} streaming={streaming && index === parts.length - 1} />
+        ))}
+      </div>
+    </AiMessage>
+  );
 }
 
-function hasAttachmentDismissIntent(text: string) {
-  return /忽略|不用|不要|取消|不保存/.test(text);
+function RenderedAiPart({ part, streaming }: { part: AiStructuredPart; streaming: boolean }) {
+  switch (part.type) {
+    case "text":
+      return <AiMarkdownText streaming={streaming}>{part.text}</AiMarkdownText>;
+    case "tool-status":
+      return <AiToolStatus part={part} />;
+    case "record-card":
+      return <AiRecordCard part={part} />;
+    case "search-result-card":
+      return <AiSearchResultCard part={part} />;
+    case "analysis-card":
+      return <AiAnalysisCard part={part} />;
+    case "import-job-card":
+      return <AiImportJobCard part={part} />;
+    case "invite-card":
+      return <AiInviteCard part={part} />;
+    case "navigation-card":
+      return <AiNavigationCard part={part} />;
+    case "confirmation":
+      return <AiConfirmation part={part} />;
+    default:
+      return null;
+  }
+}
+
+function findPendingAiConfirmation(parts: unknown[]): PendingAiConfirmation | undefined {
+  const confirmation = parts.map(normalizeAiPart).find(
+    (part): part is Extract<AiStructuredPart, { type: "confirmation" }> =>
+      Boolean(part && part.type === "confirmation" && part.confirmationId),
+  );
+  if (!confirmation?.confirmationId) return undefined;
+  const parsedExpiresAt = confirmation.expiresAt ? Date.parse(confirmation.expiresAt) : Number.NaN;
+  return {
+    confirmationId: confirmation.confirmationId,
+    title: confirmation.title ?? "需要确认",
+    ...(confirmation.message ? { description: confirmation.message } : {}),
+    confirmLabel: confirmation.confirmLabel ?? "确认",
+    cancelLabel: confirmation.cancelLabel ?? "取消",
+    expiresAt: Number.isFinite(parsedExpiresAt) ? parsedExpiresAt : Date.now() + attachmentConfirmationMs,
+  };
 }
 
 function attachmentAssistantText(request: AttachmentRequest) {
@@ -602,7 +800,7 @@ function attachmentAssistantText(request: AttachmentRequest) {
   if (request.status === "completed") return "处理任务已创建并返回完成状态。";
   if (request.status === "failed") return "附件没有保存成功。";
   if (request.status === "ignored") return "好的，我不会保存这些附件。";
-  return `我已收到 ${request.attachments.length} 个文件。需要保存到当前账本吗？`;
+  return "";
 }
 
 function createAttachment(file: File): ImportAttachmentView {
@@ -613,4 +811,111 @@ function createAttachment(file: File): ImportAttachmentView {
     status: "idle",
     ...(canPreview ? { previewUrl: URL.createObjectURL(file) } : {}),
   };
+}
+
+function assistantMessageFromResponse(result: AiChatResponse | AiConfirmationResponse, idPrefix = "ai_assistant"): AiRenderableMessage {
+  return (
+    result.message ?? {
+      id: `${idPrefix}_${crypto.randomUUID()}`,
+      role: "assistant",
+      parts: result.parts ?? [],
+    }
+  );
+}
+
+function responseParts(result: AiChatResponse | AiConfirmationResponse) {
+  return result.message?.parts ?? result.parts ?? [];
+}
+
+function attachmentMetadata(attachment: ImportAttachmentView) {
+  return {
+    id: attachment.id,
+    name: attachment.file.name,
+    type: attachment.file.type,
+    size: attachment.file.size,
+    lastModified: attachment.file.lastModified,
+  };
+}
+
+function findAttachmentDecision(result: AiChatResponse, parts: unknown[]): AttachmentDecision | undefined {
+  const topLevel = [
+    result.attachmentAction,
+    result.attachmentIntent,
+    result.ingestion,
+    result.importIntent,
+    result.intent,
+    result.action,
+  ];
+  for (const candidate of topLevel) {
+    const decision = attachmentDecisionFromValue(candidate);
+    if (decision) return decision;
+  }
+  for (const part of parts) {
+    const payload = dataPayload(part);
+    const type = stringValue(payload?.type)?.replace(/^data-/, "");
+    const isAttachmentPart = Boolean(type && /(attachment|file|import|ingestion|upload)/i.test(type));
+    if (isAttachmentPart) {
+      const decision = attachmentDecisionFromValue(payload);
+      if (decision) return decision;
+      if (type && /confirm|pending/i.test(type)) return "confirm";
+    }
+    const confirmation = objectValue(payload?.confirmation);
+    const confirmationAction = stringValue(confirmation?.action);
+    if (confirmationAction && /(attachment|file|import|ingestion|upload)/i.test(confirmationAction)) {
+      return "confirm";
+    }
+  }
+  return undefined;
+}
+
+function attachmentDecisionFromValue(value: unknown): AttachmentDecision | undefined {
+  const direct = attachmentDecisionFromString(stringValue(value));
+  if (direct) return direct;
+  const object = objectValue(value);
+  if (!object) return undefined;
+  if (object.shouldSave === true || object.save === true) return "save";
+  if (object.shouldIgnore === true || object.ignore === true) return "ignore";
+  if (object.requiresConfirmation === true || object.confirmationRequired === true) return "confirm";
+  for (const key of ["action", "decision", "behavior", "intent", "name", "status", "type"]) {
+    const decision = attachmentDecisionFromString(stringValue(object[key]));
+    if (decision) return decision;
+  }
+  for (const key of ["attachmentAction", "attachmentIntent", "ingestion", "importIntent"]) {
+    const decision = attachmentDecisionFromValue(object[key]);
+    if (decision) return decision;
+  }
+  return undefined;
+}
+
+function attachmentDecisionFromString(value?: string): AttachmentDecision | undefined {
+  if (!value) return undefined;
+  const normalized = value.trim().toLowerCase().replaceAll(/[\s_.:]+/g, "-");
+  if (!normalized) return undefined;
+  if (/(ignore|dismiss|discard|skip|do-not-save|dont-save|cancel-upload|cancel-import)/.test(normalized)) return "ignore";
+  if (/(confirm|confirmation|pending-confirmation|ask|require-confirmation|needs-confirmation)/.test(normalized)) return "confirm";
+  if (/^(save|upload|ingest|import|start-import|create-import|save-attachments?|upload-attachments?|ingest-attachments?)$/.test(normalized)) {
+    return "save";
+  }
+  if (
+    /(save-attachment|upload-attachment|ingest-attachment|import-attachment|save-file|upload-file|import-file)/.test(normalized) ||
+    /(attachment-save|attachments-save|file-save|import-save|ingestion-save|save-import)/.test(normalized)
+  ) {
+    return "save";
+  }
+  return undefined;
+}
+
+function dataPayload(value: unknown): Record<string, unknown> | undefined {
+  const object = objectValue(value);
+  if (!object) return undefined;
+  const data = objectValue(object.data);
+  return data ? { ...object, ...data } : object;
+}
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.length ? value : undefined;
 }

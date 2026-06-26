@@ -32,10 +32,16 @@ export function AnalysisPage() {
     setExpanded(false);
   };
   const transactions = data?.transactions ?? [];
-  const income = transactions
+  const range = getAnalysisRange(period);
+  const filteredTransactions = transactions.filter((item) => {
+    const occurredAt = item.occurredAt.slice(0, 10);
+    return occurredAt >= range.start && occurredAt <= range.end;
+  });
+  const periodLabel = range.label;
+  const income = filteredTransactions
     .filter((item) => item.type === "income")
     .reduce((sum, item) => sum + item.amount, 0);
-  const expenses = transactions.filter((item) => item.type === "expense");
+  const expenses = filteredTransactions.filter((item) => item.type === "expense");
   const total = expenses.reduce((sum, item) => sum + item.amount, 0);
   const trend = [...expenses].reverse().map((item) => ({
     d: new Date(item.occurredAt).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" }),
@@ -113,7 +119,7 @@ export function AnalysisPage() {
       {book && (
         <div className="analysis-scroll">
           <Panel className="analysis-period">
-            <span>{new Date().toLocaleDateString("zh-CN", { year: "numeric", month: "long" })}</span>
+            <span>{periodLabel}</span>
             <div>
               {periodOptions.map((item) => (
                 <Button
@@ -131,12 +137,12 @@ export function AnalysisPage() {
           <div className="analysis-summary">
             <span>
               <TrendUpIcon size={22} />
-              <small>本月收入</small>
+              <small>{periodLabel}收入</small>
               <b className="income">{money(income)}</b>
             </span>
             <span>
               <ChartBarIcon size={22} />
-              <small>本月支出</small>
+              <small>{periodLabel}支出</small>
               <b>{money(total)}</b>
             </span>
             <span>
@@ -205,4 +211,23 @@ export function AnalysisPage() {
       )}
     </section>
   );
+}
+
+function getAnalysisRange(period: "month" | "quarter" | "year") {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  if (period === "year") {
+    return { start: ymd(new Date(year, 0, 1)), end: ymd(new Date(year, 11, 31)), label: `${year}年` };
+  }
+  if (period === "quarter") {
+    const start = new Date(year, month - 2, 1);
+    const end = new Date(year, month + 1, 0);
+    return { start: ymd(start), end: ymd(end), label: "近 3 个月" };
+  }
+  return { start: ymd(new Date(year, month, 1)), end: ymd(new Date(year, month + 1, 0)), label: `${year}年${month + 1}月` };
+}
+
+function ymd(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
