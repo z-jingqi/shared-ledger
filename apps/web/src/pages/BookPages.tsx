@@ -2,14 +2,14 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import {
   CalendarBlankIcon,
   CaretRightIcon,
-  CheckIcon,
   WalletIcon,
 } from "@phosphor-icons/react";
 import { createBookSchema } from "@shared-ledger/shared";
 import { Input, Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue, Textarea } from "@shared-ledger/ui";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, type NavigateFunction, useNavigate } from "react-router-dom";
+import { BookSwitcherSheet } from "../components/books/BookSwitcherSheet";
 import type { LedgerTransaction } from "../components/ledger/Transactions";
 import {
   AiSparkButton,
@@ -20,7 +20,6 @@ import {
   IosField,
   IosPage,
   IosScroll,
-  IosSheet,
   IosTopBar,
   yuan,
 } from "../components/ios/IosDesign";
@@ -43,7 +42,8 @@ type ImportResponse = { imports: ImportJob[] };
 
 export function BookHomePage() {
   const navigate = useNavigate();
-  const { book, loading, error } = useActiveBook();
+  const { book, books, loading, error, setActiveBook } = useActiveBook();
+  const [bookSwitcherOpen, setBookSwitcherOpen] = useState(false);
   const { data: txData } = useApi<TransactionResponse>(book ? `/books/${book.id}/transactions` : undefined);
   const { data: imports } = useApi<ImportResponse>(book ? `/books/${book.id}/imports` : undefined);
   const transactions = txData?.transactions ?? [];
@@ -80,12 +80,12 @@ export function BookHomePage() {
     <IosPage className="ios-home">
       <IosTopBar
         book={book}
-        onLedgerClick={() => navigate("/books/manage")}
+        onLedgerClick={() => setBookSwitcherOpen(true)}
         action={<AiSparkButton onClick={() => navigate(`/ai?bookId=${book.id}`)} />}
       />
       <IosScroll className="ios-home-scroll">
         <section className="ios-balance-hero">
-          <span>6月结余</span>
+          <span>6月净收支</span>
           <strong>{yuan(income - expense, book.currency)}</strong>
           <div>
             <p>
@@ -160,20 +160,37 @@ export function BookHomePage() {
             <Link to={`/records?bookId=${book.id}`}>查看全部</Link>
           </header>
           <IosCard className="ios-transaction-card">
-            {recent.length ? recent.map((item) => <HomeTransactionRow transaction={item} book={book} key={item.id} />) : <p className="muted">还没有记录，记下第一笔吧。</p>}
+            {recent.length ? (
+              recent.map((item) => <HomeTransactionRow transaction={item} book={book} key={item.id} />)
+            ) : (
+              <div className="ios-transaction-empty" data-testid="recent-empty-state">
+                <p>还没有记录，记下第一笔吧。</p>
+              </div>
+            )}
           </IosCard>
         </section>
       </IosScroll>
+      {bookSwitcherOpen && (
+        <BookSwitcherSheet
+          books={books}
+          currentBookId={book.id}
+          onSelect={(bookId) => {
+            setActiveBook(bookId);
+            setBookSwitcherOpen(false);
+          }}
+          close={() => setBookSwitcherOpen(false)}
+        />
+      )}
     </IosPage>
   );
 }
 
 export function BooksPage() {
-  const { book, books, loading, error, setActiveBook } = useActiveBook();
+  const { book, books, loading, error } = useActiveBook();
   const navigate = useNavigate();
   return (
     <IosPage>
-      <IosTopBar title="切换账本" />
+      <IosTopBar title="管理账本" back onBack={() => goBack(navigate, "/settings")} />
       <IosScroll className="ios-book-list-screen">
         {loading && <p className="muted">正在读取账本…</p>}
         {error && <p className="field-error">{error}</p>}
@@ -189,18 +206,15 @@ export function BooksPage() {
             <button
               className={`ios-book-list-row${active ? " active" : ""}`}
               type="button"
-              onClick={() => {
-                setActiveBook(item.id);
-                navigate(`/home?bookId=${item.id}`);
-              }}
+              onClick={() => navigate(`/books/${item.id}/settings`)}
               key={item.id}
             >
               <BookMark book={item} size={44} />
               <span>
                 <b>{item.name}</b>
-                <small>{item.currency} · {active ? "当前账本" : "点击切换"}</small>
+                <small>{item.currency} · {active ? "当前账本 · 点击管理" : "点击管理"}</small>
               </span>
-              {active ? <CheckIcon size={18} weight="bold" /> : <CaretRightIcon size={18} />}
+              <CaretRightIcon size={18} />
             </button>
           );
         })}
@@ -232,7 +246,7 @@ export function CreateBookPage() {
   });
   return (
     <form className="ios-create-book-screen" onSubmit={submit}>
-      <IosTopBar title="创建账本" />
+      <IosTopBar title="创建账本" back onBack={() => goBack(navigate, "/home")} />
       <IosScroll className="ios-create-book-scroll">
         <section className="ios-create-book-hero">
           <IconTile>
@@ -268,39 +282,6 @@ export function CreateBookPage() {
         <IosButton type="submit">创建账本</IosButton>
       </footer>
     </form>
-  );
-}
-
-export function BookSwitcherSheet({
-  books,
-  currentBookId,
-  onSelect,
-  close,
-}: {
-  books: Book[];
-  currentBookId: string;
-  onSelect: (bookId: string) => void;
-  close: () => void;
-}) {
-  return (
-    <IosSheet title="切换账本" onClose={close}>
-      <div className="ios-book-switcher-list">
-        {books.map((item) => (
-          <button className={item.id === currentBookId ? "active" : ""} type="button" onClick={() => onSelect(item.id)} key={item.id}>
-            <BookMark book={item} size={44} />
-            <span>
-              <b>{item.name}</b>
-              <small>{item.currency} · {item.id === currentBookId ? "当前" : "点击切换"}</small>
-            </span>
-            <b>{item.id === currentBookId ? "当前" : ""}</b>
-          </button>
-        ))}
-        <Link to="/books/new" onClick={close}>
-          <span>+</span>
-          创建新账本
-        </Link>
-      </div>
-    </IosSheet>
   );
 }
 
@@ -360,4 +341,9 @@ function formatHomeImportProgress(jobs: ImportJob[]) {
     return jobs.length > 1 ? `${jobs.length} 个文件，OCR ${first.progress}%` : `OCR ${first.progress}%`;
   }
   return `${jobs.length} 个文件正在识别`;
+}
+
+function goBack(navigate: NavigateFunction, fallback: string) {
+  if (window.history.length > 1) navigate(-1);
+  else navigate(fallback);
 }

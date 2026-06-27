@@ -4,13 +4,12 @@ import {
   CheckCircleIcon,
   CircleNotchIcon,
   CopyIcon,
-  FileArrowUpIcon,
   FunnelSimpleIcon,
-  MagnifyingGlassIcon,
   NotePencilIcon,
   PaperclipIcon,
   PlusCircleIcon,
   ReceiptIcon,
+  SparkleIcon,
   TrashIcon,
   XIcon,
 } from "@phosphor-icons/react";
@@ -18,6 +17,7 @@ import type { FormEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+import { BookSwitcherSheet } from "../components/books/BookSwitcherSheet";
 import type { LedgerTransaction } from "../components/ledger/Transactions";
 import {
   AiSparkButton,
@@ -34,6 +34,7 @@ import {
   yuan,
 } from "../components/ios/IosDesign";
 import { searchTransactionsWithAi, type AiTransactionSearchResponse } from "../features/ai/search";
+import { useAuth } from "../features/auth/AuthProvider";
 import {
   isSupportedAttachment,
   maxAttachmentFiles,
@@ -101,8 +102,10 @@ export function RecordsPage() {
   const [searchText, setSearchText] = useState(filters.q);
   const [aiSearching, setAiSearching] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [bookSwitcherOpen, setBookSwitcherOpen] = useState(false);
   const [draftFilters, setDraftFilters] = useState(filters);
-  const { book } = useActiveBook();
+  const { user } = useAuth();
+  const { book, books, setActiveBook } = useActiveBook();
   const { data } = useApi<{ transactions: LedgerTransaction[] }>(book ? `/books/${book.id}/transactions` : undefined);
   const { data: categories } = useApi<{ categories: CategoryOption[] }>(book ? `/books/${book.id}/categories` : undefined);
   const { data: imports, reload: reloadImports } = useApi<{ imports: ImportJobStatus[] }>(book ? `/books/${book.id}/imports` : undefined);
@@ -122,7 +125,7 @@ export function RecordsPage() {
     [categoryNames, data?.transactions, filters],
   );
   const groups = useMemo(() => groupTransactions(visibleTransactions), [visibleTransactions]);
-  const filterChips = getVisibleFilterChips(filters, categoryNames);
+  const canUseAiSearch = user?.plan === "pro";
 
   useEffect(() => setSearchText(filters.q), [filters.q]);
   useEffect(() => {
@@ -137,11 +140,15 @@ export function RecordsPage() {
     );
   }, [activeImports.map((job) => `${job.id}:${job.status}`).join(","), reloadImports]);
 
-  const submitAiSearch = async (event: FormEvent<HTMLFormElement>) => {
+  const submitSearch = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const query = searchText.trim();
     if (!query) {
       resetFilters();
+      return;
+    }
+    if (!canUseAiSearch) {
+      setSearchParams(writeRecordFilters(searchParams, { ...filters, q: query, source: "", chips: [] }));
       return;
     }
     if (!book) {
@@ -175,32 +182,41 @@ export function RecordsPage() {
     setSearchParams(writeRecordFilters(searchParams, draftFilters));
     setFilterOpen(false);
   };
+  const switchBook = (bookId: string) => {
+    setActiveBook(bookId);
+    setBookSwitcherOpen(false);
+  };
 
   return (
     <IosPage className="ios-records-page">
       <IosTopBar
-        title="流水"
+        book={book}
+        onLedgerClick={() => setBookSwitcherOpen(true)}
         action={
           <div className="ios-top-actions">
             <button type="button" aria-label="筛选记录" onClick={openFilters}>
               <FunnelSimpleIcon size={21} weight="bold" />
             </button>
-            <AiSparkButton onClick={() => navigate(book ? `/ai?bookId=${book.id}` : "/ai")} />
+            {canUseAiSearch && <AiSparkButton onClick={() => navigate(book ? `/ai?bookId=${book.id}` : "/ai")} />}
           </div>
         }
       />
       <IosScroll className="ios-record-scroll">
-        <form className="ios-record-search" onSubmit={(event) => void submitAiSearch(event)}>
-          <MagnifyingGlassIcon size={18} />
+        <form className={`ios-record-search${canUseAiSearch ? " has-ai" : ""}`} onSubmit={(event) => void submitSearch(event)}>
           <input
             aria-label="搜索流水"
-            placeholder="搜索记录，或用 AI 说：上月餐饮大于 100"
+            placeholder={canUseAiSearch ? "搜索记录，或用 AI 说：上月餐饮大于 100" : "搜索记录"}
             value={searchText}
-            onChange={(event) => setSearchText(event.currentTarget.value)}
+            onChange={(event) => {
+              const { value } = event.currentTarget;
+              setSearchText(value);
+            }}
           />
-          <button type="submit" disabled={aiSearching || !book} aria-label="开始搜索">
-            {aiSearching ? <CircleNotchIcon size={18} className="ios-spin" /> : "AI"}
-          </button>
+          {canUseAiSearch && (
+            <button type="submit" disabled={aiSearching || !book} aria-label="开始搜索">
+              {aiSearching ? <CircleNotchIcon size={18} className="ios-spin" /> : <SparkleIcon size={17} weight="fill" />}
+            </button>
+          )}
         </form>
 
         <div className="ios-filter-chips" aria-label="记录类型筛选">
@@ -258,27 +274,6 @@ export function RecordsPage() {
           </section>
         )}
 
-        {filterChips.length > 0 && (
-          <div className={`ios-active-filter${filters.source === "ai" ? " ai" : ""}`}>
-            <span>{filters.source === "ai" ? "AI 已筛选" : "已筛选"}</span>
-            <p>{filterChips.join(" · ")}</p>
-            <button type="button" onClick={resetFilters}>
-              清除
-            </button>
-          </div>
-        )}
-
-        <Link className="ios-import-entry" to={`/records/imports${book ? `?bookId=${book.id}` : ""}`}>
-          <IconTile tint="#fff0e8" color="#ff681c">
-            <FileArrowUpIcon size={20} weight="bold" />
-          </IconTile>
-          <span>
-            <b>导入与识别</b>
-            <small>图片、PDF、Excel、CSV 识别后进入待确认</small>
-          </span>
-          <CaretRightIcon size={18} />
-        </Link>
-
         <section className="ios-record-groups">
           {groups.map((group) => (
             <article key={group.key}>
@@ -335,23 +330,66 @@ export function RecordsPage() {
             </IosField>
             <div className="ios-filter-grid">
               <IosField label="开始日期">
-                <input type="date" value={draftFilters.start} onChange={(event) => setDraftFilters((current) => ({ ...current, start: event.currentTarget.value }))} />
+                <input
+                  type="date"
+                  value={draftFilters.start}
+                  onChange={(event) => {
+                    const { value } = event.currentTarget;
+                    setDraftFilters((current) => ({ ...current, start: value }));
+                  }}
+                />
               </IosField>
               <IosField label="结束日期">
-                <input type="date" value={draftFilters.end} onChange={(event) => setDraftFilters((current) => ({ ...current, end: event.currentTarget.value }))} />
+                <input
+                  type="date"
+                  value={draftFilters.end}
+                  onChange={(event) => {
+                    const { value } = event.currentTarget;
+                    setDraftFilters((current) => ({ ...current, end: value }));
+                  }}
+                />
               </IosField>
               <IosField label="最小金额">
-                <input inputMode="decimal" value={draftFilters.min} onChange={(event) => setDraftFilters((current) => ({ ...current, min: event.currentTarget.value }))} />
+                <input
+                  inputMode="decimal"
+                  value={draftFilters.min}
+                  onChange={(event) => {
+                    const { value } = event.currentTarget;
+                    setDraftFilters((current) => ({ ...current, min: value }));
+                  }}
+                />
               </IosField>
               <IosField label="最大金额">
-                <input inputMode="decimal" value={draftFilters.max} onChange={(event) => setDraftFilters((current) => ({ ...current, max: event.currentTarget.value }))} />
+                <input
+                  inputMode="decimal"
+                  value={draftFilters.max}
+                  onChange={(event) => {
+                    const { value } = event.currentTarget;
+                    setDraftFilters((current) => ({ ...current, max: value }));
+                  }}
+                />
               </IosField>
             </div>
             <IosField label="分类关键词">
-              <input value={draftFilters.category} placeholder="餐饮 / 交通 / 工资" onChange={(event) => setDraftFilters((current) => ({ ...current, category: event.currentTarget.value }))} />
+              <input
+                value={draftFilters.category}
+                placeholder="餐饮 / 交通 / 工资"
+                onChange={(event) => {
+                  const { value } = event.currentTarget;
+                  setDraftFilters((current) => ({ ...current, category: value }));
+                }}
+              />
             </IosField>
           </div>
         </IosSheet>
+      )}
+      {bookSwitcherOpen && (
+        <BookSwitcherSheet
+          books={books}
+          currentBookId={book?.id ?? ""}
+          onSelect={switchBook}
+          close={() => setBookSwitcherOpen(false)}
+        />
       )}
     </IosPage>
   );
@@ -572,7 +610,13 @@ export function TransactionFormPage() {
           <h3>类别</h3>
           <div className="ios-category-strip">
             {categories.slice(0, 8).map((category) => (
-              <button className={category.id === categoryId ? "active" : ""} type="button" onClick={() => setCategoryId(category.id)} key={category.id}>
+              <button
+                aria-label={category.name}
+                className={category.id === categoryId ? "active" : ""}
+                type="button"
+                onClick={() => setCategoryId(category.id)}
+                key={category.id}
+              >
                 <IconTile tint={category.id === categoryId ? categoryColor(category, type) : `${categoryColor(category, type)}18`} color={category.id === categoryId ? "#fff" : categoryColor(category, type)}>
                   {category.name[0] ?? "类"}
                 </IconTile>
@@ -783,18 +827,12 @@ function TransactionRow({
   categoryNames: Record<string, string>;
   currency?: string;
 }) {
-  const label = categoryLabel(transaction, categoryNames);
-  const color = categoryColor({ name: label }, transaction.type);
+  const label = transactionCategoryTag(transaction, categoryNames);
   return (
     <Link className="ios-transaction-row" to={`/records/${transaction.id}`}>
-      <IconTile tint={`${color}18`} color={color}>
-        {label[0] ?? "记"}
-      </IconTile>
-      <span>
-        <b>{transaction.note || "未命名记录"}</b>
-        <small>
-          {label} · {new Date(transaction.occurredAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}
-        </small>
+      <span className={`ios-transaction-dot ${transaction.type}`} aria-hidden="true" />
+      <span className="ios-transaction-meta">
+        <span className="ios-transaction-category-tag">{label}</span>
       </span>
       <strong className={transaction.type}>
         {transaction.type === "income" ? "+" : "-"}
@@ -899,11 +937,6 @@ function clearRecordFilterParams(searchParams: URLSearchParams) {
   const bookId = searchParams.get("bookId");
   if (bookId) next.set("bookId", bookId);
   return next;
-}
-
-function getVisibleFilterChips(filters: RecordFilters, categoryNames: Record<string, string>) {
-  if (filters.source === "ai" && filters.chips.length) return filters.chips;
-  return buildFilterChips(filters, categoryNames);
 }
 
 function buildFilterChips(filters: RecordFilters, categoryNames: Record<string, string>) {
@@ -1016,6 +1049,12 @@ function extractAiSearchFilters(result: AiTransactionSearchResponse): Partial<Re
   if (sort === "latest" || sort === "amount_desc") extracted.sort = sort;
   if (min) extracted.min = min;
   if (max) extracted.max = max;
+  const minPayload = objectValue(payload.min ?? amount?.min);
+  const maxPayload = objectValue(payload.max ?? amount?.max);
+  const minStrict = booleanValue(payload.minStrict ?? payload.strictMin ?? minPayload?.strict ?? minPayload?.exclusive);
+  const maxStrict = booleanValue(payload.maxStrict ?? payload.strictMax ?? maxPayload?.strict ?? maxPayload?.exclusive);
+  if (minStrict !== undefined) extracted.minStrict = minStrict;
+  if (maxStrict !== undefined) extracted.maxStrict = maxStrict;
   if (category) extracted.category = category;
   const chips = normalizeChips(result.chips ?? payload.chips);
   if (chips.length) extracted.chips = chips;
@@ -1073,6 +1112,12 @@ function categoryLabel(transaction: LedgerTransaction, categoryNames?: Record<st
   if (transaction.categoryName) return transaction.categoryName;
   if (transaction.categoryId && categoryNames?.[transaction.categoryId]) return categoryNames[transaction.categoryId];
   return transaction.categoryId ?? (transaction.type === "income" ? "收入" : "支出");
+}
+
+function transactionCategoryTag(transaction: LedgerTransaction, categoryNames?: Record<string, string>) {
+  if (transaction.categoryName) return transaction.categoryName;
+  if (transaction.categoryId && categoryNames?.[transaction.categoryId]) return categoryNames[transaction.categoryId];
+  return transaction.categoryId ?? "未分类";
 }
 
 function categoryColor(category: { name?: string }, type: "income" | "expense") {

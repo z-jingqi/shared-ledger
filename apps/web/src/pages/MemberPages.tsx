@@ -9,7 +9,7 @@ import {
   XIcon,
 } from "@phosphor-icons/react";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams, type Location } from "react-router-dom";
 import { toast } from "sonner";
 import {
   IconTile,
@@ -37,6 +37,7 @@ type SentInvitation = {
 
 export function MembersPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const { book } = useActiveBook();
   const { data, reload } = useApi<{ members: Member[] }>(book ? `/books/${book.id}/members` : undefined);
@@ -44,7 +45,8 @@ export function MembersPage() {
   const [removing, setRemoving] = useState<Member | "me" | undefined>();
   const pendingInvitations = sentInvitations?.invitations.filter((item) => item.status === "pending") ?? [];
   const myMember = data?.members.find((member) => member.userId === user?.id);
-  const close = () => navigate(book ? `/settings?bookId=${book.id}` : "/settings");
+  const modalState = modalLinkState(location);
+  const close = () => closeSheet(navigate, location, book ? `/settings?bookId=${book.id}` : "/settings");
   const removeMember = async () => {
     if (!book || !removing) return;
     try {
@@ -69,7 +71,7 @@ export function MembersPage() {
         title="成员与邀请"
         onClose={close}
         right={
-          <Link className="ios-sheet-text-action" to={`/members/invite?bookId=${book?.id ?? ""}`}>
+          <Link className="ios-sheet-text-action" to={`/members/invite?bookId=${book?.id ?? ""}`} state={modalState}>
             + 邀请
           </Link>
         }
@@ -93,6 +95,7 @@ export function MembersPage() {
                   isMe={member.userId === user?.id}
                   canRemove={member.role !== "creator" && myMember?.role !== "member"}
                   bookId={book?.id}
+                  state={modalState}
                   onRemove={() => setRemoving(member)}
                   key={member.id}
                 />
@@ -149,7 +152,9 @@ export function MembersPage() {
 
 export function InviteMemberPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { book } = useActiveBook();
+  const modalState = modalLinkState(location);
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [method, setMethod] = useState<"email" | "phone">("email");
@@ -164,14 +169,14 @@ export function InviteMemberPage() {
         body: JSON.stringify({ email: method === "email" ? email || undefined : undefined, phone: method === "phone" ? phone || undefined : undefined, role }),
       });
       toast.success("邀请已发送", { duration: 2600, closeButton: true });
-      navigate(`/members?bookId=${book.id}`);
+      navigate(`/members?bookId=${book.id}`, { state: modalState });
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : "邀请失败");
     }
   };
   return (
     <IosPage>
-      <IosSheet title="邀请成员" onClose={() => navigate(`/members${book ? `?bookId=${book.id}` : ""}`)} back>
+      <IosSheet title="邀请成员" onClose={() => navigate(`/members${book ? `?bookId=${book.id}` : ""}`, { state: modalState })} back>
         <div className="ios-invite-sheet">
           <IosCard className="ios-invite-intro">
             <IconTile>
@@ -220,11 +225,13 @@ export function InviteMemberPage() {
 
 export function MemberRolePage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [search] = useSearchParams();
   const bookId = search.get("bookId");
   const memberId = search.get("memberId");
   const { data } = useApi<{ members: Member[] }>(bookId ? `/books/${bookId}/members` : undefined);
   const member = useMemo(() => data?.members.find((item) => item.id === memberId), [data?.members, memberId]);
+  const modalState = modalLinkState(location);
   const [role, setRole] = useState<"admin" | "member">("member");
   const [error, setError] = useState("");
 
@@ -241,7 +248,7 @@ export function MemberRolePage() {
         body: JSON.stringify({ role }),
       });
       toast.success("成员权限已更新", { duration: 2600, closeButton: true });
-      navigate(`/members?bookId=${bookId}`);
+      navigate(`/members?bookId=${bookId}`, { state: modalState });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "保存失败");
     }
@@ -250,7 +257,7 @@ export function MemberRolePage() {
     <IosPage>
       <IosSheet
         title="成员权限"
-        onClose={() => navigate(`/members${bookId ? `?bookId=${bookId}` : ""}`)}
+        onClose={() => navigate(`/members${bookId ? `?bookId=${bookId}` : ""}`, { state: modalState })}
         footer={<IosButton onClick={() => void save()}>保存权限</IosButton>}
       >
         <div className="ios-member-role-sheet">
@@ -284,12 +291,14 @@ function MemberRow({
   isMe,
   canRemove,
   bookId,
+  state,
   onRemove,
 }: {
   member: Member;
   isMe: boolean;
   canRemove: boolean;
   bookId?: string;
+  state?: { backgroundLocation: Location };
   onRemove: () => void;
 }) {
   return (
@@ -300,7 +309,7 @@ function MemberRow({
         <small>{roleLabel(member.role)}</small>
       </span>
       {member.role !== "creator" && (
-        <Link className="ios-role-pill" to={`/members/role?memberId=${member.id}${bookId ? `&bookId=${bookId}` : ""}`}>
+        <Link className="ios-role-pill" to={`/members/role?memberId=${member.id}${bookId ? `&bookId=${bookId}` : ""}`} state={state}>
           {roleLabel(member.role)}
         </Link>
       )}
@@ -311,6 +320,17 @@ function MemberRow({
       )}
     </div>
   );
+}
+
+function modalLinkState(location: Location) {
+  const state = location.state as { backgroundLocation?: Location } | null;
+  return { backgroundLocation: state?.backgroundLocation ?? location };
+}
+
+function closeSheet(navigate: ReturnType<typeof useNavigate>, location: Location, fallback: string) {
+  const state = location.state as { backgroundLocation?: Location } | null;
+  if (state?.backgroundLocation) navigate(-1);
+  else navigate(fallback);
 }
 
 function roleLabel(role: Member["role"] | "admin" | "member") {

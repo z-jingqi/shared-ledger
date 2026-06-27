@@ -55,6 +55,22 @@ describe("Hono REST API", () => {
     expect(free.status).toBe(403);
     expect(pro.status).toBe(503);
   });
+  it("updates the current user's avatar in the test runtime", async () => {
+    const store = new MemoryLedgerStore();
+    const app = createApp(store);
+    const form = new FormData();
+    form.set("avatar", new File(["avatar"], "avatar.png", { type: "image/png" }));
+
+    const response = await app.request("/auth/me/avatar", { method: "PUT", body: form }, { APP_ENV: "test" });
+    const body = await response.json<any>();
+    const me = await app.request("/auth/me", undefined, { APP_ENV: "test" });
+    const meBody = await me.json<any>();
+
+    expect(response.status).toBe(200);
+    expect(body.user.avatarUrl).toContain("/api/auth/avatar/user_demo/");
+    expect(store.users[0].avatarUrl).toBe(body.user.avatarUrl);
+    expect(meBody.user.avatarUrl).toBe(body.user.avatarUrl);
+  });
   it("prevents duplicate pending invitations", async () => {
     const store = new MemoryLedgerStore();
     const app = createApp(store);

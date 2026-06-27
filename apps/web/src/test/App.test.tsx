@@ -43,6 +43,11 @@ let transactionRequests: Array<{
   method: string;
   body: Record<string, unknown>;
 }> = [];
+let bookMutationRequests: Array<{
+  path: string;
+  method: string;
+  body?: Record<string, unknown>;
+}> = [];
 let importBatchRequests: Array<{
   path: string;
   files: string[];
@@ -68,8 +73,18 @@ const json = (data: unknown) =>
   new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/json" } });
 const errorJson = (status: number, error: string) =>
   new Response(JSON.stringify({ error }), { status, headers: { "content-type": "application/json" } });
+
+const bookSwitcherName = (bookName: string) => new RegExp(`((切换账本，)?当前账本\\s*)?${bookName}`);
+const findBookSwitcher = (bookName = "家庭账本") => screen.findByRole("button", { name: bookSwitcherName(bookName) });
+const queryAddOverlay = () =>
+  screen.queryByRole("dialog", { name: /添加|新增|记一笔|记账方式/ }) ??
+  screen.queryByRole("menu", { name: /添加|新增|记一笔|记账方式/ });
+const recordRow = (container: HTMLElement, id: string) => container.querySelector<HTMLAnchorElement>(`.ios-transaction-row[href="/records/${id}"]`);
+const recordRows = (container: HTMLElement) => [...container.querySelectorAll<HTMLAnchorElement>(".ios-transaction-row")];
+
 describe("shared ledger mobile UI", () => {
   beforeEach(() => {
+    localStorage.clear();
     plan = "free";
     authMode = "signed-in";
     authMeCalls = 0;
@@ -95,6 +110,7 @@ describe("shared ledger mobile UI", () => {
     };
     transactionError = "";
     transactionRequests = [];
+    bookMutationRequests = [];
     importBatchRequests = [];
     importCancelRequests = [];
     aiSearchRequests = [];
@@ -372,10 +388,32 @@ describe("shared ledger mobile UI", () => {
         if (path.includes("/imports/job_new"))
           return Promise.resolve(json({ job: { id: "job_new", fileName: "invoice.pdf", status: "pending_confirmation" } }));
         if (path.includes("/books/book_test/imports")) return Promise.resolve(json({ imports: [] }));
+        if (path.includes("/books/book_test") && method === "PATCH") {
+          const body = JSON.parse(bodyText ?? "{}") as { name?: string; currency?: string };
+          bookMutationRequests.push({ path, method, body });
+          bookList = bookList.map((item) => (item.id === "book_test" ? { ...item, ...body } : item));
+          return Promise.resolve(json({ book: bookList.find((item) => item.id === "book_test") }));
+        }
+        if (path.includes("/books/book_b") && method === "PATCH") {
+          const body = JSON.parse(bodyText ?? "{}") as { name?: string; currency?: string };
+          bookMutationRequests.push({ path, method, body });
+          bookList = bookList.map((item) => (item.id === "book_b" ? { ...item, ...body } : item));
+          return Promise.resolve(json({ book: bookList.find((item) => item.id === "book_b") }));
+        }
+        if (path.includes("/books/book_test") && method === "DELETE") {
+          bookMutationRequests.push({ path, method });
+          bookList = bookList.filter((item) => item.id !== "book_test");
+          return Promise.resolve(new Response(null, { status: 204 }));
+        }
+        if (path.includes("/books/book_b") && method === "DELETE") {
+          bookMutationRequests.push({ path, method });
+          bookList = bookList.filter((item) => item.id !== "book_b");
+          return Promise.resolve(new Response(null, { status: 204 }));
+        }
         if (path.includes("/books/book_test"))
-          return Promise.resolve(json({ book: { id: "book_test", name: "家庭账本", currency: "CNY" } }));
+          return Promise.resolve(json({ book: bookList.find((item) => item.id === "book_test"), role: "creator" }));
         if (path.includes("/books/book_b"))
-          return Promise.resolve(json({ book: { id: "book_b", name: "旅行账本", currency: "CNY" } }));
+          return Promise.resolve(json({ book: bookList.find((item) => item.id === "book_b"), role: "creator" }));
         if (path.includes("/books")) return Promise.resolve(json({ books: bookList }));
         return Promise.resolve(json({}));
       }),
@@ -386,22 +424,25 @@ describe("shared ledger mobile UI", () => {
   });
   it("loads a real book response and hides AI for a free user", async () => {
     render(<App />);
-    expect(await screen.findByRole("button", { name: /切换账本，当前账本 家庭账本/ })).toBeInTheDocument();
+    expect(await findBookSwitcher()).toBeInTheDocument();
+    expect(screen.getByText("6月净收支")).toBeInTheDocument();
+    expect(screen.queryByText("6月结余")).not.toBeInTheDocument();
     expect(screen.getByRole("navigation")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "首页" })).toHaveAttribute("href", "/home");
-    expect(screen.getByRole("link", { name: "记录" })).toHaveAttribute("href", "/records");
+    expect(screen.getByRole("link", { name: "首页" })).toHaveAttribute("href", expect.stringMatching(/^\/home/));
+    expect(screen.getByRole("link", { name: /流水|记录/ })).toHaveAttribute("href", expect.stringMatching(/^\/records/));
     expect(screen.getByRole("button", { name: "打开添加菜单" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "分析" })).toHaveAttribute("href", "/analysis");
-    expect(screen.getByRole("link", { name: "我的" })).toHaveAttribute("href", "/settings");
+    expect(screen.getByRole("link", { name: "分析" })).toHaveAttribute("href", expect.stringMatching(/^\/analysis/));
+    expect(screen.getByRole("link", { name: "我的" })).toHaveAttribute("href", expect.stringMatching(/^\/settings/));
     expect(screen.queryByRole("link", { name: "账本" })).not.toBeInTheDocument();
     expect(screen.getByRole("main")).toHaveClass("has-bottom-nav");
-    expect(screen.queryByLabelText("打开 AI 助手")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("打开 AI 助手")).toBeInTheDocument();
   });
   it("hides bottom navigation on book creation flow pages", async () => {
     window.history.pushState({}, "", "/books/new");
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "创建账本" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "返回" })).toBeInTheDocument();
     expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
     expect(screen.getByRole("main")).not.toHaveClass("has-bottom-nav");
   });
@@ -411,7 +452,7 @@ describe("shared ledger mobile UI", () => {
 
     expect(await screen.findByLabelText("账本名称")).toBeInTheDocument();
     expect(screen.getByLabelText("默认货币")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("输入备注信息（可选）")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("这个账本用来记录什么？")).toBeInTheDocument();
     expect(screen.queryByRole("switch", { name: "多人共享" })).not.toBeInTheDocument();
     expect(screen.queryByRole("switch", { name: "启用预算" })).not.toBeInTheDocument();
   });
@@ -420,9 +461,35 @@ describe("shared ledger mobile UI", () => {
     render(<App />);
 
     expect(await screen.findByText("还没有账本")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "创建一个" })).toHaveAttribute("href", "/books/new");
+    expect(screen.getByRole("link", { name: "创建账本" })).toHaveAttribute("href", "/books/new");
     expect(window.location.pathname).toBe("/home");
     expect(screen.getByRole("navigation")).toBeInTheDocument();
+  });
+  it("renders the empty recent transaction state as a full-width block on home", async () => {
+    transactionsByBook = { ...transactionsByBook, book_test: [] };
+    window.history.pushState({}, "", "/home?bookId=book_test");
+    render(<App />);
+
+    const emptyText = await screen.findByText("还没有记录，记下第一笔吧。");
+    const emptyBlock = emptyText.closest(".ios-empty, .ios-empty-state, .empty-state, .ios-transaction-empty, .ios-recent-empty");
+
+    expect(emptyText.closest("p.muted")).toBeNull();
+    expect(emptyBlock).toBeInTheDocument();
+    expect(emptyText.closest(".ios-transaction-card")).toContainElement(emptyBlock as HTMLElement);
+  });
+  it("switches books from the home ledger sheet without entering book management", async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, "", "/home?bookId=book_test");
+    render(<App />);
+
+    await user.click(await findBookSwitcher());
+    await user.click(await screen.findByRole("button", { name: /旅行账本/ }));
+
+    expect(window.location.pathname).toBe("/home");
+    expect(window.location.search).toContain("bookId=book_b");
+    expect(await findBookSwitcher("旅行账本")).toBeInTheDocument();
+    expect(screen.getByText("6月净收支")).toBeInTheDocument();
+    expect((await screen.findAllByText(/300\.00/)).length).toBeGreaterThan(0);
   });
   it("shows AI controls for a pro session", async () => {
     plan = "pro";
@@ -440,8 +507,8 @@ describe("shared ledger mobile UI", () => {
 
     await user.click(await screen.findByLabelText("打开 AI 助手"));
 
-    expect(await screen.findByRole("heading", { name: "AI 助手" })).toBeInTheDocument();
-    expect(screen.getByLabelText("当前账本 家庭账本")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "账本助手" })).toBeInTheDocument();
+    expect(screen.getByText(/家庭账本 · AI 助手/)).toBeInTheDocument();
     expect(screen.getByText("今年大于100的支出").closest("article")).toHaveClass("ai-message", "ai-user");
     expect(screen.getByText("已筛选出 12 笔记录。").closest("article")).toHaveClass("ai-message", "ai-assistant");
     expect(container.querySelector(".ai-message time")).toBeNull();
@@ -654,7 +721,7 @@ describe("shared ledger mobile UI", () => {
     window.localStorage.setItem("shared-ledger:last-active-book-id", "missing_book");
     render(<App />);
 
-    expect(await screen.findByRole("button", { name: /切换账本，当前账本 家庭账本/ })).toBeInTheDocument();
+    expect(await findBookSwitcher()).toBeInTheDocument();
     expect(window.localStorage.getItem("shared-ledger:last-active-book-id")).toBe("book_test");
   });
   it("shows the first book by default on analysis and switches by URL query", async () => {
@@ -662,27 +729,49 @@ describe("shared ledger mobile UI", () => {
     window.history.pushState({}, "", "/analysis");
     render(<App />);
 
-    expect(await screen.findByRole("button", { name: /当前账本\s*家庭账本/ })).toBeInTheDocument();
+    const ledgerButton = await findBookSwitcher();
+    expect(ledgerButton).toBeInTheDocument();
+    expect(ledgerButton).not.toHaveTextContent("·");
     expect((await screen.findAllByText(/100\.00/)).length).toBeGreaterThan(0);
 
-    await user.click(screen.getByRole("button", { name: /当前账本\s*家庭账本/ }));
-    await user.click(await screen.findByRole("button", { name: "旅行账本" }));
+    await user.click(screen.getByRole("button", { name: bookSwitcherName("家庭账本") }));
+    await user.click(await screen.findByRole("button", { name: /旅行账本/ }));
 
     expect(window.location.pathname).toBe("/analysis");
     expect(window.location.search).toContain("bookId=book_b");
-    expect(await screen.findByRole("button", { name: /当前账本\s*旅行账本/ })).toBeInTheDocument();
+    expect(await findBookSwitcher("旅行账本")).toBeInTheDocument();
     expect((await screen.findAllByText(/300\.00/)).length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("button", { name: "3 个月" }));
-    expect(screen.getByRole("button", { name: "3 个月" })).toHaveClass("selected");
-    expect(screen.getByRole("button", { name: "本月" })).not.toHaveClass("selected");
+    expect(screen.getByRole("button", { name: "3 个月" })).toHaveClass("active");
+    expect(screen.getByRole("button", { name: "本月" })).not.toHaveClass("active");
   });
   it("opens analysis directly with the requested book selected", async () => {
     window.history.pushState({}, "", "/analysis?bookId=book_b");
     render(<App />);
 
-    expect(await screen.findByRole("button", { name: /当前账本\s*旅行账本/ })).toBeInTheDocument();
+    expect(await findBookSwitcher("旅行账本")).toBeInTheDocument();
     expect((await screen.findAllByText(/300\.00/)).length).toBeGreaterThan(0);
+  });
+  it("uses a compact top analysis AI action instead of a top bar AI button or bottom card", async () => {
+    const user = userEvent.setup();
+    plan = "pro";
+    window.history.pushState({}, "", "/analysis?bookId=book_test");
+    const { container } = render(<App />);
+
+    expect(await findBookSwitcher()).toBeInTheDocument();
+    expect(screen.queryByText("总支出")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("打开 AI 助手")).not.toBeInTheDocument();
+    expect(screen.queryByText("想看更细的原因？")).not.toBeInTheDocument();
+    expect(container.querySelector(".ios-ai-analysis-card")).toBeNull();
+    const aiAnalysisLink = await screen.findByRole("link", { name: /用 AI 做更多分析/ });
+    expect(aiAnalysisLink.closest(".ios-analysis-ai-action")).toBeInTheDocument();
+    expect(aiAnalysisLink).toHaveAttribute("href", "/ai?bookId=book_test");
+
+    await user.click(aiAnalysisLink);
+
+    expect(window.location.pathname).toBe("/ai");
+    expect(window.location.search).toContain("bookId=book_test");
   });
   it("shows an empty analysis state when there are no books", async () => {
     bookList = [];
@@ -691,67 +780,129 @@ describe("shared ledger mobile UI", () => {
     render(<App />);
 
     expect(await screen.findByText("当前还没有账本")).toBeInTheDocument();
+    expect(screen.queryByLabelText("打开 AI 助手")).not.toBeInTheDocument();
     expect(screen.queryByText("收支趋势")).not.toBeInTheDocument();
   });
-  it("navigates from a live book to the add record form", async () => {
-    const user = userEvent.setup();
-    render(<App />);
-    await user.click(await screen.findByRole("button", { name: "打开添加菜单" }));
-    await user.click(await screen.findByRole("link", { name: /手动记录/ }));
-    expect(await screen.findByRole("heading", { name: "新增记录" })).toBeInTheDocument();
-    expect(window.location.search).toContain("bookId=book_test");
-  });
-  it("uploads files from the center add button", async () => {
-    const user = userEvent.setup();
-    const file = new File(["receipt"], "receipt.png", { type: "image/png" });
-    const { container } = render(<App />);
-
-    await user.click(await screen.findByRole("button", { name: "打开添加菜单" }));
-    expect(await screen.findByRole("dialog", { name: "添加" })).toBeInTheDocument();
-    const input = container.querySelector('input[type="file"]');
-    expect(input).toBeInTheDocument();
-    await user.upload(input as HTMLInputElement, file);
-
-    await waitFor(() => expect(window.location.pathname).toBe("/records"));
-  });
-  it("shows file upload below the records button and keeps it out of the record form", async () => {
-    window.history.pushState({}, "", "/records");
+  it("removes main page titles from records and settings", async () => {
+    window.history.pushState({}, "", "/records?bookId=book_test");
     const { unmount } = render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "家庭账本" })).toBeInTheDocument();
-    expect(screen.getByText("上传文件记一笔")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "选择文件" })).toBeInTheDocument();
+    expect(await findBookSwitcher()).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "流水" })).not.toBeInTheDocument();
 
     unmount();
-    window.history.pushState({}, "", "/records/new?bookId=book_test");
+    window.history.pushState({}, "", "/settings?bookId=book_test");
     render(<App />);
-    expect(await screen.findByRole("heading", { name: "新增记录" })).toBeInTheDocument();
-    expect(screen.queryByText("上传文件记一笔")).not.toBeInTheDocument();
-    expect(screen.queryByText("用附件记一笔")).not.toBeInTheDocument();
+
+    expect(await screen.findByText("当前订阅")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "我的" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /管理账本/ })).toHaveAttribute("href", "/books/manage");
+    expect(screen.queryByRole("link", { name: /切换 \/ 管理账本/ })).not.toBeInTheDocument();
   });
-  it("cancels a processing record import after confirmation", async () => {
+  it("opens book management details from the manage list and supports rename and delete", async () => {
     const user = userEvent.setup();
-    const file = new File(["receipt"], "receipt.png", { type: "image/png" });
-    window.history.pushState({}, "", "/records");
+    window.history.pushState({}, "", "/books/manage?bookId=book_test");
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "管理账本" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "返回" })).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: /旅行账本/ }));
+
+    expect(window.location.pathname).toBe("/books/book_b/settings");
+    expect(await screen.findByRole("heading", { name: "账本设置" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "返回" })).toBeInTheDocument();
+
+    const nameInput = await screen.findByLabelText("账本名称");
+    await user.clear(nameInput);
+    await user.type(nameInput, "出差账本");
+    await user.click(screen.getByRole("button", { name: "保存名称" }));
+
+    await waitFor(() =>
+      expect(bookMutationRequests).toContainEqual(
+        expect.objectContaining({ method: "PATCH", body: expect.objectContaining({ name: "出差账本" }) }),
+      ),
+    );
+    expect(await screen.findByText("出差账本")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "删除账本" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "删除账本" });
+    await user.click(within(dialog).getByRole("button", { name: "删除账本" }));
+
+    await waitFor(() => expect(window.location.pathname).toBe("/books/manage"));
+    expect(bookMutationRequests).toContainEqual(expect.objectContaining({ method: "DELETE" }));
+    expect(bookList.some((item) => item.id === "book_b")).toBe(false);
+  });
+  it("switches books from the records page and refreshes the records list", async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, "", "/records?bookId=book_test");
     const { container } = render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "家庭账本" })).toBeInTheDocument();
-    const input = container.querySelector('.records-upload-panel input[type="file"]') as HTMLInputElement;
+    await user.click(await findBookSwitcher());
+    await user.click(await screen.findByRole("button", { name: /旅行账本/ }));
+
+    expect(window.location.pathname).toBe("/records");
+    expect(window.location.search).toContain("bookId=book_b");
+    expect(await findBookSwitcher("旅行账本")).toBeInTheDocument();
+    await waitFor(() => expect(recordRow(container, "tx_travel")).toBeInTheDocument());
+    expect(recordRow(container, "tx_home")).not.toBeInTheDocument();
+  });
+  it("navigates from the add menu manual action to the add record form", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await findBookSwitcher();
+    await user.click(await screen.findByRole("button", { name: "打开添加菜单" }));
+    await waitFor(() => expect(queryAddOverlay()).toBeInTheDocument());
+    await user.click(screen.getByRole("menuitem", { name: /手动添加/ }));
+
+    expect(await screen.findByRole("heading", { name: "记一笔支出" })).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/records/new");
+    expect(window.location.search).toContain("bookId=book_test");
+  });
+  it("uploads supported files from the add menu and opens import history", async () => {
+    const user = userEvent.setup();
+    const file = new File(["receipt"], "receipt.png", { type: "image/png" });
+    render(<App />);
+
+    await findBookSwitcher();
+    const input = await waitFor(() => {
+      const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]');
+      if (!fileInput) throw new Error("Expected upload input to be rendered");
+      return fileInput;
+    });
+    await user.click(await screen.findByRole("button", { name: "打开添加菜单" }));
+    await waitFor(() => expect(queryAddOverlay()).toBeInTheDocument());
+    await user.click(screen.getByRole("menuitem", { name: /上传文件/ }));
     await user.upload(input, file);
-    await user.click(screen.getByRole("button", { name: "上传并自动记账" }));
 
-    expect(await screen.findByText("OCR 12%")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "取消" }));
-    expect(await screen.findByRole("dialog", { name: "取消识别" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "继续等待" }));
-    expect(screen.queryByRole("dialog", { name: "取消识别" })).not.toBeInTheDocument();
-    expect(screen.getByText("OCR 12%")).toBeInTheDocument();
+    await waitFor(() => expect(importBatchRequests).toHaveLength(1));
+    expect(importBatchRequests[0]).toMatchObject({
+      path: expect.stringContaining("/books/book_test/imports/batch"),
+      files: ["receipt.png"],
+      autoConfirm: null,
+    });
+    await waitFor(() => expect(window.location.pathname).toBe("/records/imports"));
+    expect(window.location.search).toContain("bookId=book_test");
+  });
+  it("does not show the old records import entry", async () => {
+    window.history.pushState({}, "", "/records");
+    render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "取消" }));
-    await user.click(await screen.findByRole("button", { name: "取消识别" }));
+    expect(await findBookSwitcher()).toBeInTheDocument();
+    expect(screen.queryByText("导入与识别")).not.toBeInTheDocument();
+    expect(screen.queryByText("上传文件记一笔")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "选择文件" })).not.toBeInTheDocument();
+  });
+  it("keeps the import history page free of the old three-option upload UI", async () => {
+    window.history.pushState({}, "", "/records/imports?bookId=book_test");
+    render(<App />);
 
-    await waitFor(() => expect(importCancelRequests).toHaveLength(1));
-    await waitFor(() => expect(screen.queryByAltText("receipt.png")).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/books/book_test/imports"), expect.anything()),
+    );
+    expect(screen.queryByRole("button", { name: /^拍照(\s|$)/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^相册(\s|$)/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^文件(\s|$)/ })).not.toBeInTheDocument();
   });
   it("keeps base record filters and sort in URL parameters", async () => {
     const user = userEvent.setup();
@@ -766,35 +917,87 @@ describe("shared ledger mobile UI", () => {
     window.history.pushState({}, "", "/records?bookId=book_test");
     const { container } = render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "家庭账本" })).toBeInTheDocument();
+    expect(await findBookSwitcher()).toBeInTheDocument();
     await waitFor(() =>
       expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/books/book_test/transactions"), expect.anything()),
     );
-    expect((await screen.findAllByText("早餐", {}, { timeout: 3000 })).length).toBeGreaterThan(0);
-    expect((await screen.findAllByText("工资")).length).toBeGreaterThan(0);
+    await waitFor(() => expect(recordRow(container, "tx_home")).toBeInTheDocument());
+    expect(recordRow(container, "tx_salary")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "筛选记录" }));
-    await user.click(await screen.findByRole("button", { name: "支出" }));
-    await user.click(screen.getByRole("button", { name: "金额最高" }));
-    await user.click(screen.getByRole("button", { name: "应用筛选" }));
+    let filterDialog = await screen.findByRole("dialog", { name: "筛选流水" });
+    await user.click(within(filterDialog).getByRole("button", { name: "支出" }));
+    await user.click(within(filterDialog).getByRole("button", { name: "金额最高" }));
+    await user.type(within(filterDialog).getByLabelText("最小金额"), "20");
+    await user.type(within(filterDialog).getByLabelText("最大金额"), "150");
+    await user.type(within(filterDialog).getByLabelText("分类关键词"), "餐");
+    await user.click(within(filterDialog).getByRole("button", { name: "应用筛选" }));
     expect(window.location.search).toContain("type=expense");
     expect(window.location.search).toContain("sort=amount_desc");
-    expect((await screen.findAllByText("早餐")).length).toBeGreaterThan(0);
-    expect(screen.getByText("打车")).toBeInTheDocument();
-    expect(screen.queryByText("工资")).not.toBeInTheDocument();
-    const rowTitles = [...container.querySelectorAll(".transaction-copy strong")].map((item) => item.textContent);
-    expect(rowTitles.slice(0, 2)).toEqual(["早餐", "打车"]);
+    expect(window.location.search).toContain("min=20");
+    expect(window.location.search).toContain("max=150");
+    expect(window.location.search).toContain("category=%E9%A4%90");
+    await waitFor(() => expect(recordRow(container, "tx_home")).toBeInTheDocument());
+    expect(recordRow(container, "tx_ride")).toBeInTheDocument();
+    expect(recordRow(container, "tx_salary")).not.toBeInTheDocument();
+    expect(recordRows(container).map((row) => row.getAttribute("href")).slice(0, 2)).toEqual(["/records/tx_home", "/records/tx_ride"]);
 
     await user.click(screen.getByRole("button", { name: "筛选记录" }));
-    const resetButtons = await screen.findAllByRole("button", { name: "重置" });
-    await user.click(resetButtons[resetButtons.length - 1]);
+    filterDialog = await screen.findByRole("dialog", { name: "筛选流水" });
+    await user.click(within(filterDialog).getByRole("button", { name: "重置" }));
     expect(window.location.search).not.toContain("type=");
     expect(window.location.search).not.toContain("sort=");
     expect(window.location.search).not.toContain("q=");
-    expect((await screen.findAllByText("工资")).length).toBeGreaterThan(0);
+    await waitFor(() => expect(recordRow(container, "tx_salary")).toBeInTheDocument());
+  });
+  it("hides record AI search for free users and applies keyword search on submit", async () => {
+    const user = userEvent.setup();
+    transactionsByBook = {
+      ...transactionsByBook,
+      book_test: [
+        { id: "tx_breakfast", type: "expense", amount: 100, note: "早餐", occurredAt: "2026-06-01", categoryId: "cat_food" },
+        { id: "tx_salary", type: "income", amount: 8000, note: "工资", occurredAt: "2026-06-20", categoryId: "cat_salary" },
+      ],
+    };
+    window.history.pushState({}, "", "/records?bookId=book_test");
+    const { container } = render(<App />);
+
+    const searchInput = await screen.findByLabelText("搜索流水");
+    const searchForm = searchInput.closest("form");
+
+    expect(searchForm?.firstElementChild).toBe(searchInput);
+    expect(within(searchForm as HTMLElement).queryByRole("button", { name: "开始搜索" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("打开 AI 助手")).not.toBeInTheDocument();
+
+    await user.type(searchInput, "工资{enter}");
+
+    expect(aiSearchRequests).toHaveLength(0);
+    expect(window.location.search).toContain("q=%E5%B7%A5%E8%B5%84");
+    await waitFor(() => expect(recordRow(container, "tx_salary")).toBeInTheDocument());
+    expect(recordRow(container, "tx_breakfast")).not.toBeInTheDocument();
+  });
+  it("renders compact record rows with category tags and type dots", async () => {
+    transactionsByBook = {
+      ...transactionsByBook,
+      book_test: [{ id: "tx_blank", type: "expense", amount: 500, occurredAt: "2026-06-27T08:00:00.000Z", categoryId: "cat_food" }],
+    };
+    window.history.pushState({}, "", "/records?bookId=book_test");
+    const { container } = render(<App />);
+
+    await waitFor(() => expect(recordRow(container, "tx_blank")).toBeInTheDocument());
+    const row = recordRow(container, "tx_blank");
+
+    expect(row).toHaveAttribute("href", "/records/tx_blank");
+    expect(row).toHaveTextContent("餐饮");
+    expect(row).toHaveTextContent("-¥500.00");
+    expect(row).not.toHaveTextContent("未命名记录");
+    expect(row).not.toHaveTextContent("08:00");
+    expect(row?.querySelector(".ios-transaction-dot.expense")).toBeInTheDocument();
+    expect(row?.querySelector(".ios-transaction-category-tag")).toHaveTextContent("餐饮");
   });
   it("runs natural language AI record search and persists returned filters", async () => {
     const user = userEvent.setup();
+    plan = "pro";
     transactionsByBook = {
       ...transactionsByBook,
       book_test: [
@@ -805,16 +1008,22 @@ describe("shared ledger mobile UI", () => {
       ],
     };
     window.history.pushState({}, "", "/records?bookId=book_test");
-    render(<App />);
+    const { container } = render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "家庭账本" })).toBeInTheDocument();
+    expect(await findBookSwitcher()).toBeInTheDocument();
+    const searchInput = screen.getByLabelText("搜索流水");
+    const searchForm = searchInput.closest("form");
+    expect(searchForm?.firstElementChild).toBe(searchInput);
+    expect(within(searchForm as HTMLElement).queryByText("AI")).not.toBeInTheDocument();
+    expect(within(searchForm as HTMLElement).getByRole("button", { name: "开始搜索" }).querySelector("svg")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "筛选记录" }));
-    await user.click(await screen.findByRole("button", { name: "支出" }));
-    await user.click(screen.getByRole("button", { name: "金额最高" }));
-    await user.click(screen.getByRole("button", { name: "应用筛选" }));
+    const filterDialog = await screen.findByRole("dialog", { name: "筛选流水" });
+    await user.click(within(filterDialog).getByRole("button", { name: "支出" }));
+    await user.click(within(filterDialog).getByRole("button", { name: "金额最高" }));
+    await user.click(within(filterDialog).getByRole("button", { name: "应用筛选" }));
 
-    await user.type(screen.getByLabelText("自然语言搜索记录"), "今年大于100的餐饮支出");
-    await user.click(screen.getByRole("button", { name: "AI 搜索记录" }));
+    await user.type(screen.getByLabelText("搜索流水"), "今年大于100的餐饮支出");
+    await user.click(screen.getByRole("button", { name: "开始搜索" }));
 
     await waitFor(() => expect(aiSearchRequests).toHaveLength(1));
     expect(aiSearchRequests[0]).toMatchObject({
@@ -828,14 +1037,14 @@ describe("shared ledger mobile UI", () => {
     expect(window.location.search).toContain("min=100");
     expect(window.location.search).toContain("minStrict=1");
     expect(window.location.search).toContain("category=cat_food");
-    expect(await screen.findByText("AI 已筛选")).toBeInTheDocument();
-    expect(await screen.findByText("年会餐费")).toBeInTheDocument();
-    expect(screen.queryByText("早餐")).not.toBeInTheDocument();
-    expect(screen.queryByText("工资")).not.toBeInTheDocument();
-    expect(screen.queryByText("去年餐费")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("AI 筛选条件")).toHaveTextContent("餐饮");
+    expect(screen.queryByText("AI 已筛选")).not.toBeInTheDocument();
+    await waitFor(() => expect(recordRow(container, "tx_party")).toBeInTheDocument());
+    expect(recordRow(container, "tx_breakfast")).not.toBeInTheDocument();
+    expect(recordRow(container, "tx_salary")).not.toBeInTheDocument();
+    expect(recordRow(container, "tx_old")).not.toBeInTheDocument();
+    expect(screen.queryByText(/今年 · 支出 · 餐饮/)).not.toBeInTheDocument();
   });
-  it("shows and clears AI record filters from URL parameters", async () => {
+  it("applies AI record filters from URL parameters without rendering an active filter banner", async () => {
     const user = userEvent.setup();
     transactionsByBook = {
       ...transactionsByBook,
@@ -860,104 +1069,81 @@ describe("shared ledger mobile UI", () => {
     window.history.pushState({}, "", `/records?${aiParams.toString()}`);
     const firstRender = render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "家庭账本" })).toBeInTheDocument();
-    const summary = await screen.findByText("已筛选：今年 · 支出 · 金额 > 100");
-    expect(summary.closest(".active-filter-summary")).toHaveClass("ai-filter");
-    expect(await screen.findByText("年会餐费")).toBeInTheDocument();
-    expect(screen.queryByText("早餐")).not.toBeInTheDocument();
-    expect(screen.queryByText("工资")).not.toBeInTheDocument();
-    expect(screen.queryByText("去年餐费")).not.toBeInTheDocument();
+    expect(await findBookSwitcher()).toBeInTheDocument();
+    expect(screen.queryByText("AI 已筛选")).not.toBeInTheDocument();
+    expect(screen.queryByText("今年 · 支出 · 金额 > 100")).not.toBeInTheDocument();
+    await waitFor(() => expect(recordRow(firstRender.container, "tx_party")).toBeInTheDocument());
+    expect(recordRow(firstRender.container, "tx_breakfast")).not.toBeInTheDocument();
+    expect(recordRow(firstRender.container, "tx_salary")).not.toBeInTheDocument();
+    expect(recordRow(firstRender.container, "tx_old")).not.toBeInTheDocument();
 
     firstRender.unmount();
-    render(<App />);
-    expect(await screen.findByText("已筛选：今年 · 支出 · 金额 > 100")).toBeInTheDocument();
-    expect(await screen.findByText("年会餐费")).toBeInTheDocument();
-    expect(screen.queryByText("工资")).not.toBeInTheDocument();
+    const secondRender = render(<App />);
+    expect(screen.queryByText("今年 · 支出 · 金额 > 100")).not.toBeInTheDocument();
+    await waitFor(() => expect(recordRow(secondRender.container, "tx_party")).toBeInTheDocument());
+    expect(recordRow(secondRender.container, "tx_salary")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "清除" }));
+    await user.click(screen.getByRole("button", { name: "筛选记录" }));
+    const filterDialog = await screen.findByRole("dialog", { name: "筛选流水" });
+    await user.click(within(filterDialog).getByRole("button", { name: "重置" }));
     expect(window.location.search).toBe("?bookId=book_test");
-    expect(await screen.findByText("早餐")).toBeInTheDocument();
-    expect((await screen.findAllByText("工资")).length).toBeGreaterThan(0);
-    expect(await screen.findByText("去年餐费")).toBeInTheDocument();
-    expect(screen.queryByText("已筛选：今年 · 支出 · 金额 > 100")).not.toBeInTheDocument();
+    await waitFor(() => expect(recordRow(secondRender.container, "tx_breakfast")).toBeInTheDocument());
+    expect(recordRow(secondRender.container, "tx_salary")).toBeInTheDocument();
+    expect(recordRow(secondRender.container, "tx_old")).toBeInTheDocument();
+    expect(screen.queryByText("今年 · 支出 · 金额 > 100")).not.toBeInTheDocument();
   });
-  it("renders the redesigned record form without native category and date fields", async () => {
+  it("renders the redesigned record form with custom keypad, category strip, and attachment control", async () => {
     const user = userEvent.setup();
     window.history.pushState({}, "", "/records/new?bookId=book_test");
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "新增记录" })).toBeInTheDocument();
-    const main = screen.getByRole("main");
-    expect(screen.getByRole("main")).not.toHaveClass("has-bottom-nav");
-    expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
-    const form = main.querySelector("form.transaction-form");
-    expect(form).toBeInTheDocument();
-    const footer = form?.querySelector(".record-form-footer");
-    expect(footer).toBeInTheDocument();
-    const actions = footer?.querySelector(".record-form-actions");
-    expect(actions).toBeInTheDocument();
-    expect(actions).toContainElement(screen.getByRole("button", { name: "保存记录" }));
-    expect(screen.getByRole("spinbutton", { name: "金额" })).toHaveAttribute("inputmode", "decimal");
-    expect(screen.getByRole("button", { name: /类型\s*支出/ })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "记一笔支出" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("分类", { selector: "select" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存支出" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存并继续" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "餐饮" })).toBeInTheDocument();
+    expect(screen.getByLabelText("日期")).toHaveAttribute("type", "date");
+    expect(screen.getByRole("button", { name: "附件" })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("添加备注…")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "拆分多个明细" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "1" })).toBeInTheDocument();
     expect(screen.queryByText("成员")).not.toBeInTheDocument();
     expect(screen.queryByText("标签")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /类型\s*支出/ }));
-    expect(await screen.findByRole("dialog", { name: "选择类型" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "收入" }));
-    expect(screen.getByRole("button", { name: /类型\s*收入/ })).toBeInTheDocument();
-
-    expect(screen.queryByLabelText("分类", { selector: "select" })).not.toBeInTheDocument();
-    const categoryButton = screen.getByRole("button", { name: /分类\s*请选择分类/ });
-    expect(categoryButton).toHaveTextContent("请选择分类");
-    await user.click(categoryButton);
-    expect(await screen.findByRole("dialog", { name: "选择分类" })).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "餐饮" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "工资" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "餐饮" }));
-
-    expect(screen.queryByLabelText("时间", { selector: 'input[type="date"]' })).not.toBeInTheDocument();
-    const dateButton = screen.getByRole("button", { name: /时间\s*\d{4}-\d{2}-\d{2}/ });
-    expect(dateButton.textContent).toMatch(/\d+月\d+日/);
-    await user.click(dateButton);
-    expect(await screen.findByRole("dialog", { name: "选择时间" })).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "今天" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "昨天" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "记一笔收入" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "工资" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存收入" })).toBeInTheDocument();
   });
-  it("keeps line items disabled until an amount is entered and preserves the amount after returning", async () => {
+  it("preserves amount and line items after returning from the line item sheet", async () => {
     const user = userEvent.setup();
     window.history.pushState({}, "", "/records/new?bookId=book_test");
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "新增记录" })).toBeInTheDocument();
-    const addDetailsButton = screen.getByRole("button", { name: /添加明细（选填）/ });
-    expect(addDetailsButton).toBeDisabled();
-
-    await user.click(addDetailsButton);
+    expect(await screen.findByRole("heading", { name: "记一笔支出" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "拆分多个明细" }));
     expect(window.location.pathname).toBe("/records/new");
-    expect(screen.queryByText("请先输入总金额")).not.toBeInTheDocument();
+    expect(await screen.findByText("请先输入总金额")).toBeInTheDocument();
 
-    await user.type(screen.getByRole("spinbutton", { name: "金额" }), "128.5");
-    await waitFor(() => expect(addDetailsButton).toBeEnabled());
-    await user.click(addDetailsButton);
+    for (const key of ["1", "2", "8", ".", "5"]) await user.click(screen.getByRole("button", { name: key }));
+    await user.click(screen.getByRole("button", { name: "拆分多个明细" }));
 
     expect(window.location.pathname).toBe("/records/new/items");
     expect(window.location.search).toContain("total=128.5");
-    expect(await screen.findByRole("heading", { name: "添加明细" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "拆分明细" })).toBeInTheDocument();
     expect(screen.getAllByText(/128\.50/).length).toBeGreaterThan(0);
     await user.type(screen.getByLabelText("明细名称"), "牛奶");
     await user.type(screen.getByLabelText("明细金额"), "128.5");
 
-    await user.click(screen.getByRole("button", { name: "保存明细" }));
+    await user.click(screen.getByRole("button", { name: /保存明细/ }));
 
     expect(window.location.pathname).toBe("/records/new");
-    expect(await screen.findByRole("heading", { name: "新增记录" })).toBeInTheDocument();
-    expect(screen.getByRole("spinbutton", { name: "金额" })).toHaveValue(128.5);
-    expect(screen.getByRole("button", { name: "添加明细（1 项）" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "记一笔支出" })).toBeInTheDocument();
+    expect(screen.getByText("128.5")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "拆分多个明细（1）" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /分类\s*请选择分类/ }));
     await user.click(await screen.findByRole("button", { name: "餐饮" }));
-    await user.click(screen.getByRole("button", { name: "保存记录" }));
+    await user.click(screen.getByRole("button", { name: "保存支出" }));
     await waitFor(() => expect(transactionRequests).toHaveLength(1));
     expect(transactionRequests[0]?.body).toMatchObject({
       amount: 128.5,
@@ -970,7 +1156,7 @@ describe("shared ledger mobile UI", () => {
     window.history.pushState({}, "", "/records/new/items?total=128.5");
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "添加明细" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "拆分明细" })).toBeInTheDocument();
     expect(screen.getAllByText(/128\.50/).length).toBeGreaterThan(0);
     expect(screen.queryByDisplayValue("牛奶")).not.toBeInTheDocument();
     expect(screen.queryByDisplayValue("水果")).not.toBeInTheDocument();
@@ -989,102 +1175,49 @@ describe("shared ledger mobile UI", () => {
     expect(screen.queryByDisplayValue("咖啡")).not.toBeInTheDocument();
     expect(screen.queryByText("按分类拆分")).not.toBeInTheDocument();
   });
-  it("keeps the current record draft when creating the first category from the picker", async () => {
-    const user = userEvent.setup();
-    categoriesByBook.book_test = [];
-    window.history.pushState({}, "", "/records/new?bookId=book_test");
-    render(<App />);
-
-    expect(await screen.findByRole("heading", { name: "新增记录" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /类型\s*支出/ }));
-    await user.click(await screen.findByRole("button", { name: "收入" }));
-    await user.type(screen.getByRole("spinbutton", { name: "金额" }), "88.50");
-    await user.type(screen.getByPlaceholderText("可填写备注信息（选填）"), "项目报销");
-    const originalDateLabel = screen.getByRole("button", { name: /时间\s*\d{4}-\d{2}-\d{2}/ }).textContent;
-
-    await user.click(screen.getByRole("button", { name: /分类\s*请选择分类/ }));
-    expect(await screen.findByText(/暂无分类|还没有分类|没有可用分类/)).toBeInTheDocument();
-
-    await user.type(screen.getByPlaceholderText("新分类名称"), "报销");
-    await user.click(screen.getByRole("button", { name: "添加分类" }));
-
-    expect(screen.getByRole("heading", { name: "新增记录" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /分类\s*报销/ })).toHaveTextContent("报销");
-    expect(screen.getByRole("button", { name: /时间\s*\d{4}-\d{2}-\d{2}/ }).textContent).toBe(originalDateLabel);
-    expect(screen.getByRole("spinbutton", { name: "金额" })).toHaveValue(88.5);
-    expect(screen.getByPlaceholderText("可填写备注信息（选填）")).toHaveValue("项目报销");
-
-    await user.click(screen.getByRole("button", { name: "保存记录" }));
-    await waitFor(() => expect(transactionRequests).toHaveLength(1));
-    expect(transactionRequests[0]).toMatchObject({
-      method: "POST",
-      body: {
-        type: "income",
-        amount: 88.5,
-        categoryId: expect.any(String),
-        note: "项目报销",
-      },
-    });
-    expect(transactionRequests[0]?.body).not.toHaveProperty("memberId");
-    expect(transactionRequests[0]?.body).not.toHaveProperty("accountId");
-    expect(transactionRequests[0]?.body).not.toHaveProperty("tagIds");
-    expect(transactionRequests[0]?.body.occurredAt).toMatch(/\d{4}-\d{2}-\d{2}/);
-  });
-  it("requires a category before saving a record", async () => {
+  it("requires a positive amount before saving a record", async () => {
     const user = userEvent.setup();
     window.history.pushState({}, "", "/records/new?bookId=book_test");
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "新增记录" })).toBeInTheDocument();
-    await user.type(screen.getByRole("spinbutton", { name: "金额" }), "12");
-    await user.type(screen.getByPlaceholderText("可填写备注信息（选填）"), "咖啡");
-    await user.click(screen.getByRole("button", { name: "保存记录" }));
+    expect(await screen.findByRole("heading", { name: "记一笔支出" })).toBeInTheDocument();
+    await user.type(screen.getByPlaceholderText("添加备注…"), "咖啡");
+    await user.click(screen.getByRole("button", { name: "保存支出" }));
 
-    expect((await screen.findAllByText("分类必填")).length).toBeGreaterThan(0);
+    expect(await screen.findByText("金额必须大于 0")).toBeInTheDocument();
     expect(transactionRequests).toHaveLength(0);
-    expect(screen.getByRole("spinbutton", { name: "金额" })).toHaveValue(12);
-    expect(screen.getByPlaceholderText("可填写备注信息（选填）")).toHaveValue("咖啡");
+    expect(screen.getByPlaceholderText("添加备注…")).toHaveValue("咖啡");
   });
   it("saves a record and keeps entering another one", async () => {
     const user = userEvent.setup();
     window.history.pushState({}, "", "/records/new?bookId=book_test");
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "新增记录" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /类型\s*支出/ }));
-    await user.click(await screen.findByRole("button", { name: "收入" }));
-    await user.type(screen.getByRole("spinbutton", { name: "金额" }), "20");
-    await user.type(screen.getByPlaceholderText("可填写备注信息（选填）"), "第一笔");
-    const originalDateLabel = screen.getByRole("button", { name: /时间\s*\d{4}-\d{2}-\d{2}/ }).textContent;
-
-    await user.click(screen.getByRole("button", { name: /分类\s*请选择分类/ }));
-    await user.click(await screen.findByRole("button", { name: "餐饮" }));
+    expect(await screen.findByRole("heading", { name: "记一笔支出" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "收入" }));
+    for (const key of ["2", "0"]) await user.click(screen.getByRole("button", { name: key }));
+    await user.type(screen.getByPlaceholderText("添加备注…"), "第一笔");
+    await user.click(await screen.findByRole("button", { name: "工资" }));
     await user.click(screen.getByRole("button", { name: "保存并继续" }));
 
     await waitFor(() => expect(transactionRequests).toHaveLength(1));
     expect(window.location.pathname).toBe("/records/new");
-    expect(screen.getByRole("heading", { name: "新增记录" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /类型\s*收入/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /时间\s*\d{4}-\d{2}-\d{2}/ }).textContent).toBe(originalDateLabel);
-    expect(screen.getByRole("button", { name: /分类\s*请选择分类/ })).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole("spinbutton", { name: "金额" })).toHaveValue(null));
-    expect(screen.getByPlaceholderText("可填写备注信息（选填）")).toHaveValue("");
+    expect(screen.getByRole("heading", { name: "记一笔收入" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("0", { selector: ".ios-amount-panel strong" })).toBeInTheDocument());
+    expect(screen.getByPlaceholderText("添加备注…")).toHaveValue("");
 
-    await user.type(screen.getByRole("spinbutton", { name: "金额" }), "30");
-    await user.type(screen.getByPlaceholderText("可填写备注信息（选填）"), "第二笔");
-    await user.click(screen.getByRole("button", { name: /分类\s*请选择分类/ }));
-    await user.click(await screen.findByRole("button", { name: "餐饮" }));
+    for (const key of ["3", "0"]) await user.click(screen.getByRole("button", { name: key }));
+    await user.type(screen.getByPlaceholderText("添加备注…"), "第二笔");
+    await user.click(await screen.findByRole("button", { name: "工资" }));
     await user.click(screen.getByRole("button", { name: "保存并继续" }));
 
     await waitFor(() => expect(transactionRequests).toHaveLength(2));
     expect(transactionRequests[0]).toMatchObject({
-      body: { type: "income", amount: 20, categoryId: "cat_food", note: "第一笔" },
+      body: { type: "income", amount: 20, categoryId: "cat_salary", note: "第一笔" },
     });
     expect(transactionRequests[1]).toMatchObject({
-      body: { type: "income", amount: 30, categoryId: "cat_food", note: "第二笔" },
+      body: { type: "income", amount: 30, categoryId: "cat_salary", note: "第二笔" },
     });
-    expect(transactionRequests[0]?.body).not.toHaveProperty("tagIds");
-    expect(transactionRequests[1]?.body).not.toHaveProperty("tagIds");
   });
   it("keeps the current draft when save and continue fails", async () => {
     const user = userEvent.setup();
@@ -1092,37 +1225,36 @@ describe("shared ledger mobile UI", () => {
     window.history.pushState({}, "", "/records/new?bookId=book_test");
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "新增记录" })).toBeInTheDocument();
-    await user.type(screen.getByRole("spinbutton", { name: "金额" }), "45");
-    await user.type(screen.getByPlaceholderText("可填写备注信息（选填）"), "不能丢");
-    await user.click(screen.getByRole("button", { name: /分类\s*请选择分类/ }));
+    expect(await screen.findByRole("heading", { name: "记一笔支出" })).toBeInTheDocument();
+    for (const key of ["4", "5"]) await user.click(screen.getByRole("button", { name: key }));
+    await user.type(screen.getByPlaceholderText("添加备注…"), "不能丢");
     await user.click(await screen.findByRole("button", { name: "餐饮" }));
     await user.click(screen.getByRole("button", { name: "保存并继续" }));
 
     expect(await screen.findByText("保存失败")).toBeInTheDocument();
-    expect(screen.getByRole("spinbutton", { name: "金额" })).toHaveValue(45);
-    expect(screen.getByPlaceholderText("可填写备注信息（选填）")).toHaveValue("不能丢");
+    expect(screen.getByText("45")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("添加备注…")).toHaveValue("不能丢");
   });
   it("does not show save and continue when editing a record", async () => {
     window.history.pushState({}, "", "/records/tx_home/edit?bookId=book_test");
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "编辑记录" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "保存记录" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存修改" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "保存并继续" })).not.toBeInTheDocument();
   });
   it("redirects anonymous users to login", async () => {
     authMode = "signed-out";
     window.history.pushState({}, "", "/records");
     render(<App />);
-    expect(await screen.findByRole("heading", { name: "Shared Ledger" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "欢迎回来" })).toBeInTheDocument();
     expect(window.location.pathname).toBe("/login");
     expect(window.location.search).toContain("redirect=%2Frecords");
   });
   it("refreshes an expired access session before rendering protected pages", async () => {
     authMode = "expired-once";
     render(<App />);
-    expect(await screen.findByRole("button", { name: /切换账本，当前账本 家庭账本/ })).toBeInTheDocument();
+    expect(await findBookSwitcher()).toBeInTheDocument();
     expect(authMeCalls).toBe(2);
   });
   it("keeps login and register form state separate", async () => {
@@ -1136,7 +1268,7 @@ describe("shared ledger mobile UI", () => {
     await user.click(screen.getByRole("button", { name: "登录" }));
     expect(await screen.findByText("用户名或密码错误")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("link", { name: "注册" }));
+    await user.click(screen.getByRole("link", { name: "立即注册" }));
     expect(screen.queryByText("用户名或密码错误")).not.toBeInTheDocument();
     expect(screen.getByLabelText("用户名")).toHaveValue("");
     expect(screen.getByLabelText("密码")).toHaveValue("");
@@ -1154,7 +1286,7 @@ describe("shared ledger mobile UI", () => {
     await user.click(screen.getByRole("button", { name: "隐藏密码" }));
     expect(loginPassword).toHaveAttribute("type", "password");
 
-    await user.click(screen.getByRole("link", { name: "注册" }));
+    await user.click(screen.getByRole("link", { name: "立即注册" }));
     expect(await screen.findByRole("button", { name: "创建账号" })).toBeInTheDocument();
     const registerPassword = screen.getByLabelText("密码");
     const confirmPassword = screen.getByLabelText("确认密码");

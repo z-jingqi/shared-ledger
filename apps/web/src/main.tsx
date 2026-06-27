@@ -8,6 +8,10 @@ import "./styles.core-tabs.css";
 import "./styles.records-ios.css";
 import "./styles.account-ai.css";
 import { App } from "./App";
+import { applyPlatformClasses } from "./app/platform";
+
+applyPlatformClasses();
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <App />

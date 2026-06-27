@@ -13,6 +13,7 @@ import {
   refreshSession,
   revokeRefreshToken,
   revokeSession,
+  updateUserAvatar,
   upgradeSubscription,
 } from "../services/auth";
 import { currentUser } from "../services/access";
@@ -37,6 +38,12 @@ const providers = ["google", "wechat"] as const;
 type Provider = (typeof providers)[number];
 const isProvider = (provider: string): provider is Provider =>
   (providers as readonly string[]).includes(provider);
+const avatarTypes: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+};
+const maxAvatarBytes = 3 * 1024 * 1024;
 
 function callbackUrl(context: any, provider: Provider) {
   return new URL(`/auth/oauth/${provider}/callback`, context.req.url).toString();
@@ -57,6 +64,14 @@ function setAuthCookies(context: any, tokens: { accessToken: string; refreshToke
 function clearAuthCookies(context: any) {
   deleteCookie(context, "ledger_session", { path: "/" });
   deleteCookie(context, "ledger_refresh", { path: "/" });
+}
+function publicAvatarUrl(context: any, userId: string, fileName: string) {
+  const path = `/api/auth/avatar/${encodeURIComponent(userId)}/${encodeURIComponent(fileName)}`;
+  return context.env.API_PUBLIC_ORIGIN ? new URL(path, context.env.API_PUBLIC_ORIGIN).toString() : path;
+}
+function avatarContentType(file: File) {
+  const type = file.type.toLowerCase();
+  return avatarTypes[type] ? type : undefined;
 }
 
 export function registerAuthRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryLedgerStore) {
@@ -109,6 +124,54 @@ export function registerAuthRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryL
   app.get("/auth/me", async (context) => {
     const user = await currentUser(context, store);
     return user ? context.json({ user }) : jsonError(context, "未登录", 401);
+  });
+
+  app.put("/auth/me/avatar", async (context) => {
+    const user = await currentUser(context, store);
+    if (!user) return jsonError(context, "未登录", 401);
+    const data = await context.req.formData().catch(() => null);
+    const avatar = data?.get("avatar");
+    if (!(avatar instanceof File)) return jsonError(context, "请选择头像文件");
+    const contentType = avatarContentType(avatar);
+    if (!contentType) return jsonError(context, "头像仅支持 JPG、PNG 或 WebP");
+    if (avatar.size > maxAvatarBytes) return jsonError(context, "头像不能超过 3MB");
+
+    if (context.env.DB) {
+      if (!context.env.FILES) return jsonError(context, "头像上传需要 R2 绑定", 503);
+      const extension = avatarTypes[contentType];
+      const fileName = `${crypto.randomUUID()}.${extension}`;
+      const key = `avatars/${user.id}/${fileName}`;
+      await context.env.FILES.put(key, avatar.stream(), {
+        httpMetadata: { contentType },
+      });
+      const avatarUrl = publicAvatarUrl(context, user.id, fileName);
+      await updateUserAvatar(context.env.DB, user.id, avatarUrl);
+      return context.json({ user: { ...user, avatarUrl } });
+    }
+
+    if (context.env.APP_ENV === "test" && store) {
+      const avatarUrl = publicAvatarUrl(context, user.id, `${crypto.randomUUID()}.${avatarTypes[contentType]}`);
+      const stored = store.users.find((item) => item.id === user.id);
+      if (stored) stored.avatarUrl = avatarUrl;
+      return context.json({ user: { ...user, avatarUrl } });
+    }
+    return jsonError(context, "头像上传需要 D1 与 R2 运行时", 503);
+  });
+
+  app.get("/auth/avatar/:userId/:fileName", async (context) => {
+    const { userId, fileName } = context.req.param();
+    if (!context.env.FILES) return jsonError(context, "头像文件服务未配置", 503);
+    if (!/^[a-zA-Z0-9_-]+$/.test(userId) || !/^[a-f0-9-]+\.(jpg|png|webp)$/.test(fileName)) {
+      return jsonError(context, "头像地址无效", 400);
+    }
+    const object = await context.env.FILES.get(`avatars/${userId}/${fileName}`);
+    if (!object?.body) return jsonError(context, "头像不存在", 404);
+    return new Response(object.body, {
+      headers: {
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "Content-Type": object.httpMetadata?.contentType ?? "application/octet-stream",
+      },
+    });
   });
 
   app.get("/auth/oauth/:provider", async (context) => {

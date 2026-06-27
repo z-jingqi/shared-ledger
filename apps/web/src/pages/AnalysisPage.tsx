@@ -1,17 +1,18 @@
-import { WarningCircleIcon } from "@phosphor-icons/react";
+import { CaretRightIcon, SparkleIcon, WarningCircleIcon } from "@phosphor-icons/react";
 import { useState } from "react";
+import { Link } from "react-router-dom";
+import { BookSwitcherSheet } from "../components/books/BookSwitcherSheet";
 import type { LedgerTransaction } from "../components/ledger/Transactions";
-import { AiSparkButton, IosMetric, IosPage, IosScroll, IosTopBar, yuan } from "../components/ios/IosDesign";
+import { IosMetric, IosPage, IosScroll, IosTopBar, yuan } from "../components/ios/IosDesign";
 import { useActiveBook } from "../hooks/useActiveBook";
 import { useApi } from "../hooks/useApi";
-import { useNavigate } from "react-router-dom";
 
 type Range = "month" | "quarter" | "year";
 
 export function AnalysisPage() {
-  const navigate = useNavigate();
-  const { book } = useActiveBook();
+  const { book, books, setActiveBook } = useActiveBook();
   const [range, setRange] = useState<Range>("month");
+  const [bookSwitcherOpen, setBookSwitcherOpen] = useState(false);
   const { data } = useApi<{ transactions: LedgerTransaction[] }>(book ? `/books/${book.id}/transactions` : undefined);
   const transactions = data?.transactions ?? [];
   const limits = getRange(range);
@@ -24,13 +25,23 @@ export function AnalysisPage() {
   const maxMonth = Math.max(1, ...monthlyBars(transactions).map((item) => Math.max(item.income, item.expense)));
   const warnings = [...expenseItems].sort((a, b) => b.amount - a.amount).slice(0, 2);
 
+  if (!book) {
+    return (
+      <IosPage className="ios-analysis">
+        <IosTopBar book={book} />
+        <div className="ios-empty">
+          <b>当前还没有账本</b>
+          <p>创建账本后即可查看收支分析。</p>
+        </div>
+      </IosPage>
+    );
+  }
+
   return (
     <IosPage className="ios-analysis">
       <IosTopBar
         book={book}
-        suffix={`· ${limits.label}`}
-        onLedgerClick={() => navigate("/books/manage")}
-        action={<AiSparkButton onClick={() => navigate(`/ai${book?.id ? `?bookId=${book.id}` : ""}`)} />}
+        onLedgerClick={() => setBookSwitcherOpen(true)}
       />
       <div className="ios-analysis-ranges">
         {[
@@ -44,6 +55,15 @@ export function AnalysisPage() {
         ))}
       </div>
       <IosScroll className="ios-analysis-scroll">
+        <Link className="ios-analysis-ai-action" to={`/ai?bookId=${book.id}`}>
+          <SparkleIcon size={18} weight="fill" />
+          <span>
+            <b>用 AI 做更多分析</b>
+            <small>按分类、成员和异常继续拆解</small>
+          </span>
+          <CaretRightIcon size={17} />
+        </Link>
+
         <div className="ios-analysis-summary">
           <IosMetric label="收入" value={yuan(income, book?.currency)} tone="income" />
           <IosMetric label="支出" value={yuan(expense, book?.currency)} />
@@ -73,7 +93,6 @@ export function AnalysisPage() {
           <div>
             <div className="ios-donut" style={donutStyle(categories, expense)}>
               <span>
-                <small>总支出</small>
                 <b>{yuan(expense, book?.currency)}</b>
               </span>
             </div>
@@ -123,6 +142,17 @@ export function AnalysisPage() {
           </div>
         </section>
       </IosScroll>
+      {bookSwitcherOpen && (
+        <BookSwitcherSheet
+          books={books}
+          currentBookId={book.id}
+          onSelect={(bookId) => {
+            setActiveBook(bookId);
+            setBookSwitcherOpen(false);
+          }}
+          close={() => setBookSwitcherOpen(false)}
+        />
+      )}
     </IosPage>
   );
 }

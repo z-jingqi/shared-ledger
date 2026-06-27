@@ -16,7 +16,13 @@ export type Env = {
   WECHAT_APP_SECRET?: string;
   AUTH_COOKIE_SECRET?: string;
 };
-export type LedgerUser = { id: string; name: string; email: string; plan: "free" | "pro" };
+export type LedgerUser = {
+  id: string;
+  name: string;
+  email: string;
+  plan: "free" | "pro";
+  avatarUrl?: string;
+};
 export type Book = {
   id: string;
   name: string;

@@ -9,6 +9,7 @@ type UserRow = {
   id: string;
   name: string;
   email: string | null;
+  avatarUrl: string | null;
   phone: string | null;
   plan: "free" | "pro" | null;
   provider: "password" | "google" | "wechat" | null;
@@ -61,13 +62,19 @@ export async function verifyPassword(password: string, encoded: string) {
 }
 
 function toLedgerUser(row: UserRow): LedgerUser {
-  return { id: row.id, name: row.name, email: row.email ?? "", plan: row.plan ?? "free" };
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email ?? "",
+    plan: row.plan ?? "free",
+    ...(row.avatarUrl ? { avatarUrl: row.avatarUrl } : {}),
+  };
 }
 
 async function findUser(db: D1Database, where: string, value: string) {
   return db
     .prepare(
-      `SELECT u.id, u.name, u.email, u.phone, s.plan, i.provider
+      `SELECT u.id, u.name, u.email, u.avatar_url AS avatarUrl, u.phone, s.plan, i.provider
        FROM users u
        LEFT JOIN subscriptions s ON s.user_id = u.id AND s.status = 'active'
        LEFT JOIN auth_identities i ON i.user_id = u.id
@@ -171,7 +178,7 @@ export async function findSessionUser(db: D1Database, token?: string) {
   if (!token) return null;
   const row = await db
     .prepare(
-      `SELECT u.id, u.name, u.email, u.phone, s.plan, i.provider
+      `SELECT u.id, u.name, u.email, u.avatar_url AS avatarUrl, u.phone, s.plan, i.provider
        FROM auth_sessions session
        JOIN users u ON u.id = session.user_id
        LEFT JOIN subscriptions s ON s.user_id = u.id AND s.status = 'active'
@@ -286,7 +293,7 @@ export async function createOrFindOAuthUser(
 ) {
   const existing = await db
     .prepare(
-      `SELECT u.id,u.name,u.email,u.phone,s.plan,i.provider
+      `SELECT u.id,u.name,u.email,u.avatar_url AS avatarUrl,u.phone,s.plan,i.provider
        FROM auth_identities i JOIN users u ON u.id = i.user_id
        LEFT JOIN subscriptions s ON s.user_id = u.id AND s.status = 'active'
        WHERE i.provider = ? AND i.provider_account_id = ? LIMIT 1`,
@@ -345,4 +352,12 @@ export async function createOrFindOAuthUser(
     email: profile.email ?? "",
     plan: "free" as const,
   };
+}
+
+export async function updateUserAvatar(db: D1Database, userId: string, avatarUrl: string) {
+  const timestamp = new Date().toISOString();
+  await db
+    .prepare("UPDATE users SET avatar_url = ?, updated_at = ? WHERE id = ?")
+    .bind(avatarUrl, timestamp, userId)
+    .run();
 }

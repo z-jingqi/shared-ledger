@@ -1,14 +1,14 @@
+import { ChartBarIcon, HouseIcon, ListBulletsIcon, UserCircleIcon } from "@phosphor-icons/react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import {
-  ChartBarIcon,
-  HouseIcon,
-  ListBulletsIcon,
-  PlusIcon,
-  UserCircleIcon,
-} from "@phosphor-icons/react";
-import type { ReactNode } from "react";
-import { Link, useLocation } from "react-router-dom";
+  ImportFileUploadInput,
+  type ImportFileUploadInputHandle,
+} from "../components/imports/ImportFileUploadInput";
 import { useAuth } from "../features/auth/AuthProvider";
 import { useActiveBook } from "../hooks/useActiveBook";
+import { AddActionMenu } from "./AddActionMenu";
 
 const tabs = [
   { to: "/home", label: "首页", key: "home", Icon: HouseIcon },
@@ -19,18 +19,44 @@ const tabs = [
 
 export function AppFrame({ children }: { children: ReactNode }) {
   const location = useLocation();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const { book } = useActiveBook();
+  const uploadInputRef = useRef<ImportFileUploadInputHandle>(null);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const isAuthPage = ["/login", "/register"].includes(location.pathname);
   const isCreateBookPage = location.pathname === "/books/new";
   const bottomNavTab = getBottomNavTab(location.pathname);
-  const showBottomNav = Boolean(user && bottomNavTab && !isAuthPage && !isCreateBookPage && location.pathname !== "/ai");
+  const showBottomNav = Boolean(
+    user && bottomNavTab && !isAuthPage && !isCreateBookPage && location.pathname !== "/ai",
+  );
   const bookQuery = book?.id ? `?bookId=${encodeURIComponent(book.id)}` : "";
+
+  useEffect(() => {
+    setAddMenuOpen(false);
+  }, [location.pathname, location.search]);
+
+  const goToManualAdd = () => {
+    if (!book?.id) {
+      toast.error("请先选择账本", { duration: 3000, closeButton: true });
+      return;
+    }
+    setAddMenuOpen(false);
+    navigate(`/records/new${bookQuery}`);
+  };
+
+  const openUploadInput = () => {
+    uploadInputRef.current?.open();
+    setAddMenuOpen(false);
+  };
 
   if (isAuthPage) return <main className="phone auth-shell ios-auth-shell">{children}</main>;
 
   return (
-    <main className={`phone ios-app-shell${showBottomNav ? " has-bottom-nav" : ""}${isCreateBookPage ? " create-book-shell" : ""}`}>
+    <main
+      className={`phone ios-app-shell${showBottomNav ? " has-bottom-nav" : ""}${isCreateBookPage ? " create-book-shell" : ""}`}
+    >
       <div className="content ios-app-content">{children}</div>
       {showBottomNav && (
         <>
@@ -47,9 +73,19 @@ export function AppFrame({ children }: { children: ReactNode }) {
               ))}
             </div>
           </nav>
-          <Link className="ios-fab" to={`/records/new${bookQuery}`} aria-label="记一笔">
-            <PlusIcon size={30} weight="bold" />
-          </Link>
+          <ImportFileUploadInput
+            ref={uploadInputRef}
+            bookId={book?.id}
+            onUploadingChange={setUploading}
+            onUploaded={() => navigate(`/records/imports${bookQuery}`, { state: { backgroundLocation: location } })}
+          />
+          <AddActionMenu
+            open={addMenuOpen}
+            uploading={uploading}
+            onManualAdd={goToManualAdd}
+            onOpenChange={setAddMenuOpen}
+            onUploadFile={openUploadInput}
+          />
         </>
       )}
     </main>

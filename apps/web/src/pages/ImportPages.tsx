@@ -1,8 +1,6 @@
 import {
-  CameraIcon,
   CheckCircleIcon,
   CircleNotchIcon,
-  FileArrowUpIcon,
   FileCsvIcon,
   FilePdfIcon,
   ImageSquareIcon,
@@ -10,7 +8,7 @@ import {
   XCircleIcon,
 } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, type Location } from "react-router-dom";
 import { toast } from "sonner";
 import {
   IconTile,
@@ -22,14 +20,8 @@ import {
   IosSheet,
   yuan,
 } from "../components/ios/IosDesign";
-import {
-  isSupportedAttachment,
-  maxAttachmentFiles,
-  supportedFileAccept,
-  supportedFileDescription,
-} from "../features/imports/files";
 import { terminalImportStatuses, watchImportJobs, type ImportJobStatus } from "../features/imports/status";
-import { cancelImportJob, retryImportJob, uploadImportFiles } from "../features/imports/upload";
+import { cancelImportJob, retryImportJob } from "../features/imports/upload";
 import { useActiveBook } from "../hooks/useActiveBook";
 import { useApi } from "../hooks/useApi";
 import { api } from "../lib";
@@ -90,11 +82,12 @@ function usePendingRecords() {
 
 export function PendingImportsPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { book } = useActiveBook();
   const { records, error, reload } = usePendingRecords();
   const [busy, setBusy] = useState("");
   const [editing, setEditing] = useState<PendingRecord | undefined>();
-  const close = () => navigate(book ? `/records?bookId=${book.id}` : "/records");
+  const close = () => closeImportSheet(navigate, location, book ? `/records?bookId=${book.id}` : "/records");
   const confirm = async (recordId: string) => {
     setBusy(recordId);
     try {
@@ -205,13 +198,12 @@ export function PendingImportsPage() {
 
 export function ImportHistoryPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { book } = useActiveBook();
   const { data, error, reload } = useApi<{ imports: Job[] }>(book ? `/books/${book.id}/imports` : undefined);
-  const [uploading, setUploading] = useState(false);
   const [busyJobId, setBusyJobId] = useState("");
-  const fileInput = useRef<HTMLInputElement>(null);
   const stopWatchingRef = useRef<(() => void) | undefined>(undefined);
-  const close = () => navigate(book ? `/records?bookId=${book.id}` : "/records");
+  const close = () => closeImportSheet(navigate, location, book ? `/records?bookId=${book.id}` : "/records");
 
   useEffect(() => {
     const active = (data?.imports ?? []).filter((job) => !terminalImportStatuses.has(job.status)).map((job) => job.id);
@@ -227,47 +219,6 @@ export function ImportHistoryPage() {
     };
   }, [data?.imports?.map((job) => `${job.id}:${job.status}`).join(","), reload]);
 
-  const upload = async (fileList: FileList | null) => {
-    const files = Array.from(fileList ?? []);
-    if (!files.length) return;
-    if (!book) {
-      toast.error("请先选择账本", { duration: 3000, closeButton: true });
-      return;
-    }
-    const unsupported = files.find((file) => !isSupportedAttachment(file));
-    if (unsupported) {
-      toast.error("文件格式暂不支持", {
-        description: `${unsupported.name} 不是支持的 ${supportedFileDescription} 格式。`,
-        duration: 3000,
-        closeButton: true,
-      });
-      return;
-    }
-    if (files.length > maxAttachmentFiles) {
-      toast.warning(`一次最多上传 ${maxAttachmentFiles} 个文件`, { duration: 3000, closeButton: true });
-    }
-    setUploading(true);
-    try {
-      const { jobs } = await uploadImportFiles(book.id, files.slice(0, maxAttachmentFiles));
-      toast.success("文件已上传", {
-        description: "识别会在后台继续，完成后进入待确认。",
-        duration: 3000,
-        closeButton: true,
-      });
-      await reload();
-      stopWatchingRef.current?.();
-      stopWatchingRef.current = watchImportJobs(
-        jobs.map((job) => job.id),
-        () => void reload(),
-        { onDone: () => void reload(), onError: (message) => toast.warning(message, { duration: 3000, closeButton: true }) },
-      );
-    } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "上传失败", { duration: 3000, closeButton: true });
-    } finally {
-      setUploading(false);
-      if (fileInput.current) fileInput.current.value = "";
-    }
-  };
   const retry = async (jobId: string) => {
     setBusyJobId(jobId);
     try {
@@ -295,41 +246,11 @@ export function ImportHistoryPage() {
 
   return (
     <IosPage>
-      <IosSheet title="导入与识别" onClose={close}>
+      <IosSheet title="识别进度" onClose={close}>
         <div className="ios-import-sheet">
-          <div className="ios-import-options">
-            <button type="button" onClick={() => fileInput.current?.click()}>
-              <IconTile>
-                <CameraIcon size={21} weight="bold" />
-              </IconTile>
-              <b>拍照</b>
-              <small>小票 / 发票</small>
-            </button>
-            <button type="button" onClick={() => fileInput.current?.click()}>
-              <IconTile tint="#eaf1ff" color="#4c8dff">
-                <ImageSquareIcon size={21} weight="bold" />
-              </IconTile>
-              <b>相册</b>
-              <small>图片批量</small>
-            </button>
-            <button type="button" onClick={() => fileInput.current?.click()}>
-              <IconTile tint="#f0f2f5" color="#5b6473">
-                <FileArrowUpIcon size={21} weight="bold" />
-              </IconTile>
-              <b>文件</b>
-              <small>PDF/CSV/Excel</small>
-            </button>
-          </div>
-          <input ref={fileInput} className="sr-only" type="file" multiple accept={supportedFileAccept} onChange={(event) => void upload(event.currentTarget.files)} />
           <p className="ios-sheet-note">
             文件在后台异步处理，你可以离开此页面。识别完成的记录会进入「待确认」，不会直接入账。
           </p>
-          {uploading && (
-            <IosCard className="ios-import-uploading">
-              <CircleNotchIcon size={20} className="ios-spin" />
-              正在上传文件…
-            </IosCard>
-          )}
           {error && <p className="field-error">{error}</p>}
           <section className="ios-import-jobs">
             <h3>最近任务</h3>
@@ -345,7 +266,7 @@ export function ImportHistoryPage() {
             {!data?.imports.length && (
               <div className="ios-empty">
                 <b>还没有导入记录</b>
-                <p>上传图片、PDF、Excel 或 CSV 后会显示识别进度。</p>
+                <p>从底部加号上传图片、PDF、Excel 或 CSV 后会显示识别进度。</p>
               </div>
             )}
           </section>
@@ -521,6 +442,12 @@ function formatJobStatus(job: Job) {
   if (job.status === "converting") return "正在转换文件…";
   if (job.status === "parsing") return "正在解析文件…";
   return job.stage || "正在排队…";
+}
+
+function closeImportSheet(navigate: ReturnType<typeof useNavigate>, location: Location, fallback: string) {
+  const state = location.state as { backgroundLocation?: Location } | null;
+  if (state?.backgroundLocation) navigate(-1);
+  else navigate(fallback);
 }
 
 function formatOcrProgress(job: Job) {

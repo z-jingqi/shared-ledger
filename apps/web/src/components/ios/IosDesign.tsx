@@ -43,17 +43,26 @@ export function IosTopBar({
   suffix,
   onLedgerClick,
   action,
+  back,
+  onBack,
 }: {
   book?: IosBookLike;
   title?: string;
   suffix?: ReactNode;
   onLedgerClick?: () => void;
   action?: ReactNode;
+  back?: boolean;
+  onBack?: () => void;
 }) {
   return (
-    <header className="ios-topbar">
+    <header className={`ios-topbar${back ? " with-back" : ""}`}>
+      {back ? (
+        <button className="ios-topbar-back" type="button" aria-label="返回" onClick={onBack}>
+          <CaretLeftIcon size={23} weight="bold" />
+        </button>
+      ) : null}
       {title ? <h1>{title}</h1> : <LedgerPill book={book} suffix={suffix} onClick={onLedgerClick} />}
-      {action}
+      {action ?? (back ? <span className="ios-topbar-spacer" aria-hidden="true" /> : null)}
     </header>
   );
 }
