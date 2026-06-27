@@ -1,15 +1,13 @@
 import type {
-  AiAnalysisCardPart,
   AiChatPart,
   AiConfirmationCardPart,
-  AiSearchResultCardPart,
 } from "@shared-ledger/shared";
 import { canInvite } from "@shared-ledger/shared";
 import { D1LedgerRepository } from "../repository";
-import type { AiActionAuditLog, AiConfirmation, ImportJob, Invitation, MemoryLedgerStore, SimpleEntity } from "../store";
-import type { LedgerUser, Transaction } from "../types";
+import type { AiActionAuditLog, AiConfirmation, ImportJob, Invitation, MemoryLedgerStore } from "../store";
+import type { LedgerUser } from "../types";
 import { ingestAiTransaction, isTransactionIngestionPrompt } from "./ai-ingestion";
-import { parseHeuristicIntent, type AiActionIntent, type AiActionSearchFilters, type TransactionSearchFilters } from "./ai-normalizer";
+import { parseHeuristicIntent, type AiActionIntent, type TransactionSearchFilters } from "./ai-normalizer";
 import { TransactionSearchService } from "./ai-search";
 
 export type AiActionRepository = D1LedgerRepository | MemoryLedgerStore;
@@ -343,134 +341,16 @@ function filtersFromIntent(intent?: AiActionIntent): TransactionSearchFilters {
   return filters;
 }
 
-function parseSearchFilters(prompt: string) {
-  const filters: { type?: "income" | "expense"; minAmount?: number; maxAmount?: number; from?: string; to?: string } = {};
-  if (/支出|花费|消费/.test(prompt)) filters.type = "expense";
-  if (/收入|工资|入账/.test(prompt)) filters.type = "income";
-  const greater = prompt.match(/(?:大于|超过|高于|>)\s*([0-9]+(?:\.[0-9]{1,2})?)/);
-  if (greater) filters.minAmount = Number(greater[1]);
-  const less = prompt.match(/(?:小于|低于|少于|<)\s*([0-9]+(?:\.[0-9]{1,2})?)/);
-  if (less) filters.maxAmount = Number(less[1]);
-  if (prompt.includes("今年")) {
-    const year = new Date().getFullYear();
-    filters.from = `${year}-01-01`;
-    filters.to = `${year}-12-31`;
-  }
-  return filters;
-}
-
 function parseInviteContact(prompt: string) {
   const email = prompt.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0].toLowerCase();
   const phone = prompt.match(/(?:\+?\d[\d -]{5,}\d)/)?.[0].replaceAll(/[^\d+]/g, "");
   return { email, phone };
 }
 
-function isInvitePrompt(prompt: string) {
-  return /邀请|加入|成员/.test(prompt);
-}
-
-function isSearchPrompt(prompt: string) {
-  return /查|搜索|找|筛选|大于|小于|今年|本月/.test(prompt) && !/分析|统计|总结/.test(prompt);
-}
-
-function isAnalysisPrompt(prompt: string) {
-  return /分析|统计|总结|报表|趋势/.test(prompt);
-}
-
 async function resolveBookId(repository: AiActionRepository, userId: string, bookId?: string) {
   if (bookId) return bookId;
   if (repository instanceof D1LedgerRepository) return (await repository.listBooks(userId))[0]?.id;
   return repository.books.find((book) => repository.role(book.id, userId))?.id;
-}
-
-async function listTransactions(repository: AiActionRepository, bookId: string) {
-  return repository instanceof D1LedgerRepository
-    ? repository.listTransactions(bookId)
-    : repository.transactions.filter((transaction) => transaction.bookId === bookId);
-}
-
-async function listCategories(repository: AiActionRepository, bookId: string) {
-  return repository instanceof D1LedgerRepository
-    ? repository.listSimple("categories", bookId)
-    : repository.categories.filter((category) => category.bookId === bookId);
-}
-
-function applyNormalizedSearch(
-  records: Transaction[],
-  filters: AiActionSearchFilters,
-  categories: SimpleEntity[],
-) {
-  const categoryNames = new Map(categories.map((category) => [category.id, category.name]));
-  const filtered = records.filter((transaction) => {
-    if (filters.type !== "all" && transaction.type !== filters.type) return false;
-    const occurredAt = transaction.occurredAt.slice(0, 10);
-    if (filters.start && occurredAt < filters.start) return false;
-    if (filters.end && occurredAt > filters.end) return false;
-    if (filters.minAmount !== undefined) {
-      if (filters.minAmountInclusive ? transaction.amount < filters.minAmount : transaction.amount <= filters.minAmount)
-        return false;
-    }
-    if (filters.maxAmount !== undefined) {
-      if (filters.maxAmountInclusive ? transaction.amount > filters.maxAmount : transaction.amount >= filters.maxAmount)
-        return false;
-    }
-    if (filters.categoryId && transaction.categoryId !== filters.categoryId) return false;
-    if (filters.categoryName) {
-      const categoryName = transaction.categoryId ? categoryNames.get(transaction.categoryId) : undefined;
-      if (categoryName !== filters.categoryName) return false;
-    }
-    const keyword = filters.q?.trim().toLowerCase();
-    if (keyword) {
-      const categoryName = transaction.categoryId ? categoryNames.get(transaction.categoryId) : "";
-      const searchable = [transaction.note, categoryName, transaction.categoryId].filter(Boolean).join(" ").toLowerCase();
-      if (!searchable.includes(keyword)) return false;
-    }
-    return true;
-  });
-  return filtered.sort((left, right) =>
-    filters.sort === "amount_desc"
-      ? right.amount - left.amount
-      : right.occurredAt.localeCompare(left.occurredAt),
-  );
-}
-
-async function searchTransactions(
-  repository: AiActionRepository,
-  bookId: string,
-  filters: { type?: "income" | "expense"; minAmount?: number; maxAmount?: number; from?: string; to?: string },
-) {
-  if (repository instanceof D1LedgerRepository) return repository.searchTransactions(bookId, filters);
-  return repository.transactions.filter((transaction) => {
-    if (transaction.bookId !== bookId) return false;
-    if (filters.type && transaction.type !== filters.type) return false;
-    if (filters.minAmount !== undefined && transaction.amount <= filters.minAmount) return false;
-    if (filters.maxAmount !== undefined && transaction.amount >= filters.maxAmount) return false;
-    if (filters.from && transaction.occurredAt < filters.from) return false;
-    if (filters.to && transaction.occurredAt > filters.to) return false;
-    return true;
-  });
-}
-
-async function categoryMap(repository: AiActionRepository, bookId: string) {
-  const categories =
-    repository instanceof D1LedgerRepository
-      ? await repository.listSimple("categories", bookId)
-      : repository.categories.filter((category) => category.bookId === bookId);
-  return new Map(categories.map((category) => [category.id, category.name]));
-}
-
-function transactionSummary(transaction: Transaction, categories: Map<string, string> | string | undefined) {
-  const categoryName =
-    typeof categories === "string" ? categories : transaction.categoryId ? categories?.get(transaction.categoryId) : undefined;
-  return {
-    id: transaction.id,
-    type: transaction.type,
-    amount: transaction.amount,
-    ...(transaction.categoryId ? { categoryId: transaction.categoryId } : {}),
-    ...(categoryName ? { categoryName } : {}),
-    ...(transaction.note ? { note: transaction.note } : {}),
-    occurredAt: transaction.occurredAt,
-  };
 }
 
 async function findPendingInvitation(
@@ -615,10 +495,3 @@ function mapImportStatus(status: string) {
   return status;
 }
 
-function sum(records: Transaction[]) {
-  return Number(records.reduce((total, record) => total + record.amount, 0).toFixed(2));
-}
-
-function formatMoney(value: number) {
-  return `¥${value.toFixed(2)}`;
-}

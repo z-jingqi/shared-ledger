@@ -1,0 +1,504 @@
+.ios-account-scroll {
+  flex: 1;
+  padding: 8px 16px 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ios-success-note {
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: #e8f7ef;
+  color: #1f9d57;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.ios-upgrade-hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: 24px;
+  padding: 28px 20px 24px;
+  color: #fff;
+  background: linear-gradient(150deg, #2b2620, #1a1714);
+  box-shadow: 0 10px 28px rgba(42, 28, 15, 0.16);
+}
+
+.ios-upgrade-hero::after {
+  content: "";
+  position: absolute;
+  top: -28px;
+  right: -30px;
+  width: 122px;
+  height: 122px;
+  border-radius: 999px;
+  background: rgba(255, 104, 28, .16);
+}
+
+.ios-upgrade-hero button {
+  border: 0;
+  border-radius: 999px;
+  padding: 4px 12px;
+  background: var(--ios-accent);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.ios-upgrade-hero h1 {
+  margin: 13px 0 0;
+  max-width: 230px;
+  font-size: 25px;
+  line-height: 1.25;
+  font-weight: 900;
+}
+
+.ios-upgrade-hero p {
+  margin: 7px 0 0;
+  color: #b9b2a8;
+  font-size: 13.5px;
+}
+
+.ios-upgrade-features {
+  padding: 4px 16px;
+}
+
+.ios-upgrade-features div {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  padding: 13px 0;
+  border-bottom: 1px solid #f2f4f7;
+}
+
+.ios-upgrade-features div:last-child {
+  border-bottom: 0;
+}
+
+.ios-upgrade-features span {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: #fff0e8;
+  color: var(--ios-accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.ios-upgrade-features p {
+  margin: 0;
+}
+
+.ios-upgrade-features b,
+.ios-upgrade-features small {
+  display: block;
+}
+
+.ios-upgrade-features b {
+  font-size: 14px;
+}
+
+.ios-upgrade-features small {
+  margin-top: 2px;
+  color: var(--ios-muted);
+  font-size: 12px;
+}
+
+.ios-auth-page {
+  justify-content: center;
+  padding: 24px 22px;
+}
+
+.ios-auth-brand {
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+.ios-auth-brand span {
+  width: 62px;
+  height: 62px;
+  border-radius: 20px;
+  margin: 0 auto 14px;
+  background: linear-gradient(145deg, var(--ios-accent-2), var(--ios-accent));
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--ios-shadow-strong);
+}
+
+.ios-auth-brand h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 900;
+  letter-spacing: -0.7px;
+}
+
+.ios-auth-brand p {
+  margin: 7px 0 0;
+  color: var(--ios-muted);
+  font-size: 13.5px;
+}
+
+.ios-auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+
+.ios-auth-form > p,
+.ios-subscription-form > p {
+  margin: 0;
+  color: var(--ios-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ios-auth-input {
+  height: 50px;
+  border: 1px solid #e3e7ed;
+  border-radius: 15px;
+  padding: 0 13px;
+  background: #fff;
+  color: #5b6473;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  box-shadow: var(--ios-shadow);
+}
+
+.ios-auth-input input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ios-text);
+  font: inherit;
+}
+
+.ios-auth-input button {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ios-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ios-auth-switch {
+  margin: 18px 0 0;
+  color: var(--ios-muted);
+  text-align: center;
+  font-size: 13px;
+}
+
+.ios-auth-switch a {
+  margin-left: 3px;
+  color: var(--ios-accent);
+  font-weight: 900;
+}
+
+.ios-ai-workspace {
+  z-index: 70;
+}
+
+.ios-ai-workspace .ai-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--ios-bg);
+  padding: 0;
+}
+
+.ios-ai-workspace .ai-content {
+  flex: 1;
+  min-height: 0;
+}
+
+.ios-ai-workspace .ai-empty {
+  margin: auto 16px;
+  border-radius: 22px;
+  padding: 26px 18px;
+  background: #fff;
+  box-shadow: var(--ios-shadow);
+}
+
+.ios-ai-workspace .ai-messages {
+  flex: 1;
+  padding: 14px 16px;
+}
+
+.ios-ai-workspace .ai-assistant {
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: var(--ios-shadow);
+}
+
+.ios-ai-workspace .ai-composer {
+  margin: 0 14px calc(14px + env(safe-area-inset-bottom));
+  border-radius: 22px;
+  border: 1px solid #e3e7ed;
+  background: #fff;
+  box-shadow: 0 12px 30px rgba(36, 48, 74, .12);
+}
+
+.ios-members-sheet,
+.ios-invite-sheet,
+.ios-member-role-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ios-member-summary,
+.ios-invite-intro,
+.ios-role-intro {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+}
+
+.ios-member-summary span:nth-child(2),
+.ios-invite-intro span:nth-child(2),
+.ios-role-intro span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+
+.ios-member-summary b,
+.ios-member-summary small,
+.ios-invite-intro b,
+.ios-invite-intro small,
+.ios-role-intro b,
+.ios-role-intro small {
+  display: block;
+}
+
+.ios-member-summary small,
+.ios-invite-intro small,
+.ios-role-intro small {
+  margin-top: 2px;
+  color: var(--ios-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ios-members-sheet h3 {
+  margin: 0 4px 8px;
+  color: #8993a3;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.ios-member-list {
+  overflow: hidden;
+}
+
+.ios-member-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 64px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #f2f4f7;
+}
+
+.ios-member-row:last-child {
+  border-bottom: 0;
+}
+
+.ios-member-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #ff8a4d, #ff681c);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 900;
+  flex-shrink: 0;
+}
+
+.ios-member-row > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+
+.ios-member-row b,
+.ios-member-row small {
+  display: block;
+}
+
+.ios-member-row b {
+  font-size: 14.5px;
+}
+
+.ios-member-row small {
+  color: var(--ios-muted);
+  font-size: 12px;
+}
+
+.ios-role-pill,
+.ios-member-row > a:not(.ios-role-pill) {
+  border-radius: 8px;
+  padding: 4px 8px;
+  background: #fff0e8;
+  color: var(--ios-accent);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.ios-member-remove {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #c2c9d3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ios-member-links {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+}
+
+.ios-member-links a {
+  min-height: 42px;
+  border-radius: 13px;
+  background: #fff;
+  color: #5b6473;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 800;
+  box-shadow: var(--ios-shadow);
+}
+
+.ios-role-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+}
+
+.ios-role-cards button {
+  min-height: 94px;
+  border: 1.5px solid var(--ios-line);
+  border-radius: 15px;
+  padding: 13px 10px;
+  background: #fff;
+  color: #5b6473;
+  text-align: left;
+  font: inherit;
+}
+
+.ios-role-cards button.active {
+  border-color: var(--ios-accent);
+  color: var(--ios-accent);
+  box-shadow: 0 8px 20px rgba(255,104,28,.12);
+}
+
+.ios-role-cards b,
+.ios-role-cards small {
+  display: block;
+}
+
+.ios-role-cards b {
+  margin-top: 7px;
+  font-size: 14px;
+}
+
+.ios-role-cards small {
+  margin-top: 3px;
+  color: var(--ios-muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.danger-text {
+  color: var(--ios-danger) !important;
+}
+
+.ios-invitation-list {
+  overflow: hidden;
+}
+
+.ios-invitation-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 14px;
+  border-bottom: 1px solid #f2f4f7;
+}
+
+.ios-invitation-row:last-child {
+  border-bottom: 0;
+}
+
+.ios-invitation-row > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+
+.ios-invitation-row b,
+.ios-invitation-row small {
+  display: block;
+}
+
+.ios-invitation-row b {
+  font-size: 14px;
+}
+
+.ios-invitation-row small {
+  margin-top: 2px;
+  color: var(--ios-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.ios-invitation-row em {
+  color: var(--ios-muted);
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.ios-inline-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ios-inline-actions button {
+  border: 1px solid #e4e8ee;
+  border-radius: 9px;
+  padding: 4px 8px;
+  background: #fff;
+  color: #172032;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.ios-inline-actions button.danger {
+  border-color: #ffd7d3;
+  color: var(--ios-danger);
+}

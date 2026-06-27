@@ -1,233 +1,179 @@
-import { Area, AreaChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
-import {
-  BookOpenIcon,
-  CaretDownIcon,
-  CheckIcon,
-  ChartBarIcon,
-  ChartPieSliceIcon,
-  TrendUpIcon,
-  UsersThreeIcon,
-} from "@phosphor-icons/react";
-import { Button, Panel } from "@shared-ledger/ui";
+import { WarningCircleIcon } from "@phosphor-icons/react";
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Page } from "../components/layout/Page";
+import type { LedgerTransaction } from "../components/ledger/Transactions";
+import { AiSparkButton, IosMetric, IosPage, IosScroll, IosTopBar, yuan } from "../components/ios/IosDesign";
 import { useActiveBook } from "../hooks/useActiveBook";
 import { useApi } from "../hooks/useApi";
-import type { LedgerTransaction } from "../components/ledger/Transactions";
-import { money } from "../lib";
+import { useNavigate } from "react-router-dom";
+
+type Range = "month" | "quarter" | "year";
 
 export function AnalysisPage() {
-  const [expanded, setExpanded] = useState(false);
-  const [period, setPeriod] = useState<"month" | "quarter" | "year">("month");
-  const [searchParams, setSearchParams] = useSearchParams();
-  const { book, books, loading: booksLoading } = useActiveBook();
-  const { data } = useApi<{ transactions: LedgerTransaction[] }>(
-    book ? `/books/${book.id}/transactions` : undefined,
-  );
-  const selectBook = (bookId: string) => {
-    const next = new URLSearchParams(searchParams);
-    next.set("bookId", bookId);
-    setSearchParams(next);
-    setExpanded(false);
-  };
+  const navigate = useNavigate();
+  const { book } = useActiveBook();
+  const [range, setRange] = useState<Range>("month");
+  const { data } = useApi<{ transactions: LedgerTransaction[] }>(book ? `/books/${book.id}/transactions` : undefined);
   const transactions = data?.transactions ?? [];
-  const range = getAnalysisRange(period);
-  const filteredTransactions = transactions.filter((item) => {
-    const occurredAt = item.occurredAt.slice(0, 10);
-    return occurredAt >= range.start && occurredAt <= range.end;
-  });
-  const periodLabel = range.label;
-  const income = filteredTransactions
-    .filter((item) => item.type === "income")
-    .reduce((sum, item) => sum + item.amount, 0);
-  const expenses = filteredTransactions.filter((item) => item.type === "expense");
-  const total = expenses.reduce((sum, item) => sum + item.amount, 0);
-  const trend = [...expenses].reverse().map((item) => ({
-    d: new Date(item.occurredAt).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" }),
-    value: item.amount,
-  }));
-  const grouped = Object.values(
-    expenses.reduce<Record<string, { name: string; value: number }>>((group, item) => {
-      const name = item.categoryId ?? "未分类";
-      group[name] = group[name] ?? { name, value: 0 };
-      group[name].value += item.amount;
-      return group;
-    }, {}),
-  );
-  const members = Object.values(
-    expenses.reduce<Record<string, { name: string; value: number }>>((group, item) => {
-      const name = item.memberId ?? "我";
-      group[name] = group[name] ?? { name, value: 0 };
-      group[name].value += item.amount;
-      return group;
-    }, {}),
-  ).sort((left, right) => right.value - left.value);
-  const colors = ["#ff681c", "#ffae75", "#315a9c", "#d8dee9"];
-  const periodOptions = [
-    { label: "本月", value: "month" as const },
-    { label: "3 个月", value: "quarter" as const },
-    { label: "年度", value: "year" as const },
-  ];
+  const limits = getRange(range);
+  const visible = transactions.filter((item) => item.occurredAt.slice(0, 10) >= limits.start && item.occurredAt.slice(0, 10) <= limits.end);
+  const income = sum(visible, "income");
+  const expense = sum(visible, "expense");
+  const expenseItems = visible.filter((item) => item.type === "expense");
+  const categories = groupBy(expenseItems, (item) => item.categoryName ?? item.categoryId ?? "未分类");
+  const members = groupBy(expenseItems, (item) => item.memberId ?? "我");
+  const maxMonth = Math.max(1, ...monthlyBars(transactions).map((item) => Math.max(item.income, item.expense)));
+  const warnings = [...expenseItems].sort((a, b) => b.amount - a.amount).slice(0, 2);
+
   return (
-    <section className="analysis-screen">
-      <div className="analysis-fixed">
-        <Page title="分析" back={false} />
-        {booksLoading && <p className="muted">正在读取账本…</p>}
-        {!booksLoading && !book && (
-          <Panel className="analysis-empty">
-            <BookOpenIcon size={32} weight="fill" />
-            <h2>当前还没有账本</h2>
-            <p>创建账本后，就可以查看收支趋势、分类占比和成员排行。</p>
-          </Panel>
-        )}
-        {book && (
-          <Panel className="analysis-book-picker">
-            <Button
-              type="button"
-              variant="ghost"
-              aria-expanded={expanded}
-              aria-controls="analysis-book-list"
-              onClick={() => setExpanded((current) => !current)}
-            >
-              <span>
-                <small>当前账本</small>
-                <b>{book.name}</b>
-              </span>
-              <CaretDownIcon className={expanded ? "open" : ""} size={22} />
-            </Button>
-            {expanded && (
-              <div id="analysis-book-list" className="analysis-book-list">
-                {books.map((item) => (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className={item.id === book.id ? "selected" : ""}
-                    onClick={() => selectBook(item.id)}
-                    key={item.id}
-                  >
-                    <BookOpenIcon size={20} weight={item.id === book.id ? "fill" : "regular"} />
-                    <span>{item.name}</span>
-                    {item.id === book.id && <CheckIcon size={18} weight="bold" />}
-                  </Button>
-                ))}
-              </div>
-            )}
-          </Panel>
-        )}
+    <IosPage className="ios-analysis">
+      <IosTopBar
+        book={book}
+        suffix={`· ${limits.label}`}
+        onLedgerClick={() => navigate("/books/manage")}
+        action={<AiSparkButton onClick={() => navigate(`/ai${book?.id ? `?bookId=${book.id}` : ""}`)} />}
+      />
+      <div className="ios-analysis-ranges">
+        {[
+          ["month", "本月"],
+          ["quarter", "3 个月"],
+          ["year", "今年"],
+        ].map(([value, label]) => (
+          <button className={range === value ? "active" : ""} type="button" onClick={() => setRange(value as Range)} key={value}>
+            {label}
+          </button>
+        ))}
       </div>
-      {book && (
-        <div className="analysis-scroll">
-          <Panel className="analysis-period">
-            <span>{periodLabel}</span>
-            <div>
-              {periodOptions.map((item) => (
-                <Button
-                  className={period === item.value ? "selected" : ""}
-                  variant="ghost"
-                  type="button"
-                  onClick={() => setPeriod(item.value)}
-                  key={item.value}
-                >
-                  {item.label}
-                </Button>
-              ))}
-            </div>
-          </Panel>
-          <div className="analysis-summary">
-            <span>
-              <TrendUpIcon size={22} />
-              <small>{periodLabel}收入</small>
-              <b className="income">{money(income)}</b>
-            </span>
-            <span>
-              <ChartBarIcon size={22} />
-              <small>{periodLabel}支出</small>
-              <b>{money(total)}</b>
-            </span>
-            <span>
-              <ChartPieSliceIcon size={22} />
-              <small>结余</small>
-              <b className="income">{money(income - total)}</b>
-            </span>
-          </div>
-          <Panel>
+      <IosScroll className="ios-analysis-scroll">
+        <div className="ios-analysis-summary">
+          <IosMetric label="收入" value={yuan(income, book?.currency)} tone="income" />
+          <IosMetric label="支出" value={yuan(expense, book?.currency)} />
+          <IosMetric label="结余" value={yuan(income - expense, book?.currency)} tone="accent" />
+        </div>
+
+        <section className="ios-chart-card">
+          <header>
             <h2>收支趋势</h2>
-            <div className="chart">
-              <ResponsiveContainer>
-                <AreaChart data={trend}>
-                  <Tooltip />
-                  <Area type="monotone" dataKey="value" stroke="#ff681c" fill="#ffe9db" strokeWidth={3} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </Panel>
-          <Panel>
-            <h2>分类占比</h2>
-            <div className="pie-wrap">
-              <div className="pie-chart-shell">
-                <PieChart width={160} height={180}>
-                  <Pie
-                    data={grouped}
-                    dataKey="value"
-                    innerRadius={45}
-                    outerRadius={70}
-                    cx={80}
-                    cy={90}
-                    isAnimationActive={false}
-                  >
-                    {grouped.map((entry, index) => (
-                      <Cell key={entry.name} fill={colors[index % colors.length]} />
-                    ))}
-                  </Pie>
-                </PieChart>
-              </div>
-              <ul>
-                {grouped.map((item, index) => (
-                  <li key={item.name}>
-                    <i style={{ background: colors[index % colors.length] }} />
-                    {item.name}
-                    <b>{total ? Math.round((item.value / total) * 100) : 0}%</b>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </Panel>
-          <Panel className="member-ranking">
-            <h2>
-              <UsersThreeIcon size={22} />
-              成员支出排行
-            </h2>
-            {members.map((member, index) => (
-              <div className="ranking-row" key={member.name}>
-                <span>{index + 1}</span>
-                <b>{member.name}</b>
-                <small>{money(member.value)}</small>
+            <p><i />支出 <i className="income" />收入</p>
+          </header>
+          <div className="ios-bar-chart">
+            {monthlyBars(transactions).map((item) => (
+              <div key={item.label}>
+                <span>
+                  <i style={{ height: `${Math.max(4, (item.expense / maxMonth) * 100)}%` }} />
+                  <i className="income" style={{ height: `${Math.max(4, (item.income / maxMonth) * 100)}%` }} />
+                </span>
+                <small>{item.label}</small>
               </div>
             ))}
-            {!members.length && <p className="muted">暂无支出记录</p>}
-          </Panel>
-        </div>
-      )}
-    </section>
+          </div>
+        </section>
+
+        <section className="ios-chart-card ios-breakdown">
+          <h2>支出构成</h2>
+          <div>
+            <div className="ios-donut" style={donutStyle(categories, expense)}>
+              <span>
+                <small>总支出</small>
+                <b>{yuan(expense, book?.currency)}</b>
+              </span>
+            </div>
+            <ul>
+              {categories.map((item, index) => (
+                <li key={item.name}>
+                  <span><i style={{ background: chartColors[index % chartColors.length] }} />{item.name}</span>
+                  <b>{expense ? Math.round((item.amount / expense) * 100) : 0}%</b>
+                </li>
+              ))}
+              {!categories.length && <li>暂无支出记录</li>}
+            </ul>
+          </div>
+        </section>
+
+        <section className="ios-chart-card">
+          <h2>成员贡献</h2>
+          <div className="ios-member-bars">
+            {members.map((member, index) => (
+              <div key={member.name}>
+                <span style={{ background: chartColors[index % chartColors.length] }}>{member.name[0] ?? "我"}</span>
+                <p>
+                  <b>{member.name}</b>
+                  <small>{yuan(member.amount, book?.currency)} · {expense ? Math.round((member.amount / expense) * 100) : 0}%</small>
+                  <i><em style={{ width: `${expense ? (member.amount / expense) * 100 : 0}%`, background: chartColors[index % chartColors.length] }} /></i>
+                </p>
+              </div>
+            ))}
+            {!members.length && <p className="muted">暂无成员支出数据</p>}
+          </div>
+        </section>
+
+        <section className="ios-chart-card">
+          <h2>异常与大额</h2>
+          <div className="ios-unusual-list">
+            {warnings.map((item) => (
+              <article key={item.id}>
+                <WarningCircleIcon size={18} />
+                <span>
+                  <b>{item.note || "大额支出"}</b>
+                  <small>本期较高支出，请留意预算</small>
+                </span>
+                <strong>{yuan(item.amount, book?.currency)}</strong>
+              </article>
+            ))}
+            {!warnings.length && <p className="muted">暂无异常支出</p>}
+          </div>
+        </section>
+      </IosScroll>
+    </IosPage>
   );
 }
 
-function getAnalysisRange(period: "month" | "quarter" | "year") {
+const chartColors = ["#ff7a45", "#ff5d8f", "#14b8a6", "#4c8dff", "#a855f7", "#94a3b8"];
+
+function sum(transactions: LedgerTransaction[], type: "income" | "expense") {
+  return transactions.filter((item) => item.type === type).reduce((total, item) => total + item.amount, 0);
+}
+
+function getRange(range: Range) {
   const now = new Date();
   const year = now.getFullYear();
   const month = now.getMonth();
-  if (period === "year") {
-    return { start: ymd(new Date(year, 0, 1)), end: ymd(new Date(year, 11, 31)), label: `${year}年` };
-  }
-  if (period === "quarter") {
-    const start = new Date(year, month - 2, 1);
-    const end = new Date(year, month + 1, 0);
-    return { start: ymd(start), end: ymd(end), label: "近 3 个月" };
-  }
-  return { start: ymd(new Date(year, month, 1)), end: ymd(new Date(year, month + 1, 0)), label: `${year}年${month + 1}月` };
+  if (range === "year") return { start: ymd(new Date(year, 0, 1)), end: ymd(new Date(year, 11, 31)), label: `${year}年` };
+  if (range === "quarter") return { start: ymd(new Date(year, month - 2, 1)), end: ymd(new Date(year, month + 1, 0)), label: "近3个月" };
+  return { start: ymd(new Date(year, month, 1)), end: ymd(new Date(year, month + 1, 0)), label: `${month + 1}月` };
 }
 
 function ymd(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function groupBy(transactions: LedgerTransaction[], label: (item: LedgerTransaction) => string) {
+  const groups = new Map<string, number>();
+  transactions.forEach((item) => groups.set(label(item), (groups.get(label(item)) ?? 0) + item.amount));
+  return [...groups.entries()].map(([name, amount]) => ({ name, amount })).sort((a, b) => b.amount - a.amount);
+}
+
+function monthlyBars(transactions: LedgerTransaction[]) {
+  const now = new Date();
+  return Array.from({ length: 6 }, (_, offset) => {
+    const date = new Date(now.getFullYear(), now.getMonth() - (5 - offset), 1);
+    const month = date.getMonth();
+    const year = date.getFullYear();
+    const monthItems = transactions.filter((item) => {
+      const d = new Date(item.occurredAt);
+      return d.getFullYear() === year && d.getMonth() === month;
+    });
+    return { label: `${month + 1}月`, income: sum(monthItems, "income"), expense: sum(monthItems, "expense") };
+  });
+}
+
+function donutStyle(items: Array<{ amount: number }>, total: number) {
+  if (!total || !items.length) return { background: "#f0f2f5" };
+  let cursor = 0;
+  const parts = items.map((item, index) => {
+    const start = cursor;
+    const end = cursor + (item.amount / total) * 100;
+    cursor = end;
+    return `${chartColors[index % chartColors.length]} ${start}% ${end}%`;
+  });
+  return { background: `conic-gradient(${parts.join(",")})` };
 }

@@ -1,0 +1,1141 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+
+<style>
+  html,body{margin:0;background:#e7eaef;}
+  @keyframes sheetUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+  @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+  @keyframes popIn{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:scale(1)}}
+  @keyframes toastIn{from{opacity:0;transform:transl(-50%,8px)}to{opacity:1;transform:translateY(0)}}
+  *{-webkit-tap-highlight-color:transparent}
+  .scroll-y{-ms-overflow-style:none;scrollbar-width:none}
+  .scroll-y::-webkit-scrollbar{display:none}
+</style>
+</helmet>
+
+<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:28px;background:radial-gradient(120% 120% at 50% 0%, #f3f5f8 0%, #dfe4ea 70%, #d4dae1 100%);font-family:Inter,'PingFang SC','Microsoft YaHei',sans-serif;">
+<x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" hint-size="402px,874px">
+
+<div style="position:relative;height:100%;width:100%;background:#eef1f4;overflow:hidden;font-family:Inter,'PingFang SC','Microsoft YaHei',sans-serif;color:#101827;">
+
+<!-- ============ HOME ============ -->
+<sc-if value="{{ isHome }}" hint-placeholder-val="{{ true }}">
+<div style="height:100%;display:flex;flex-direction:column;">
+  <div style="padding:56px 16px 8px;display:flex;align-items:center;justify-content:space-between;">
+    <div onClick="{{ openSwitcher }}" style="display:flex;align-items:center;gap:7px;padding:7px 12px 7px 8px;background:#fff;border-radius:999px;box-shadow:0 4px 16px #1d2a4710;">
+      <span style="width:26px;height:26px;border-radius:8px;background:{{ activeLedger.color }};color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;">{{ activeLedger.char }}</span>
+      <span style="font-size:16px;font-weight:700;letter-spacing:-.2px;">{{ activeLedger.name }}</span>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M7 10l5 5 5-5" stroke="#8993a3" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    <div onClick="{{ openAI }}" style="width:40px;height:40px;border-radius:999px;background:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px #1d2a4710;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8z" fill="#ff681c"/><circle cx="18.5" cy="5.5" r="1.6" fill="#ff9d5c"/></svg>
+    </div>
+  </div>
+
+  <div class="scroll-y" style="flex:1;overflow-y:auto;padding:8px 16px 120px;">
+    <!-- hero balance -->
+    <div style="border-radius:24px;background:linear-gradient(150deg,#ff7a3d 0%, #ff681c 60%, #f1530a 100%);padding:20px 20px 18px;color:#fff;box-shadow:0 16px 34px #ff681c33;position:relative;overflow:hidden;">
+      <div style="position:absolute;right:-30px;top:-30px;width:140px;height:140px;border-radius:999px;background:#ffffff18;"></div>
+      <div style="font-size:13px;opacity:.9;font-weight:600;">6月结余</div>
+      <div style="font-size:38px;font-weight:800;letter-spacing:-1px;margin-top:2px;">¥{{ home.balance }}</div>
+      <div style="display:flex;gap:10px;margin-top:16px;">
+        <div style="flex:1;background:#ffffff1f;border-radius:14px;padding:10px 12px;">
+          <div style="font-size:11.5px;opacity:.9;">收入</div>
+          <div style="font-size:18px;font-weight:700;margin-top:2px;">¥{{ home.income }}</div>
+        </div>
+        <div style="flex:1;background:#ffffff1f;border-radius:14px;padding:10px 12px;">
+          <div style="font-size:11.5px;opacity:.9;">支出</div>
+          <div style="font-size:18px;font-weight:700;margin-top:2px;">¥{{ home.expense }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- today -->
+    <div style="display:flex;align-items:center;gap:10px;margin-top:14px;background:#fff;border-radius:16px;padding:13px 15px;box-shadow:0 6px 22px #24304a08;">
+      <span style="width:38px;height:38px;border-radius:11px;background:#fff0e8;display:flex;align-items:center;justify-content:center;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 7v5l3 2" stroke="#ff681c" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="8.5" stroke="#ff681c" stroke-width="2"/></svg>
+      </span>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:14px;font-weight:600;white-space:nowrap;">今日记账</div>
+        <div style="font-size:12px;color:#8993a3;margin-top:1px;white-space:nowrap;">{{ home.todayCount }} 笔 · 支出 ¥{{ home.todayExpense }}</div>
+      </div>
+      <div onClick="{{ openAddExpense }}" style="padding:0 16px;height:34px;border-radius:999px;background:#ff681c;color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;white-space:nowrap;cursor:pointer;">继续记账</div>
+    </div>
+
+    <!-- reminders -->
+    <sc-if value="{{ home.hasReminders }}" hint-placeholder-val="{{ true }}">
+    <div style="margin-top:18px;">
+      <div style="font-size:13px;font-weight:700;color:#5b6473;margin:0 4px 9px;">待处理</div>
+      <div style="display:flex;flex-direction:column;gap:9px;">
+        <sc-for list="{{ home.reminders }}" as="r" hint-placeholder-count="2">
+          <div onClick="{{ r.onTap }}" style="display:flex;align-items:center;gap:11px;background:#fff;border-radius:14px;padding:12px 14px;box-shadow:0 6px 22px #24304a08;">
+            <span style="width:34px;height:34px;border-radius:10px;background:{{ r.tint }};display:flex;align-items:center;justify-content:center;color:{{ r.color }};font-size:15px;font-weight:800;">{{ r.badge }}</span>
+            <div style="flex:1;">
+              <div style="font-size:13.5px;font-weight:600;">{{ r.title }}</div>
+              <div style="font-size:12px;color:#8993a3;margin-top:1px;">{{ r.sub }}</div>
+            </div>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="#c2c9d3" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- recent -->
+    <div style="margin-top:18px;display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;padding:0 4px;">
+      <div style="font-size:13px;font-weight:700;color:#5b6473;">最近交易</div>
+      <div onClick="{{ goTxns }}" style="font-size:12.5px;color:#ff681c;font-weight:600;">查看全部</div>
+    </div>
+    <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 6px 22px #24304a08;">
+      <sc-for list="{{ home.recent }}" as="t" hint-placeholder-count="5">
+        <div onClick="{{ t.onTap }}" style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid #f2f4f7;">
+          <span style="width:38px;height:38px;border-radius:11px;background:{{ t.catColor }}1a;color:{{ t.catColor }};font-size:15px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">{{ t.catChar }}</span>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ t.note }}</div>
+            <div style="font-size:12px;color:#8993a3;margin-top:2px;">{{ t.catName }} · {{ t.member }}</div>
+          </div>
+          <div style="text-align:right;flex-shrink:0;">
+            <div style="font-size:15px;font-weight:700;color:{{ t.amountColor }};">{{ t.amountText }}</div>
+            <div style="font-size:11px;color:#aab2bd;margin-top:2px;">{{ t.time }}</div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+</div>
+</sc-if>
+
+<!-- ============ TRANSACTIONS ============ -->
+<sc-if value="{{ isTxns }}" hint-placeholder-val="{{ true }}">
+<div style="height:100%;display:flex;flex-direction:column;">
+  <div style="padding:56px 16px 6px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <div onClick="{{ openSwitcher }}" style="display:flex;align-items:center;gap:7px;padding:7px 12px 7px 8px;background:#fff;border-radius:999px;box-shadow:0 4px 16px #1d2a4710;">
+        <span style="width:26px;height:26px;border-radius:8px;background:{{ activeLedger.color }};color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;">{{ activeLedger.char }}</span>
+        <span style="font-size:16px;font-weight:700;letter-spacing:-.2px;">{{ activeLedger.name }}</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M7 10l5 5 5-5" stroke="#8993a3" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div onClick="{{ openAI }}" style="width:38px;height:38px;border-radius:999px;background:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px #1d2a4710;">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8z" fill="#ff681c"/></svg>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;background:#fff;border-radius:13px;padding:0 12px;height:42px;box-shadow:0 4px 16px #1d2a470a;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="6.5" stroke="#aab2bd" stroke-width="2"/><path d="M20 20l-3.5-3.5" stroke="#aab2bd" stroke-width="2" stroke-linecap="round"/></svg>
+      <input value="{{ search }}" onInput="{{ onSearch }}" placeholder="用自然语言搜索，如「上月餐饮」" style="flex:1;border:0;outline:0;background:transparent;font-size:14px;color:#101827;font-family:inherit;"/>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:11px;overflow-x:auto;" class="scroll-y">
+      <sc-for list="{{ txnFilters }}" as="f" hint-placeholder-count="3">
+        <div onClick="{{ f.onTap }}" style="padding:6px 14px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap;background:{{ f.bg }};color:{{ f.fg }};border:1px solid {{ f.bd }};">{{ f.label }}</div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div class="scroll-y" style="flex:1;overflow-y:auto;padding:8px 16px 120px;">
+    <sc-if value="{{ txnEmpty }}" hint-placeholder-val="{{ false }}">
+      <div style="text-align:center;padding:70px 20px;color:#aab2bd;">
+        <div style="font-size:15px;font-weight:600;color:#8993a3;">没有匹配的记录</div>
+        <div style="font-size:13px;margin-top:6px;">试试调整筛选条件或搜索词</div>
+      </div>
+    </sc-if>
+    <sc-for list="{{ txnGroups }}" as="g" hint-placeholder-count="3">
+      <div style="margin-bottom:16px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:0 4px 8px;">
+          <div style="font-size:13px;font-weight:700;color:#5b6473;">{{ g.day }}</div>
+          <div style="font-size:12px;color:#8993a3;">支出 ¥{{ g.expense }}</div>
+        </div>
+        <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 6px 22px #24304a08;">
+          <sc-for list="{{ g.items }}" as="t" hint-placeholder-count="3">
+            <div onClick="{{ t.onTap }}" style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid #f2f4f7;">
+              <span style="width:38px;height:38px;border-radius:11px;background:{{ t.catColor }}1a;color:{{ t.catColor }};font-size:15px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">{{ t.catChar }}</span>
+              <div style="flex:1;min-width:0;">
+                <div style="font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ t.note }}</div>
+                <div style="font-size:12px;color:#8993a3;margin-top:2px;display:flex;align-items:center;gap:6px;"><span>{{ t.catName }} · {{ t.member }}</span><sc-if value="{{ t.att }}" hint-placeholder-val="{{ false }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M16 8l-6 6a2.5 2.5 0 01-3.5-3.5l6.5-6.5a4 4 0 015.5 5.5l-7 7" stroke="#c2c9d3" stroke-width="2" stroke-linecap="round"/></svg></sc-if></div>
+              </div>
+              <div style="text-align:right;flex-shrink:0;">
+                <div style="font-size:15px;font-weight:700;color:{{ t.amountColor }};">{{ t.amountText }}</div>
+                <div style="font-size:11px;color:#aab2bd;margin-top:2px;">{{ t.time }}</div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</sc-if>
+
+<!-- ============ ANALYSIS ============ -->
+<sc-if value="{{ isAnalysis }}" hint-placeholder-val="{{ false }}">
+<div style="height:100%;display:flex;flex-direction:column;">
+  <div style="padding:56px 16px 10px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <div onClick="{{ openSwitcher }}" style="display:flex;align-items:center;gap:7px;padding:7px 12px 7px 8px;background:#fff;border-radius:999px;box-shadow:0 4px 16px #1d2a4710;">
+        <span style="width:26px;height:26px;border-radius:8px;background:{{ activeLedger.color }};color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;">{{ activeLedger.char }}</span>
+        <span style="font-size:16px;font-weight:700;letter-spacing:-.2px;">{{ activeLedger.name }}</span>
+        <span style="font-size:13px;color:#8993a3;font-weight:500;">· {{ analysisRangeLabel }}</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M7 10l5 5 5-5" stroke="#8993a3" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div onClick="{{ openAI }}" style="width:38px;height:38px;border-radius:999px;background:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px #1d2a4710;">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8z" fill="#ff681c"/><circle cx="18.5" cy="5.5" r="1.4" fill="#ff9d5c"/></svg>
+      </div>
+    </div>
+    <div style="display:flex;gap:7px;overflow-x:auto;" class="scroll-y">
+      <sc-for list="{{ analysisRanges }}" as="r" hint-placeholder-count="5">
+        <div onClick="{{ r.onTap }}" style="padding:6px 14px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap;background:{{ r.bg }};color:{{ r.fg }};border:1px solid {{ r.bd }};">{{ r.label }}</div>
+      </sc-for>
+    </div>
+  </div>
+  <div class="scroll-y" style="flex:1;overflow-y:auto;padding:6px 16px 120px;">
+    <!-- summary trio -->
+    <div style="display:flex;gap:9px;">
+      <div style="flex:1;background:#fff;border-radius:15px;padding:13px 13px;box-shadow:0 6px 22px #24304a08;">
+        <div style="font-size:11.5px;color:#8993a3;">收入</div>
+        <div style="font-size:17px;font-weight:800;color:#1f9d57;margin-top:3px;">¥{{ home.income }}</div>
+      </div>
+      <div style="flex:1;background:#fff;border-radius:15px;padding:13px 13px;box-shadow:0 6px 22px #24304a08;">
+        <div style="font-size:11.5px;color:#8993a3;">支出</div>
+        <div style="font-size:17px;font-weight:800;margin-top:3px;">¥{{ home.expense }}</div>
+      </div>
+      <div style="flex:1;background:#fff;border-radius:15px;padding:13px 13px;box-shadow:0 6px 22px #24304a08;">
+        <div style="font-size:11.5px;color:#8993a3;">结余</div>
+        <div style="font-size:17px;font-weight:800;color:#ff681c;margin-top:3px;">¥{{ home.balance }}</div>
+      </div>
+    </div>
+
+    <!-- trend -->
+    <div style="margin-top:14px;background:#fff;border-radius:18px;padding:16px 16px 12px;box-shadow:0 6px 22px #24304a08;">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <div style="font-size:15px;font-weight:700;">收支趋势</div>
+        <div style="display:flex;gap:12px;font-size:11.5px;color:#8993a3;">
+          <span style="display:flex;align-items:center;gap:4px;"><span style="width:8px;height:8px;border-radius:2px;background:#ff681c;"></span>支出</span>
+          <span style="display:flex;align-items:center;gap:4px;"><span style="width:8px;height:8px;border-radius:2px;background:#1f9d57;"></span>收入</span>
+        </div>
+      </div>
+      <div style="display:flex;align-items:flex-end;gap:10px;height:128px;margin-top:16px;">
+        <sc-for list="{{ trend }}" as="b" hint-placeholder-count="6">
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end;">
+            <div style="display:flex;gap:3px;align-items:flex-end;height:100%;width:100%;justify-content:center;">
+              <div style="width:9px;border-radius:4px 4px 0 0;background:#ff681c;height:{{ b.expH }}%;"></div>
+              <div style="width:9px;border-radius:4px 4px 0 0;background:#1f9d57;height:{{ b.incH }}%;"></div>
+            </div>
+            <div style="font-size:10.5px;color:#aab2bd;">{{ b.label }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <!-- category breakdown + donut -->
+    <div style="margin-top:14px;background:#fff;border-radius:18px;padding:16px;box-shadow:0 6px 22px #24304a08;">
+      <div style="font-size:15px;font-weight:700;margin-bottom:6px;">支出构成</div>
+      <div style="display:flex;align-items:center;gap:16px;">
+        <div style="position:relative;width:120px;height:120px;flex-shrink:0;">
+          <svg width="120" height="120" viewBox="0 0 120 120">
+            <sc-for list="{{ donut }}" as="d" hint-placeholder-count="5">
+              <circle cx="60" cy="60" r="52" fill="none" stroke="{{ d.color }}" stroke-width="15" stroke-dasharray="{{ d.dash }}" stroke-dashoffset="{{ d.offset }}" transform="rotate(-90 60 60)"/>
+            </sc-for>
+          </svg>
+          <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;">
+            <div style="font-size:10px;color:#8993a3;">总支出</div>
+            <div style="font-size:17px;font-weight:800;">¥{{ home.expense }}</div>
+          </div>
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;gap:9px;">
+          <sc-for list="{{ breakdown }}" as="c" hint-placeholder-count="4">
+            <div>
+              <div style="display:flex;align-items:center;justify-content:space-between;font-size:12.5px;margin-bottom:4px;">
+                <span style="display:flex;align-items:center;gap:6px;"><span style="width:9px;height:9px;border-radius:3px;background:{{ c.color }};"></span>{{ c.name }}</span>
+                <span style="color:#8993a3;">{{ c.pct }}%</span>
+              </div>
+              <div style="height:6px;border-radius:99px;background:#f0f2f5;overflow:hidden;"><div style="height:100%;border-radius:99px;background:{{ c.color }};width:{{ c.pct }}%;"></div></div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+
+    <!-- member contributions -->
+    <div style="margin-top:14px;background:#fff;border-radius:18px;padding:16px;box-shadow:0 6px 22px #24304a08;">
+      <div style="font-size:15px;font-weight:700;margin-bottom:13px;">成员贡献</div>
+      <div style="display:flex;flex-direction:column;gap:13px;">
+        <sc-for list="{{ memberStats }}" as="m" hint-placeholder-count="4">
+          <div style="display:flex;align-items:center;gap:11px;">
+            <span style="width:34px;height:34px;border-radius:999px;background:{{ m.color }};color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">{{ m.initial }}</span>
+            <div style="flex:1;">
+              <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;"><span style="font-weight:600;">{{ m.name }}</span><span style="color:#5b6473;">¥{{ m.amount }} · {{ m.pct }}%</span></div>
+              <div style="height:6px;border-radius:99px;background:#f0f2f5;overflow:hidden;"><div style="height:100%;border-radius:99px;background:{{ m.color }};width:{{ m.pct }}%;"></div></div>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <!-- unusual -->
+    <div style="margin-top:14px;background:#fff;border-radius:18px;padding:16px;box-shadow:0 6px 22px #24304a08;">
+      <div style="font-size:15px;font-weight:700;margin-bottom:11px;">异常与大额</div>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <sc-for list="{{ unusual }}" as="u" hint-placeholder-count="2">
+          <div style="display:flex;align-items:center;gap:11px;padding:11px 12px;border-radius:13px;background:#fff7f4;border:1px solid #ffe4d6;">
+            <span style="width:32px;height:32px;border-radius:9px;background:#ff681c1a;color:#ff681c;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M12 8v5" stroke="#ff681c" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="16.5" r="1.2" fill="#ff681c"/><path d="M10.3 4.3 3 17a2 2 0 001.7 3h14.6a2 2 0 001.7-3L13.7 4.3a2 2 0 00-3.4 0z" stroke="#ff681c" stroke-width="2"/></svg></span>
+            <div style="flex:1;">
+              <div style="font-size:13.5px;font-weight:600;">{{ u.note }}</div>
+              <div style="font-size:11.5px;color:#c2691f;margin-top:1px;">{{ u.tag }}</div>
+            </div>
+            <div style="font-size:14px;font-weight:700;">{{ u.amount }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+</div>
+</sc-if>
+
+<!-- ============ ME ============ -->
+<sc-if value="{{ isMe }}" hint-placeholder-val="{{ false }}">
+<div style="height:100%;display:flex;flex-direction:column;">
+  <div style="padding:56px 16px 4px;"><div style="font-size:26px;font-weight:800;letter-spacing:-.5px;">我的</div></div>
+  <div class="scroll-y" style="flex:1;overflow-y:auto;padding:10px 16px 120px;">
+    <!-- profile -->
+    <div style="display:flex;align-items:center;gap:13px;background:#fff;border-radius:18px;padding:16px;box-shadow:0 6px 22px #24304a08;">
+      <span style="width:54px;height:54px;border-radius:999px;background:linear-gradient(135deg,#ff8a4d,#ff681c);color:#fff;font-size:20px;font-weight:700;display:flex;align-items:center;justify-content:center;">我</span>
+      <div style="flex:1;">
+        <div style="font-size:17px;font-weight:700;">陈晓</div>
+        <div style="font-size:12.5px;color:#8993a3;margin-top:2px;">138****2046 · me@example.com</div>
+      </div>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="#c2c9d3" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+
+    <!-- subscription -->
+    <div style="margin-top:13px;border-radius:18px;padding:16px;box-shadow:0 10px 26px #2a1c0f1f;background:linear-gradient(135deg,#2b2620,#1a1714);color:#fff;position:relative;overflow:hidden;">
+      <div style="position:absolute;right:-20px;top:-20px;width:110px;height:110px;border-radius:999px;background:#ff681c22;"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <div>
+          <div style="font-size:12px;color:#d8b08c;font-weight:600;letter-spacing:.3px;">当前订阅</div>
+          <div style="font-size:22px;font-weight:800;margin-top:3px;">{{ sub.tierLabel }}</div>
+        </div>
+        <span style="padding:5px 11px;border-radius:999px;font-size:11.5px;font-weight:700;background:{{ sub.badgeBg }};color:{{ sub.badgeFg }};">{{ sub.badge }}</span>
+      </div>
+      <div style="font-size:12.5px;color:#b9b2a8;margin-top:8px;line-height:1.5;">{{ sub.desc }}</div>
+      <sc-if value="{{ sub.showUpgrade }}" hint-placeholder-val="{{ true }}">
+        <div onClick="{{ openUpgrade }}" style="margin-top:13px;background:#ff681c;color:#fff;text-align:center;padding:11px;border-radius:12px;font-size:14px;font-weight:700;box-shadow:0 8px 20px #ff681c40;">升级到 Pro · 解锁完整 AI</div>
+      </sc-if>
+    </div>
+
+    <!-- ledger group -->
+    <div style="font-size:12px;font-weight:700;color:#8993a3;margin:18px 4px 8px;">账本</div>
+    <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 6px 22px #24304a08;">
+      <sc-for list="{{ meLedgerRows }}" as="row" hint-placeholder-count="3">
+        <div onClick="{{ row.onTap }}" style="display:flex;align-items:center;gap:12px;padding:14px 15px;border-bottom:1px solid #f2f4f7;">
+          <span style="width:30px;height:30px;border-radius:8px;background:{{ row.tint }};color:{{ row.color }};display:flex;align-items:center;justify-content:center;flex-shrink:0;">{{ row.icon }}</span>
+          <div style="flex:1;font-size:14.5px;font-weight:500;">{{ row.label }}</div>
+          <div style="font-size:13px;color:#aab2bd;">{{ row.detail }}</div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="#c2c9d3" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="font-size:12px;font-weight:700;color:#8993a3;margin:18px 4px 8px;">账号</div>
+    <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 6px 22px #24304a08;">
+      <sc-for list="{{ meAccountRows }}" as="row" hint-placeholder-count="3">
+        <div onClick="{{ row.onTap }}" style="display:flex;align-items:center;gap:12px;padding:14px 15px;border-bottom:1px solid #f2f4f7;">
+          <span style="width:30px;height:30px;border-radius:8px;background:{{ row.tint }};color:{{ row.color }};display:flex;align-items:center;justify-content:center;flex-shrink:0;">{{ row.icon }}</span>
+          <div style="flex:1;font-size:14.5px;font-weight:500;color:{{ row.labelColor }};">{{ row.label }}</div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="#c2c9d3" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+</div>
+</sc-if>
+
+<!-- ============ BOTTOM TAB BAR + FAB ============ -->
+<div style="position:absolute;left:0;right:0;bottom:0;height:86px;background:rgba(255,255,255,.86);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border-top:1px solid #e7eaef;display:flex;align-items:flex-start;padding:8px 22px 0;z-index:20;">
+  <div style="flex:1;display:flex;justify-content:space-around;">
+    <sc-for list="{{ tabsLeft }}" as="t" hint-placeholder-count="2">
+      <div onClick="{{ t.onTap }}" style="display:flex;flex-direction:column;align-items:center;gap:3px;width:56px;">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="{{ t.d }}" stroke="{{ t.color }}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span style="font-size:10.5px;font-weight:600;color:{{ t.color }};">{{ t.label }}</span>
+      </div>
+    </sc-for>
+  </div>
+  <div style="width:64px;"></div>
+  <div style="flex:1;display:flex;justify-content:space-around;">
+    <sc-for list="{{ tabsRight }}" as="t" hint-placeholder-count="2">
+      <div onClick="{{ t.onTap }}" style="display:flex;flex-direction:column;align-items:center;gap:3px;width:56px;">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="{{ t.d }}" stroke="{{ t.color }}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span style="font-size:10.5px;font-weight:600;color:{{ t.color }};">{{ t.label }}</span>
+      </div>
+    </sc-for>
+  </div>
+</div>
+<div onClick="{{ openAddExpense }}" style="position:absolute;left:50%;transform:translateX(-50%);bottom:40px;width:58px;height:58px;border-radius:999px;background:linear-gradient(145deg,#ff8a4d,#ff681c);box-shadow:0 10px 24px #ff681c55;display:flex;align-items:center;justify-content:center;z-index:25;">
+  <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/></svg>
+</div>
+
+<!-- ============ OVERLAYS ============ -->
+{{ overlays }}
+{{ dialogNode }}
+{{ toastNode }}
+
+</div>
+</x-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:&quot;460px&quot;,&quot;height&quot;:&quot;930px&quot;}}">
+class Component extends DCLogic {
+  state = {
+    tab: 'home', overlay: null, dialog: null, toast: null, authed: true,
+    addType: 'expense', addAmount: '0', addCat: 'food', addNote: '', addDate: '今天', addLines: [], addAtt: [], addCatPickerOpen: false,
+    txnType: 'all', search: '', analysisRange: 'month',
+    detail: null,
+    aiInput: '', aiBusy: false,
+    aiMsgs: [{ id: 1, role: 'ai', kind: 'text', text: '你好，我是账本助手。我可以帮你记账、查账、分析开支，或处理账单文件。试试下面的快捷指令 👇' }],
+    inviteMethod: 'phone', inviteValue: '', inviteRole: '成员',
+    isPro: false,
+    activeLedgerId: 'home',
+    members: [
+      { id: 'm1', name: '陈晓（我）', role: '创建者', initial: '我', color: '#ff681c', contact: 'me@example.com', me: true },
+      { id: 'm2', name: '林小美', role: '管理员', initial: '美', color: '#ff5d8f', contact: '139****8821' },
+      { id: 'm3', name: '阿杰', role: '成员', initial: '杰', color: '#4c8dff', contact: 'jay@example.com' },
+      { id: 'm4', name: '妈妈', role: '成员', initial: '妈', color: '#14b8a6', contact: '137****5560' },
+    ],
+    invitations: [
+      { id: 'i1', name: '小强 · 138****2046', state: '待接受', stateKey: 'pending' },
+      { id: 'i2', name: 'lucy@mail.com', state: '已过期', stateKey: 'expired' },
+    ],
+    ledgers: [
+      { id: 'home', name: '家庭账本', char: '家', color: '#ff681c', currency: 'CNY', members: 4, role: '创建者', balance: '9,351', sub: '你和其他 3 人' },
+      { id: 'trip', name: '日本旅行 2026', char: '旅', color: '#4c8dff', currency: 'JPY', members: 5, role: '管理员', balance: '12,880', sub: '5 人 · 旅行' },
+      { id: 'flat', name: '合租公寓', char: '租', color: '#14b8a6', currency: 'CNY', members: 3, role: '成员', balance: '2,140', sub: '3 人 · 室友' },
+    ],
+    txns: [
+      { id: 't1', type: 'expense', amount: 38, cat: 'food', note: '公司楼下牛肉面', member: '我', day: '今天', time: '12:30', att: false },
+      { id: 't2', type: 'expense', amount: 128.5, cat: 'shop', note: '盒马生鲜采购', member: '小美', day: '今天', time: '10:05', att: true },
+      { id: 't3', type: 'income', amount: 5000, cat: 'salary', note: '本月工资', member: '我', day: '今天', time: '09:00', att: false },
+      { id: 't4', type: 'expense', amount: 42, cat: 'transit', note: '滴滴出行', member: '阿杰', day: '昨天', time: '21:12', att: true },
+      { id: 't5', type: 'expense', amount: 328, cat: 'food', note: '海底捞火锅 家庭聚餐', member: '我', day: '昨天', time: '19:40', att: true },
+      { id: 't6', type: 'expense', amount: 89, cat: 'fun', note: '电影票 ×3', member: '小美', day: '昨天', time: '15:20', att: false },
+      { id: 't7', type: 'expense', amount: 1860, cat: 'shop', note: '机票 春秋航空', member: '我', day: '06月18日', time: '11:00', att: true },
+      { id: 't8', type: 'income', amount: 600, cat: 'reimb', note: '差旅报销', member: '阿杰', day: '06月18日', time: '10:30', att: false },
+      { id: 't9', type: 'expense', amount: 256, cat: 'home', note: '水电燃气', member: '妈妈', day: '06月17日', time: '18:00', att: false },
+      { id: 't10', type: 'expense', amount: 68, cat: 'med', note: '感冒药', member: '妈妈', day: '06月17日', time: '14:25', att: false },
+    ],
+    pending: [
+      { id: 'p1', type: 'expense', amount: 328, cat: 'food', note: '海底捞火锅', date: '06-25', source: '小票识别', low: [] },
+      { id: 'p2', type: 'expense', amount: 42, cat: 'transit', note: '滴滴出行', date: '06-25', source: '微信账单', low: ['cat'] },
+      { id: 'p3', type: 'income', amount: 5000, cat: 'salary', note: '工资', date: '06-25', source: '银行流水', low: [] },
+      { id: 'p4', type: 'expense', amount: 156, cat: 'shop', note: '京东订单（金额待核对）', date: '06-24', source: '邮件账单', low: ['amount'] },
+    ],
+  };
+
+  expenseCats = [
+    { key: 'food', name: '餐饮', char: '餐', color: '#ff7a45' },
+    { key: 'transit', name: '交通', char: '行', color: '#4c8dff' },
+    { key: 'shop', name: '购物', char: '购', color: '#ff5d8f' },
+    { key: 'home', name: '居家', char: '家', color: '#14b8a6' },
+    { key: 'fun', name: '娱乐', char: '娱', color: '#a855f7' },
+    { key: 'med', name: '医疗', char: '医', color: '#ef4444' },
+    { key: 'edu', name: '教育', char: '学', color: '#f59e0b' },
+    { key: 'daily', name: '日用', char: '日', color: '#0ea5e9' },
+    { key: 'other', name: '其他', char: '他', color: '#94a3b8' },
+  ];
+  incomeCats = [
+    { key: 'salary', name: '工资', char: '薪', color: '#1f9d57' },
+    { key: 'redpack', name: '红包', char: '包', color: '#ff5d5d' },
+    { key: 'reimb', name: '报销', char: '报', color: '#4c8dff' },
+    { key: 'invest', name: '理财', char: '财', color: '#f59e0b' },
+    { key: 'other_i', name: '其他', char: '他', color: '#94a3b8' },
+  ];
+  trendRaw = [
+    { label: '1月', exp: 7200, inc: 16800 }, { label: '2月', exp: 8100, inc: 17200 },
+    { label: '3月', exp: 6800, inc: 16800 }, { label: '4月', exp: 9050, inc: 18200 },
+    { label: '5月', exp: 7600, inc: 17600 }, { label: '6月', exp: 9248, inc: 18600 },
+  ];
+  breakdownRaw = [
+    { name: '餐饮', color: '#ff7a45', amount: 3120, pct: 34 },
+    { name: '购物', color: '#ff5d8f', amount: 2480, pct: 27 },
+    { name: '居家', color: '#14b8a6', amount: 1450, pct: 16 },
+    { name: '交通', color: '#4c8dff', amount: 900, pct: 10 },
+    { name: '娱乐', color: '#a855f7', amount: 680, pct: 7 },
+    { name: '其他', color: '#94a3b8', amount: 618, pct: 6 },
+  ];
+  memberStatsRaw = [
+    { name: '陈晓（我）', initial: '我', color: '#ff681c', amount: 4820, pct: 52 },
+    { name: '林小美', initial: '美', color: '#ff5d8f', amount: 2630, pct: 28 },
+    { name: '阿杰', initial: '杰', color: '#4c8dff', amount: 1180, pct: 13 },
+    { name: '妈妈', initial: '妈', color: '#14b8a6', amount: 618, pct: 7 },
+  ];
+  unusualRaw = [
+    { note: '机票 春秋航空', amount: '¥1,860', tag: '本月最大单笔支出' },
+    { note: '海底捞火锅', amount: '¥328', tag: '高于该类目均值 2.4×' },
+  ];
+
+  // ---------- helpers ----------
+  catByKey(k) { return [...this.expenseCats, ...this.incomeCats].find(c => c.key === k) || { name: '其他', char: '他', color: '#94a3b8' }; }
+  fmt(n) { return Number(n).toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 2 }); }
+  toast(m) { this.setState({ toast: m }); clearTimeout(this._t); this._t = setTimeout(() => this.setState({ toast: null }), 1900); }
+  React = null;
+
+  // ---------- nav ----------
+  setTab = (t) => this.setState({ tab: t, overlay: null });
+  open = (o) => this.setState({ overlay: o });
+  close = () => this.setState({ overlay: null });
+  openDialog = (d) => this.setState({ dialog: d });
+  closeDialog = () => this.setState({ dialog: null });
+  confirmDialog = () => { const d = this.state.dialog; this.setState({ dialog: null }); if (d && d.onConfirm) d.onConfirm(); };
+
+  // ---------- add ----------
+  openAdd = (type) => this.setState({ overlay: 'add', addType: type, addAmount: '0', addCat: type === 'income' ? 'salary' : 'food', addNote: '', addLines: [], addAtt: [], addCatPickerOpen: false });
+  setAddType = (t) => this.setState({ addType: t, addCat: t === 'income' ? 'salary' : 'food' });
+  addDigit = (d) => this.setState(s => {
+    let a = s.addAmount;
+    if (d === 'del') return { addAmount: a.length <= 1 ? '0' : a.slice(0, -1) };
+    if (d === '.') return a.includes('.') ? {} : { addAmount: a + '.' };
+    if (a === '0') return { addAmount: d };
+    if (a.includes('.') && a.split('.')[1].length >= 2) return {};
+    return { addAmount: a + d };
+  });
+  addLine = () => this.setState(s => ({ addLines: [...s.addLines, { id: Date.now(), name: '明细 ' + (s.addLines.length + 1), amount: '0.00' }] }));
+  addAttach = () => { this.setState(s => ({ addAtt: [...s.addAtt, { id: Date.now(), name: 'IMG_' + (1043 + s.addAtt.length) + '.jpg' }] })); this.toast('已添加附件'); };
+  saveTxn = () => {
+    const s = this.state; const amt = parseFloat(s.addAmount) || 0;
+    if (amt <= 0) { this.toast('请输入金额'); return; }
+    const c = this.catByKey(s.addCat);
+    const t = { id: Date.now(), type: s.addType, amount: amt, cat: s.addCat, note: s.addNote || c.name, member: '我', day: '今天', time: '刚刚', att: s.addAtt.length > 0 };
+    this.setState(st => ({ txns: [t, ...st.txns], overlay: null }));
+    this.toast(s.addType === 'income' ? '已记一笔收入' : '已记一笔支出');
+  };
+
+  // ---------- ledger ----------
+  openSwitcher = () => this.open('switcher');
+  switchLedger = (id) => { this.setState({ activeLedgerId: id, overlay: null, tab: 'home' }); this.toast('已切换账本'); };
+
+  // ---------- AI ----------
+  openAI = () => this.open('ai');
+  openAISearch = () => { this.open('ai'); setTimeout(() => this.sendAI('上个月餐饮花了多少？'), 250); };
+  setMsg = (id, patch) => this.setState(s => ({ aiMsgs: s.aiMsgs.map(x => x.id === id ? { ...x, ...patch } : x) }));
+  sendAI = (preset) => {
+    const text = (preset != null ? preset : this.state.aiInput).trim();
+    if (!text || this.state.aiBusy) return;
+    const um = { id: Date.now(), role: 'user', kind: 'text', text };
+    this.setState(s => ({ aiMsgs: [...s.aiMsgs, um], aiInput: '', aiBusy: true }));
+    clearTimeout(this._ai);
+    this._ai = setTimeout(() => { const r = this.aiRespond(text); this.setState(s => ({ aiMsgs: [...s.aiMsgs, ...r], aiBusy: false })); }, 850);
+  };
+  aiAttach = () => {
+    const um = { id: Date.now(), role: 'user', kind: 'attachment', name: '小票_海底捞.jpg' };
+    this.setState(s => ({ aiMsgs: [...s.aiMsgs, um], aiBusy: true }));
+    setTimeout(() => {
+      const ask = { id: Date.now() + 1, role: 'ai', kind: 'attachAsk', status: 'pending', text: '我识别到一张餐饮小票（¥328）。需要我把它记入「家庭账本」吗？' };
+      this.setState(s => ({ aiMsgs: [...s.aiMsgs, ask], aiBusy: false }));
+    }, 950);
+  };
+  aiRespond(t) {
+    const nid = () => Date.now() + Math.floor(Math.random() * 9999);
+    if (/邀请|加入|成员|invite/.test(t)) return [{ id: nid(), role: 'ai', kind: 'confirm', status: 'pending', title: '邀请成员加入「家庭账本」',
+      rows: [['操作', '邀请新成员'], ['对象', '小强 · 138****2046'], ['角色', '成员'], ['影响', '对方可查看并记录该账本']], note: '这是高风险操作，需你确认。' }];
+    if (/多少|查|搜|消费|超过|大于|over/.test(t)) return [{ id: nid(), role: 'ai', kind: 'search', title: '上月「餐饮」消费', total: '¥3,120', count: 18,
+      items: [['海底捞火锅', '¥328'], ['公司楼下牛肉面', '¥38'], ['星巴克 ×4', '¥168']] }];
+    if (/分析|趋势|报告|开支|结构|情况/.test(t)) return [{ id: nid(), role: 'ai', kind: 'analysis',
+      concl: '本月支出 ¥9,248，较上月增加 18%。', bullets: ['餐饮 ¥3,120（34%）为最大类目，环比 +22%', '购物 ¥2,480，主要来自 6/12 一笔 ¥1,860 机票', '检测到 2 笔大额支出高于历史均值'],
+      sugg: '建议关注餐饮与购物，本月已接近预算上限。' }];
+    const m = t.match(/(\d+(?:\.\d+)?)/);
+    if (m && /记|花|买|餐|饭|打车|车|工资|收入|元|块|￥|¥/.test(t)) {
+      const amt = m[1]; const inc = /工资|收入|报销|红包/.test(t);
+      const cat = inc ? '工资' : (/午餐|晚餐|早餐|饭|餐/.test(t) ? '餐饮' : (/打车|车|地铁/.test(t) ? '交通' : '其他'));
+      return [{ id: nid(), role: 'ai', kind: 'txn', status: 'pending', ttype: inc ? '收入' : '支出', amount: '¥' + amt,
+        date: /昨天/.test(t) ? '昨天' : '今天', category: cat, note: t,
+        raw: { amount: parseFloat(amt), type: inc ? 'income' : 'expense', cat: inc ? 'salary' : (cat === '餐饮' ? 'food' : cat === '交通' ? 'transit' : 'other'), day: /昨天/.test(t) ? '昨天' : '今天' } }];
+    }
+    return [{ id: nid(), role: 'ai', kind: 'text', text: '好的，可以再多告诉我一些信息吗？例如金额、类别或时间。你也可以直接上传账单文件，我来帮你识别整理。' }];
+  }
+  aiConfirmInvite = (id) => { this.setMsg(id, { status: 'confirmed' }); this.setState(s => ({ invitations: [{ id: Date.now(), name: '小强 · 138****2046', state: '待接受', stateKey: 'pending' }, ...s.invitations] })); this.toast('邀请已发送'); };
+  aiConfirmTxn = (msg) => { this.setMsg(msg.id, { status: 'confirmed' }); const r = msg.raw; this.setState(s => ({ txns: [{ id: Date.now(), type: r.type, amount: r.amount, cat: r.cat, note: msg.note, member: '我', day: r.day, time: '刚刚', att: false }, ...s.txns] })); this.toast('已记一笔'); };
+  aiConfirmAttach = (id) => { this.setMsg(id, { status: 'confirmed' }); this.toast('已创建待确认记录'); setTimeout(() => this.open('pending'), 400); };
+
+  // ---------- pending ----------
+  confirmPending = (p) => { const c = this.catByKey(p.cat); this.setState(s => ({ txns: [{ id: Date.now(), type: p.type, amount: p.amount, cat: p.cat, note: p.note, member: '我', day: '今天', time: p.date, att: true }, ...s.txns], pending: s.pending.filter(x => x.id !== p.id) })); this.toast('已确认入账'); };
+  ignorePending = (p) => { this.setState(s => ({ pending: s.pending.filter(x => x.id !== p.id) })); this.toast('已忽略'); };
+  bulkConfirm = () => { this.setState(s => { const ts = s.pending.map(p => ({ id: Math.random(), type: p.type, amount: p.amount, cat: p.cat, note: p.note, member: '我', day: '今天', time: p.date, att: true })); return { txns: [...ts, ...s.txns], pending: [] }; }); this.toast('已全部入账'); };
+
+  // ---------- members ----------
+  changeRole = (id, role) => { this.setState(s => ({ members: s.members.map(m => m.id === id ? { ...m, role } : m) })); this.toast('角色已更新'); };
+  removeMember = (m) => this.openDialog({ title: '移除成员', message: '确定移除「' + m.name + '」？历史记录将保留，对方将无法再访问该账本。', confirmText: '移除', danger: true, onConfirm: () => { this.setState(s => ({ members: s.members.filter(x => x.id !== m.id) })); this.toast('已移除成员'); } });
+  sendInvite = () => { const v = this.state.inviteValue.trim(); if (!v) { this.toast('请输入' + (this.state.inviteMethod === 'phone' ? '手机号' : '邮箱')); return; } this.setState(s => ({ invitations: [{ id: Date.now(), name: v, state: '待接受', stateKey: 'pending' }, ...s.invitations], overlay: 'members', inviteValue: '' })); this.toast('邀请已发送'); };
+
+  // ---------- danger ----------
+  deleteTxn = (t) => this.openDialog({ title: '删除交易', message: '确定删除「' + t.note + '」这笔记录吗？此操作不可撤销。', confirmText: '删除', danger: true, onConfirm: () => { this.setState(s => ({ txns: s.txns.filter(x => x.id !== t.id), overlay: null })); this.toast('已删除'); } });
+  deleteLedger = () => this.openDialog({ title: '删除账本', message: '删除后将无法恢复，所有交易、成员与文件都会被移除。此操作不可撤销。', confirmText: '删除账本', danger: true, onConfirm: () => this.toast('账本已删除（演示）') });
+  leaveLedger = () => this.openDialog({ title: '退出账本', message: '退出后你将无法访问该账本，但历史记录会保留给其他成员。', confirmText: '退出账本', danger: true, onConfirm: () => this.toast('已退出账本（演示）') });
+  logout = () => this.openDialog({ title: '退出登录', message: '确定退出当前账号吗？', confirmText: '退出登录', danger: true, onConfirm: () => this.toast('已退出登录（演示）') });
+
+  // ---------- subscription ----------
+  openUpgrade = () => this.open('upgrade');
+  upgrade = () => { this.setState({ isPro: true, overlay: null }); this.toast('已升级到 Pro'); };
+  exportData = () => { this.open(null); this.toast('已导出 ledger.json'); };
+
+  openDetail = (t) => this.setState({ detail: t, overlay: 'detail' });
+
+  // ============ RENDER ============
+  fmtTxn = (t) => {
+    const c = this.catByKey(t.cat);
+    return { id: t.id, catName: c.name, catChar: c.char, catColor: c.color, note: t.note, member: t.member, time: t.time, att: !!t.att,
+      amountText: (t.type === 'income' ? '+¥' : '-¥') + this.fmt(t.amount), amountColor: t.type === 'income' ? '#1f9d57' : '#101827',
+      onTap: () => this.openDetail(t) };
+  };
+
+  renderVals() {
+    const R = React; this.React = R;
+    const s = this.state;
+    const active = s.ledgers.find(l => l.id === s.activeLedgerId) || s.ledgers[0];
+    const ICON = (d) => R.createElement('svg', { width: 17, height: 17, viewBox: '0 0 24 24', fill: 'none' }, R.createElement('path', { d, stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }));
+
+    // tabs
+    const mk = (key, label, d) => ({ key, label, d, color: s.tab === key && !s.overlay ? '#ff681c' : '#aab2bd', onTap: () => this.setTab(key) });
+    const tabsLeft = [mk('home', '首页', 'M3 11.5 12 4l9 7.5M5 10.5V20h14v-9.5'), mk('txns', '流水', 'M5 7h14M5 12h14M5 17h9')];
+    const tabsRight = [mk('analysis', '分析', 'M5 20V10M12 20V4M19 20v-7'), mk('me', '我的', 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM5 20c0-3.6 3.5-5.5 7-5.5s7 1.9 7 5.5')];
+
+    // home
+    const recent = s.txns.slice(0, 5).map(this.fmtTxn);
+    const reminders = [];
+    reminders.push({ id: 'imp', badge: '2', tint: '#eaf1ff', color: '#4c8dff', title: '2 个文件正在识别', sub: '微信账单 · 超市小票 — 点击查看进度', onTap: () => this.open('import') });
+    reminders.push({ id: 'pend', badge: String(s.pending.length), tint: '#fff0e8', color: '#ff681c', title: s.pending.length + ' 条待确认记录', sub: '来自文件识别与 AI — 需你审核入账', onTap: () => this.open('pending') });
+    reminders.push({ id: 'fail', badge: '!', tint: '#fdeceb', color: '#d74035', title: '1 个文件识别失败', sub: 'invoice_0612.pdf — 无法识别金额', onTap: () => this.open('import') });
+
+    const home = { balance: '9,351', income: '18,600', expense: '9,248', todayCount: 3, todayExpense: '166.5',
+      hasReminders: reminders.length > 0, reminders, recent };
+
+    // txns filtered+grouped
+    let list = s.txns.filter(t => (s.txnType === 'all' || t.type === s.txnType));
+    if (s.search.trim()) { const q = s.search.trim(); list = list.filter(t => (t.note.indexOf(q) >= 0) || String(t.amount).indexOf(q) >= 0 || this.catByKey(t.cat).name.indexOf(q) >= 0); }
+    const order = []; const gmap = {};
+    list.forEach(t => { if (!gmap[t.day]) { gmap[t.day] = { day: t.day, exp: 0, items: [] }; order.push(gmap[t.day]); } gmap[t.day].items.push(this.fmtTxn(t)); if (t.type === 'expense') gmap[t.day].exp += t.amount; });
+    const txnGroups = order.map(g => ({ day: g.day, expense: this.fmt(g.exp), items: g.items }));
+    const tf = (key, label) => ({ key, label, onTap: () => this.setState({ txnType: key }),
+      bg: s.txnType === key ? '#ff681c' : '#fff', fg: s.txnType === key ? '#fff' : '#5b6473', bd: s.txnType === key ? '#ff681c' : '#e7eaef' });
+    const txnFilters = [tf('all', '全部'), tf('expense', '支出'), tf('income', '收入')];
+
+    // analysis
+    const tmax = Math.max(...this.trendRaw.map(x => Math.max(x.exp, x.inc)));
+    const trend = this.trendRaw.map(x => ({ label: x.label, expH: Math.round(x.exp / tmax * 100), incH: Math.round(x.inc / tmax * 100) }));
+    const breakdown = this.breakdownRaw.map(b => ({ name: b.name, color: b.color, pct: b.pct, amount: this.fmt(b.amount) }));
+    const C = 2 * Math.PI * 52; let cum = 0;
+    const donut = this.breakdownRaw.map(b => { const len = b.pct / 100 * C; const o = { color: b.color, dash: len.toFixed(1) + ' ' + (C - len).toFixed(1), offset: (-cum).toFixed(1) }; cum += len; return o; });
+    const memberStats = this.memberStatsRaw.map(m => ({ name: m.name, initial: m.initial, color: m.color, pct: m.pct, amount: this.fmt(m.amount) }));
+
+    // me
+    const sub = s.isPro
+      ? { tierLabel: 'Pro', badge: '已订阅', badgeBg: '#ff681c', badgeFg: '#fff', desc: '已解锁完整 AI 助手、文件批量识别与高级分析。下次续费 2026/07/26。', showUpgrade: false }
+      : { tierLabel: 'Free', badge: '免费版', badgeBg: '#ffffff22', badgeFg: '#ffd9c2', desc: '可使用核心记账与协作功能。升级 Pro 解锁完整 AI 助手与批量文件识别。', showUpgrade: true };
+    const meLedgerRows = [
+      { id: 'sw', icon: ICON('M8 7h12M8 12h12M8 17h12M4 7h.01M4 12h.01M4 17h.01'), tint: '#fff0e8', color: '#ff681c', label: '切换 / 管理账本', detail: active.name, onTap: () => this.open('switcher') },
+      { id: 'mem', icon: ICON('M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3 19c0-2.8 2.7-4 6-4s6 1.2 6 4M17 11a3 3 0 0 0 0-6'), tint: '#eaf1ff', color: '#4c8dff', label: '成员与邀请', detail: s.members.length + ' 人', onTap: () => this.open('members') },
+      { id: 'pend', icon: ICON('M9 11l3 3 8-8M21 12v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h11'), tint: '#fff0e8', color: '#ff681c', label: '待确认记录', detail: String(s.pending.length), onTap: () => this.open('pending') },
+      { id: 'exp', icon: ICON('M12 3v12m0 0l-4-4m4 4l4-4M5 21h14'), tint: '#e8f7ef', color: '#1f9d57', label: '导出数据', detail: 'JSON', onTap: () => this.open('export') },
+    ];
+    const meAccountRows = [
+      { id: 'profile', icon: ICON('M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM5 20c0-3.6 3.5-5.5 7-5.5s7 1.9 7 5.5'), tint: '#f0f2f5', color: '#5b6473', label: '账户信息', labelColor: '#101827', onTap: () => this.toast('账户信息（演示）') },
+      { id: 'bind', icon: ICON('M4 8l8 5 8-5M4 6h16v12H4z'), tint: '#f0f2f5', color: '#5b6473', label: '绑定邮箱 / 手机', labelColor: '#101827', onTap: () => this.toast('绑定邮箱 / 手机（演示）') },
+      { id: 'logout', icon: ICON('M14 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-2M9 12h11m0 0l-3-3m3 3l-3 3'), tint: '#fdeceb', color: '#d74035', label: '退出登录', labelColor: '#d74035', onTap: () => this.logout() },
+    ];
+
+    const rangeOptions = [
+      { key: 'month', label: '本月' },
+      { key: 'last', label: '上月' },
+      { key: '3m', label: '近3月' },
+      { key: '6m', label: '近6月' },
+      { key: 'year', label: '本年' },
+    ];
+    const analysisRanges = rangeOptions.map(r => ({
+      key: r.key, label: r.label,
+      onTap: () => this.setState({ analysisRange: r.key }),
+      bg: s.analysisRange === r.key ? '#ff681c' : '#fff',
+      fg: s.analysisRange === r.key ? '#fff' : '#5b6473',
+      bd: s.analysisRange === r.key ? '#ff681c' : '#e7eaef',
+    }));
+    const analysisRangeLabel = (rangeOptions.find(r => r.key === s.analysisRange) || rangeOptions[0]).label;
+
+    return {
+      isHome: s.tab === 'home' && !s.overlay ? true : (s.tab === 'home'),
+      // simpler: tab flags (overlays render above)
+      isHome: s.tab === 'home', isTxns: s.tab === 'txns', isAnalysis: s.tab === 'analysis', isMe: s.tab === 'me',
+      activeLedger: active,
+      openSwitcher: this.openSwitcher, openAI: this.openAI, openAISearch: this.openAISearch,
+      openAddExpense: () => this.openAdd('expense'),
+      goTxns: () => this.setTab('txns'),
+      tabsLeft, tabsRight,
+      home,
+      search: s.search, onSearch: (e) => this.setState({ search: e.target.value }),
+      txnFilters, txnGroups, txnEmpty: txnGroups.length === 0,
+      trend, breakdown, donut, memberStats, unusual: this.unusualRaw,
+      analysisRanges, analysisRangeLabel,
+      sub, openUpgrade: this.openUpgrade, meLedgerRows, meAccountRows,
+      overlays: this.renderOverlays(R),
+      dialogNode: this.renderDialog(R),
+      toastNode: this.renderToast(R),
+    };
+  }
+
+  // ---------- overlay rendering (createElement for complex stacked sheets) ----------
+  sheetWrap(R, children, opts = {}) {
+    return R.createElement('div', { style: { position: 'absolute', inset: 0, zIndex: 60, display: 'flex', flexDirection: 'column', justifyContent: opts.full ? 'stretch' : 'flex-end', animation: 'fadeIn .2s' } },
+      R.createElement('div', { onClick: this.close, style: { position: 'absolute', inset: 0, background: 'rgba(20,26,38,.42)' } }),
+      R.createElement('div', { style: { position: 'relative', background: '#f4f6f9', borderRadius: opts.full ? '0' : '26px 26px 0 0', maxHeight: opts.full ? '100%' : '92%', height: opts.full ? '100%' : 'auto', display: 'flex', flexDirection: 'column', overflow: 'hidden', animation: 'sheetUp .3s cubic-bezier(.22,1,.36,1)', boxShadow: '0 -10px 40px rgba(0,0,0,.18)' } }, children)
+    );
+  }
+  sheetHeader(R, title, opts = {}) {
+    return R.createElement('div', { style: { position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: opts.full ? '52px 16px 14px' : '26px 16px 14px', flexShrink: 0 } },
+      opts.full ? null : R.createElement('div', { style: { position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', width: 38, height: 4, borderRadius: 9, background: '#d3d8df' } }),
+      R.createElement('div', { onClick: opts.back ? this.close : null, style: { width: 60, fontSize: 14, color: '#8993a3', fontWeight: 600, cursor: opts.back ? 'pointer' : 'default' } }, opts.back ? '‹ 返回' : ''),
+      R.createElement('div', { style: { fontSize: 16, fontWeight: 700 } }, title),
+      R.createElement('div', { style: { width: 60, textAlign: 'right' } }, opts.right || '')
+    );
+  }
+  btn(R, label, onClick, variant = 'primary', style = {}) {
+    const base = { border: 0, borderRadius: 13, height: 46, fontSize: 15, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer', width: '100%', ...style };
+    const v = variant === 'primary' ? { background: '#ff681c', color: '#fff', boxShadow: '0 9px 22px #ff681c35' }
+      : variant === 'danger' ? { background: '#d74035', color: '#fff' }
+      : variant === 'outline' ? { background: '#fff', color: '#172032', border: '1px solid #e4e8ee' }
+      : { background: '#fff', color: '#ff681c', border: '1px solid #ff681c' };
+    return R.createElement('button', { onClick, style: { ...base, ...v } }, label);
+  }
+
+  renderOverlays(R) {
+    const o = this.state.overlay;
+    if (!o) return null;
+    if (o === 'add') return this.renderAdd(R);
+    if (o === 'ai') return this.renderAI(R);
+    if (o === 'switcher') return this.renderSwitcher(R);
+    if (o === 'import') return this.renderImport(R);
+    if (o === 'pending') return this.renderPending(R);
+    if (o === 'members') return this.renderMembers(R);
+    if (o === 'invite') return this.renderInvite(R);
+    if (o === 'upgrade') return this.renderUpgrade(R);
+    if (o === 'export') return this.renderExport(R);
+    if (o === 'detail') return this.renderDetail(R);
+    return null;
+  }
+
+  renderAdd(R) {
+    const s = this.state; const cats = s.addType === 'income' ? this.incomeCats : this.expenseCats;
+    const seg = (k, label) => R.createElement('div', { onClick: () => this.setAddType(k), style: { flex: 1, textAlign: 'center', padding: '8px 0', borderRadius: 10, fontSize: 14, fontWeight: 700, background: s.addType === k ? '#fff' : 'transparent', color: s.addType === k ? (k === 'income' ? '#1f9d57' : '#ff681c') : '#8993a3', boxShadow: s.addType === k ? '0 2px 8px #1d2a4715' : 'none' } }, label);
+    const key = (label, val) => R.createElement('div', { onClick: () => this.addDigit(val), style: { height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 23, fontWeight: 600, background: '#fff', borderRadius: 13, boxShadow: '0 2px 5px #1d2a470a', color: '#172032' } }, label);
+    const amtColor = s.addType === 'income' ? '#1f9d57' : '#101827';
+    const catItem = (c) => R.createElement('div', { key: c.key, onClick: () => this.setState({ addCat: c.key, addCatPickerOpen: false }), style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0, width: 56 } }, [
+      R.createElement('span', { key: 'i', style: { width: 52, height: 52, borderRadius: 16, background: s.addCat === c.key ? c.color : c.color + '14', color: s.addCat === c.key ? '#fff' : c.color, fontSize: 19, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: s.addCat === c.key ? '0 8px 18px ' + c.color + '55' : 'none', transition: 'all .15s' } }, c.char),
+      R.createElement('span', { key: 't', style: { fontSize: 11.5, color: s.addCat === c.key ? '#172032' : '#8993a3', fontWeight: 600, whiteSpace: 'nowrap' } }, c.name)
+    ]);
+    const topCats = cats.slice(0, 5);
+    const hasMore = cats.length > 5;
+    const selInTop = topCats.some(c => c.key === s.addCat);
+    const catPicker = s.addCatPickerOpen ? R.createElement('div', { key: 'cp', style: { position: 'absolute', inset: 0, background: '#f4f6f9', borderRadius: '26px 26px 0 0', display: 'flex', flexDirection: 'column', overflow: 'hidden', animation: 'sheetUp .25s cubic-bezier(.22,1,.36,1)', zIndex: 5 } }, [
+      R.createElement('div', { key: 'h', style: { position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '26px 16px 14px', flexShrink: 0 } }, [
+        R.createElement('div', { key: 'dash', style: { position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', width: 38, height: 4, borderRadius: 9, background: '#d3d8df' } }),
+        R.createElement('div', { key: 'bk', onClick: () => this.setState({ addCatPickerOpen: false }), style: { fontSize: 14, color: '#8993a3', fontWeight: 600, cursor: 'pointer', width: 60 } }, '‹ 返回'),
+        R.createElement('div', { key: 't', style: { fontSize: 16, fontWeight: 700 } }, '选择类别'),
+        R.createElement('div', { key: 'r', style: { width: 60 } })
+      ]),
+      R.createElement('div', { key: 'grid', className: 'scroll-y', style: { flex: 1, overflowY: 'auto', padding: '4px 20px 28px', display: 'flex', flexWrap: 'wrap', gap: '16px 14px' } }, [
+        ...cats.map(catItem),
+        R.createElement('div', { key: 'new', onClick: () => this.toast('新建类别（演示）'), style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, width: 56 } }, [
+          R.createElement('span', { key: 'i', style: { width: 52, height: 52, borderRadius: 16, background: '#fff', border: '1.5px dashed #d3d8df', color: '#aab2bd', fontSize: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' } }, '+'),
+          R.createElement('span', { key: 't', style: { fontSize: 11.5, color: '#aab2bd', fontWeight: 600, whiteSpace: 'nowrap' } }, '新建')
+        ])
+      ])
+    ]) : null;
+    return this.sheetWrap(R, [
+      this.sheetHeader(R, s.addType === 'income' ? '记一笔收入' : '记一笔支出', { right: '' }),
+      R.createElement('div', { key: 'b', className: 'scroll-y', style: { flex: 1, overflowY: 'auto', padding: '0 16px 8px' } }, [
+        R.createElement('div', { key: 'seg', style: { display: 'flex', gap: 4, background: '#e9edf2', borderRadius: 13, padding: 4, marginBottom: 14 } }, [seg('expense', '支出'), seg('income', '收入')]),
+        R.createElement('div', { key: 'amt', style: { background: '#fff', borderRadius: 16, padding: '16px 18px', display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end', boxShadow: '0 6px 22px #24304a08' } }, [
+          R.createElement('span', { key: 's', style: { fontSize: 24, fontWeight: 700, color: amtColor, marginRight: 4 } }, '¥'),
+          R.createElement('span', { key: 'v', style: { fontSize: 40, fontWeight: 800, color: amtColor, letterSpacing: '-1px' } }, s.addAmount)
+        ]),
+        R.createElement('div', { key: 'catl', style: { fontSize: 12.5, fontWeight: 700, color: '#5b6473', margin: '16px 4px 9px' } }, '类别'),
+        R.createElement('div', { key: 'cats', style: { display: 'flex', gap: 14, padding: '2px 0 4px', alignItems: 'flex-start' } }, [
+          ...topCats.map(catItem),
+          !selInTop ? catItem(cats.find(c => c.key === s.addCat) || cats[0]) : null,
+          hasMore ? R.createElement('div', { key: 'showall', onClick: () => this.setState({ addCatPickerOpen: true }), style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0, width: 56 } }, [
+            R.createElement('span', { key: 'i', style: { width: 52, height: 52, borderRadius: 16, background: '#f0f2f5', display: 'flex', alignItems: 'center', justifyContent: 'center' } },
+              R.createElement('svg', { width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none' },
+                R.createElement('path', { d: 'M4 5h4v4H4zM10 5h4v4h-4zM16 5h4v4h-4zM4 14h4v4H4zM10 14h4v4h-4z', stroke: '#5b6473', strokeWidth: 1.7, strokeLinejoin: 'round' })
+              )
+            ),
+            R.createElement('span', { key: 't', style: { fontSize: 11.5, color: '#8993a3', fontWeight: 600, whiteSpace: 'nowrap' } }, '全部')
+          ]) : null
+        ]),
+        R.createElement('div', { key: 'meta', style: { display: 'flex', gap: 10, marginTop: 16 } }, [
+          R.createElement('div', { key: 'd', style: { flex: 1, background: '#fff', borderRadius: 13, padding: '11px 13px', display: 'flex', alignItems: 'center', gap: 8, boxShadow: '0 6px 22px #24304a08' } }, [
+            R.createElement('svg', { key: 'i', width: 17, height: 17, viewBox: '0 0 24 24', fill: 'none' }, R.createElement('path', { d: 'M7 3v3M17 3v3M4 8h16M5 6h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z', stroke: '#8993a3', strokeWidth: 1.8 })),
+            R.createElement('span', { key: 't', style: { fontSize: 13.5, fontWeight: 600 } }, '今天 ' + new Date().toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }))
+          ]),
+          R.createElement('div', { key: 'a', onClick: this.addAttach, style: { background: '#fff', borderRadius: 13, padding: '11px 14px', display: 'flex', alignItems: 'center', gap: 7, boxShadow: '0 6px 22px #24304a08' } }, [
+            R.createElement('svg', { key: 'i', width: 17, height: 17, viewBox: '0 0 24 24', fill: 'none' }, R.createElement('path', { d: 'M16 8l-6.5 6.5a2.5 2.5 0 0 0 3.5 3.5l7-7a4 4 0 0 0-5.5-5.5l-7 7', stroke: '#8993a3', strokeWidth: 1.8, strokeLinecap: 'round' })),
+            R.createElement('span', { key: 't', style: { fontSize: 13.5, fontWeight: 600, color: '#5b6473' } }, s.addAtt.length ? '附件 ' + s.addAtt.length : '附件')
+          ])
+        ]),
+        R.createElement('input', { key: 'note', value: s.addNote, onChange: e => this.setState({ addNote: e.target.value }), placeholder: '添加备注…', style: { width: '100%', marginTop: 10, border: '1px solid #e3e7ed', borderRadius: 13, height: 46, padding: '0 14px', fontSize: 14, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box', background: '#fff' } }),
+        R.createElement('div', { key: 'lines', onClick: this.addLine, style: { marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, color: '#ff681c', fontSize: 13.5, fontWeight: 600, padding: '11px', background: '#fff', borderRadius: 13, border: '1px dashed #ffc7a8' } }, [
+          R.createElement('span', { key: 'p', style: { fontSize: 17 } }, '+'), '拆分多个明细' + (s.addLines.length ? '（' + s.addLines.length + '）' : '')
+        ]),
+        R.createElement('div', { key: 'kp', style: { display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginTop: 14 } },
+          ['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', '⌫'].map(d => key(d, d === '⌫' ? 'del' : d)))
+      ]),
+      R.createElement('div', { key: 'f', style: { padding: '10px 16px calc(20px + env(safe-area-inset-bottom))', background: '#f4f6f9', borderTop: '1px solid #eceff3', flexShrink: 0 } },
+        this.btn(R, s.addType === 'income' ? '保存收入' : '保存支出', this.saveTxn, s.addType === 'income' ? 'primary' : 'primary', s.addType === 'income' ? { background: '#1f9d57', boxShadow: '0 9px 22px #1f9d5735' } : {})),
+      catPicker
+    ], {});
+  }
+
+  renderAI(R) {
+    const s = this.state;
+    const chips = ['记一笔 昨天午餐 38', '上个月餐饮花了多少？', '帮我分析最近开支', '邀请小强加入'];
+    const msgNode = (m) => {
+      if (m.role === 'user') {
+        if (m.kind === 'attachment') return R.createElement('div', { key: m.id, style: { alignSelf: 'flex-end', maxWidth: '78%', background: '#ff681c', color: '#fff', borderRadius: '16px 16px 4px 16px', padding: '10px 13px', display: 'flex', alignItems: 'center', gap: 9 } }, [
+          R.createElement('span', { key: 'i', style: { width: 30, height: 30, borderRadius: 8, background: '#ffffff33', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 } }, '📎'),
+          R.createElement('span', { key: 't', style: { fontSize: 13.5, fontWeight: 600 } }, m.name)
+        ]);
+        return R.createElement('div', { key: m.id, style: { alignSelf: 'flex-end', maxWidth: '80%', background: '#ff681c', color: '#fff', borderRadius: '16px 16px 4px 16px', padding: '10px 14px', fontSize: 14.5, lineHeight: 1.5 } }, m.text);
+      }
+      const wrap = (inner) => R.createElement('div', { key: m.id, style: { alignSelf: 'flex-start', maxWidth: '88%', display: 'flex', gap: 8 } }, [
+        R.createElement('span', { key: 'a', style: { width: 28, height: 28, borderRadius: 999, background: '#fff', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px #1d2a4715', marginTop: 2 } }, R.createElement('svg', { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none' }, R.createElement('path', { d: 'M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8z', fill: '#ff681c' }))),
+        inner
+      ]);
+      const bubble = { background: '#fff', borderRadius: '4px 16px 16px 16px', padding: '11px 14px', boxShadow: '0 4px 16px #24304a0c', fontSize: 14, lineHeight: 1.55 };
+      if (m.kind === 'text') return wrap(R.createElement('div', { style: bubble }, m.text));
+      if (m.kind === 'txn') {
+        const done = m.status !== 'pending';
+        return wrap(R.createElement('div', { style: { ...bubble, width: '100%', padding: 0, overflow: 'hidden' } }, [
+          R.createElement('div', { key: 'h', style: { padding: '12px 14px 4px', fontSize: 13, color: '#8993a3', fontWeight: 600 } }, '识别为一笔记账'),
+          R.createElement('div', { key: 'g', style: { padding: '0 14px 12px' } }, [
+            ['类型', m.ttype], ['金额', m.amount], ['日期', m.date], ['类别', m.category]
+          ].map((r, i) => R.createElement('div', { key: i, style: { display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: i < 3 ? '1px solid #f2f4f7' : 'none', fontSize: 14 } }, [
+            R.createElement('span', { key: 'k', style: { color: '#8993a3' } }, r[0]),
+            R.createElement('span', { key: 'v', style: { fontWeight: 700, color: r[0] === '金额' ? (m.ttype === '收入' ? '#1f9d57' : '#101827') : '#172032' } }, r[1])
+          ]))),
+          done ? R.createElement('div', { key: 'd', style: { padding: '10px 14px', background: '#e8f7ef', color: '#1f9d57', fontSize: 13.5, fontWeight: 700, textAlign: 'center' } }, '✓ 已记账')
+            : R.createElement('div', { key: 'b', style: { display: 'flex', gap: 8, padding: '0 14px 14px' } }, [
+              R.createElement('button', { key: 'e', onClick: () => { this.close(); this.openAdd('expense'); }, style: { flex: 1, height: 40, borderRadius: 11, border: '1px solid #e4e8ee', background: '#fff', fontSize: 14, fontWeight: 700, color: '#172032', fontFamily: 'inherit' } }, '编辑'),
+              R.createElement('button', { key: 'c', onClick: () => this.aiConfirmTxn(m), style: { flex: 1.4, height: 40, borderRadius: 11, border: 0, background: '#ff681c', color: '#fff', fontSize: 14, fontWeight: 700, fontFamily: 'inherit' } }, '确认记账')
+            ])
+        ]));
+      }
+      if (m.kind === 'search') return wrap(R.createElement('div', { style: { ...bubble, width: '100%' } }, [
+        R.createElement('div', { key: 't', style: { fontSize: 13, color: '#8993a3', fontWeight: 600 } }, m.title),
+        R.createElement('div', { key: 's', style: { fontSize: 26, fontWeight: 800, margin: '2px 0 4px' } }, m.total),
+        R.createElement('div', { key: 'c', style: { fontSize: 12.5, color: '#8993a3', marginBottom: 8 } }, '共 ' + m.count + ' 笔 · 已按你的权限过滤'),
+        R.createElement('div', { key: 'i', style: { borderTop: '1px solid #f2f4f7', paddingTop: 8 } }, m.items.map((it, i) =>
+          R.createElement('div', { key: i, style: { display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 13.5 } }, [R.createElement('span', { key: 'a' }, it[0]), R.createElement('span', { key: 'b', style: { fontWeight: 600 } }, it[1])]))),
+        R.createElement('button', { key: 'v', onClick: () => { this.setTab('txns'); this.setState({ txnType: 'expense' }); }, style: { marginTop: 8, width: '100%', height: 38, borderRadius: 10, border: '1px solid #ff681c', background: '#fff', color: '#ff681c', fontSize: 13.5, fontWeight: 700, fontFamily: 'inherit' } }, '查看全部 ' + m.count + ' 笔 ›')
+      ]));
+      if (m.kind === 'analysis') return wrap(R.createElement('div', { style: { ...bubble, width: '100%' } }, [
+        R.createElement('div', { key: 'c', style: { fontSize: 14.5, fontWeight: 700, marginBottom: 8 } }, m.concl),
+        R.createElement('div', { key: 'b' }, m.bullets.map((b, i) => R.createElement('div', { key: i, style: { display: 'flex', gap: 7, fontSize: 13.5, color: '#5b6473', padding: '3px 0' } }, [R.createElement('span', { key: 'd', style: { color: '#ff681c' } }, '•'), b]))),
+        R.createElement('div', { key: 's', style: { marginTop: 8, padding: '9px 11px', background: '#fff7f4', borderRadius: 10, fontSize: 13, color: '#c2691f' } }, '💡 ' + m.sugg),
+        R.createElement('button', { key: 'v', onClick: () => this.setTab('analysis'), style: { marginTop: 8, width: '100%', height: 38, borderRadius: 10, border: '1px solid #ff681c', background: '#fff', color: '#ff681c', fontSize: 13.5, fontWeight: 700, fontFamily: 'inherit' } }, '打开分析页 ›')
+      ]));
+      if (m.kind === 'confirm' || m.kind === 'attachAsk') {
+        const done = m.status !== 'pending';
+        const isAttach = m.kind === 'attachAsk';
+        return wrap(R.createElement('div', { style: { ...bubble, width: '100%', border: '1px solid #ffe0cf', background: '#fffaf6' } }, [
+          R.createElement('div', { key: 'w', style: { display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 } }, [
+            R.createElement('span', { key: 'i', style: { width: 22, height: 22, borderRadius: 6, background: '#ff681c', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800 } }, '!'),
+            R.createElement('span', { key: 't', style: { fontSize: 13.5, fontWeight: 800, color: '#c2410c' } }, isAttach ? '需要确认' : '高风险操作，需确认')
+          ]),
+          isAttach ? R.createElement('div', { key: 'tx', style: { fontSize: 14, lineHeight: 1.5, marginBottom: 4 } }, m.text)
+            : R.createElement('div', { key: 'rows' }, [
+              R.createElement('div', { key: 'ti', style: { fontSize: 14.5, fontWeight: 700, marginBottom: 6 } }, m.title),
+              ...m.rows.map((r, i) => R.createElement('div', { key: i, style: { display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 13.5 } }, [R.createElement('span', { key: 'a', style: { color: '#8993a3' } }, r[0]), R.createElement('span', { key: 'b', style: { fontWeight: 600, maxWidth: '62%', textAlign: 'right' } }, r[1])])),
+              R.createElement('div', { key: 'n', style: { fontSize: 12, color: '#c2691f', marginTop: 6 } }, m.note)
+            ]),
+          done ? R.createElement('div', { key: 'd', style: { marginTop: 10, padding: '9px', textAlign: 'center', borderRadius: 10, background: m.status === 'confirmed' ? '#e8f7ef' : '#f0f2f5', color: m.status === 'confirmed' ? '#1f9d57' : '#8993a3', fontSize: 13.5, fontWeight: 700 } }, m.status === 'confirmed' ? '✓ 已确认执行' : (m.status === 'declined' ? '已忽略' : '已取消'))
+            : R.createElement('div', { key: 'b2', style: { display: 'flex', gap: 8, marginTop: 11 } }, [
+              R.createElement('button', { key: 'c', onClick: () => this.setMsg(m.id, { status: isAttach ? 'declined' : 'canceled' }), style: { flex: 1, height: 40, borderRadius: 11, border: '1px solid #e4e8ee', background: '#fff', fontSize: 14, fontWeight: 700, color: '#172032', fontFamily: 'inherit' } }, isAttach ? '不用了' : '取消'),
+              R.createElement('button', { key: 'o', onClick: () => isAttach ? this.aiConfirmAttach(m.id) : this.aiConfirmInvite(m.id), style: { flex: 1.4, height: 40, borderRadius: 11, border: 0, background: '#ff681c', color: '#fff', fontSize: 14, fontWeight: 700, fontFamily: 'inherit' } }, isAttach ? '记录这张小票' : '确认邀请')
+            ])
+        ]));
+      }
+      return null;
+    };
+    return R.createElement('div', { style: { position: 'absolute', inset: 0, zIndex: 60, display: 'flex', flexDirection: 'column', background: '#eef1f4', animation: 'fadeIn .2s' } }, [
+      R.createElement('div', { key: 'h', style: { padding: '52px 16px 12px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid #e7eaef', background: 'rgba(255,255,255,.8)', backdropFilter: 'blur(12px)' } }, [
+        R.createElement('div', { key: 'b', onClick: this.close, style: { fontSize: 22, color: '#8993a3', width: 28 } }, '‹'),
+        R.createElement('span', { key: 'i', style: { width: 32, height: 32, borderRadius: 999, background: 'linear-gradient(135deg,#ff8a4d,#ff681c)', display: 'flex', alignItems: 'center', justifyContent: 'center' } }, R.createElement('svg', { width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none' }, R.createElement('path', { d: 'M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8z', fill: '#fff' }))),
+        R.createElement('div', { key: 't', style: { flex: 1 } }, [R.createElement('div', { key: 'a', style: { fontSize: 15.5, fontWeight: 700 } }, '账本助手'), R.createElement('div', { key: 'b', style: { fontSize: 11.5, color: '#8993a3' } }, '家庭账本 · ' + (this.state.isPro ? 'Pro' : 'Free'))])
+      ]),
+      R.createElement('div', { key: 'm', className: 'scroll-y', style: { flex: 1, overflowY: 'auto', padding: '16px 14px', display: 'flex', flexDirection: 'column', gap: 12 } }, [
+        ...s.aiMsgs.map(msgNode),
+        s.aiBusy ? R.createElement('div', { key: 'busy', style: { alignSelf: 'flex-start', background: '#fff', borderRadius: '4px 16px 16px 16px', padding: '12px 16px', boxShadow: '0 4px 16px #24304a0c', display: 'flex', gap: 4 } }, [0, 1, 2].map(i => R.createElement('span', { key: i, style: { width: 7, height: 7, borderRadius: 9, background: '#c2c9d3', display: 'inline-block', animation: 'fadeIn .6s infinite alternate', animationDelay: (i * .15) + 's' } }))) : null
+      ]),
+      R.createElement('div', { key: 'c', style: { padding: '8px 14px 6px', display: 'flex', gap: 8, overflowX: 'auto' }, className: 'scroll-y' }, chips.map((c, i) =>
+        R.createElement('div', { key: i, onClick: () => this.sendAI(c), style: { whiteSpace: 'nowrap', padding: '7px 13px', borderRadius: 999, background: '#fff', border: '1px solid #e7eaef', fontSize: 12.5, fontWeight: 600, color: '#5b6473', flexShrink: 0 } }, c))),
+      R.createElement('div', { key: 'i', style: { padding: '6px 14px calc(14px + env(safe-area-inset-bottom))', display: 'flex', alignItems: 'center', gap: 9, borderTop: '1px solid #e7eaef', background: '#fff' } }, [
+        R.createElement('div', { key: 'a', onClick: this.aiAttach, style: { width: 38, height: 38, borderRadius: 999, background: '#f0f2f5', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 } }, R.createElement('svg', { width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none' }, R.createElement('path', { d: 'M16 8l-6.5 6.5a2.5 2.5 0 0 0 3.5 3.5l7-7a4 4 0 0 0-5.5-5.5l-7 7', stroke: '#8993a3', strokeWidth: 1.9, strokeLinecap: 'round' }))),
+        R.createElement('input', { key: 'in', value: s.aiInput, onChange: e => this.setState({ aiInput: e.target.value }), onKeyDown: e => { if (e.key === 'Enter') this.sendAI(); }, placeholder: '问我任何关于账本的问题…', style: { flex: 1, border: '1px solid #e3e7ed', borderRadius: 999, height: 40, padding: '0 16px', fontSize: 14, fontFamily: 'inherit', outline: 'none', background: '#f7f8fa' } }),
+        R.createElement('div', { key: 's', onClick: () => this.sendAI(), style: { width: 40, height: 40, borderRadius: 999, background: '#ff681c', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 } }, R.createElement('svg', { width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none' }, R.createElement('path', { d: 'M5 12h14M13 6l6 6-6 6', stroke: '#fff', strokeWidth: 2.2, strokeLinecap: 'round', strokeLinejoin: 'round' })))
+      ])
+    ]);
+  }
+
+  renderSwitcher(R) {
+    const s = this.state;
+    return this.sheetWrap(R, [
+      this.sheetHeader(R, '切换账本'),
+      R.createElement('div', { key: 'b', className: 'scroll-y', style: { padding: '0 16px', overflowY: 'auto' } }, [
+        ...s.ledgers.map(l => {
+          const act = l.id === s.activeLedgerId;
+          return R.createElement('div', { key: l.id, onClick: () => this.switchLedger(l.id), style: { display: 'flex', alignItems: 'center', gap: 13, padding: 14, marginBottom: 10, borderRadius: 16, background: '#fff', border: act ? '2px solid #ff681c' : '2px solid transparent', boxShadow: '0 6px 22px #24304a08' } }, [
+            R.createElement('span', { key: 'i', style: { width: 44, height: 44, borderRadius: 13, background: l.color, color: '#fff', fontSize: 17, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' } }, l.char),
+            R.createElement('div', { key: 't', style: { flex: 1 } }, [
+              R.createElement('div', { key: 'n', style: { fontSize: 15.5, fontWeight: 700 } }, l.name),
+              R.createElement('div', { key: 's', style: { fontSize: 12, color: '#8993a3', marginTop: 2 } }, l.sub + ' · ' + l.role)
+            ]),
+            R.createElement('div', { key: 'r', style: { textAlign: 'right' } }, [
+              R.createElement('div', { key: 'b', style: { fontSize: 14, fontWeight: 700 } }, '¥' + l.balance),
+              act ? R.createElement('div', { key: 'c', style: { fontSize: 11.5, color: '#ff681c', fontWeight: 700, marginTop: 2 } }, '当前') : null
+            ])
+          ]);
+        }),
+        R.createElement('div', { key: 'new', onClick: () => { this.close(); this.toast('创建新账本（演示）'); }, style: { display: 'flex', alignItems: 'center', gap: 12, padding: 14, borderRadius: 16, border: '1.5px dashed #ffc7a8', color: '#ff681c', marginBottom: 14 } }, [
+          R.createElement('span', { key: 'i', style: { width: 44, height: 44, borderRadius: 13, background: '#fff0e8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontWeight: 400 } }, '+'),
+          R.createElement('div', { key: 't', style: { fontSize: 15, fontWeight: 700 } }, '创建新账本')
+        ])
+      ]),
+      R.createElement('div', { key: 'f', style: { height: 'calc(8px + env(safe-area-inset-bottom))' } })
+    ]);
+  }
+
+  renderImport(R) {
+    const jobs = [
+      { id: 'j1', name: '微信账单_6月.csv', type: 'CSV', status: 'processing', stage: '正在 AI 结构化…', progress: 62 },
+      { id: 'j2', name: '超市小票.jpg', type: '图片', status: 'done', stage: '已生成 3 条待确认记录', progress: 100 },
+      { id: 'j3', name: 'invoice_0612.pdf', type: 'PDF', status: 'failed', stage: '无法识别金额', progress: 0 },
+    ];
+    const opt = (icon, label, sub) => R.createElement('div', { onClick: () => this.toast(label + '（演示）'), style: { flex: 1, background: '#fff', borderRadius: 16, padding: '16px 10px', textAlign: 'center', boxShadow: '0 6px 22px #24304a08' } }, [
+      R.createElement('div', { key: 'i', style: { width: 42, height: 42, borderRadius: 13, background: '#fff0e8', margin: '0 auto 8px', display: 'flex', alignItems: 'center', justifyContent: 'center' } }, icon),
+      R.createElement('div', { key: 'l', style: { fontSize: 13, fontWeight: 700 } }, label),
+      R.createElement('div', { key: 's', style: { fontSize: 10.5, color: '#8993a3', marginTop: 2 } }, sub)
+    ]);
+    const ic = (d) => R.createElement('svg', { width: 22, height: 22, viewBox: '0 0 24 24', fill: 'none' }, R.createElement('path', { d, stroke: '#ff681c', strokeWidth: 1.9, strokeLinecap: 'round', strokeLinejoin: 'round' }));
+    return this.sheetWrap(R, [
+      this.sheetHeader(R, '导入与识别'),
+      R.createElement('div', { key: 'b', className: 'scroll-y', style: { flex: 1, overflowY: 'auto', padding: '0 16px calc(20px + env(safe-area-inset-bottom))' } }, [
+        R.createElement('div', { key: 'opts', style: { display: 'flex', gap: 10, marginBottom: 16 } }, [
+          opt(ic('M12 16a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM4 8h3l1.5-2h7L17 8h3v11H4z'), '拍照', '小票 / 发票'),
+          opt(ic('M4 6h16v12H4zM4 14l4-4 5 5 3-3 4 4'), '相册', '图片 / 截图'),
+          opt(ic('M7 3h7l5 5v13H7zM14 3v5h5'), '文件', 'PDF/CSV/Excel')
+        ]),
+        R.createElement('div', { key: 'note', style: { fontSize: 12, color: '#8993a3', background: '#fff', borderRadius: 12, padding: '10px 13px', marginBottom: 16, lineHeight: 1.5 } }, '文件在后台异步处理，你可以离开此页面。识别完成的记录会进入「待确认」，不会直接入账。'),
+        R.createElement('div', { key: 'st', style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '0 4px 9px' } }, [
+          R.createElement('span', { key: 'a', style: { fontSize: 13, fontWeight: 700, color: '#5b6473' } }, '处理任务'),
+          R.createElement('span', { key: 'b', style: { fontSize: 12, color: '#8993a3' } }, '1 处理中 · 1 完成 · 1 失败')
+        ]),
+        R.createElement('div', { key: 'jobs', style: { display: 'flex', flexDirection: 'column', gap: 10 } }, jobs.map(j => {
+          const col = j.status === 'done' ? '#1f9d57' : j.status === 'failed' ? '#d74035' : '#ff681c';
+          const tint = j.status === 'done' ? '#e8f7ef' : j.status === 'failed' ? '#fdeceb' : '#fff0e8';
+          return R.createElement('div', { key: j.id, style: { background: '#fff', borderRadius: 14, padding: 14, boxShadow: '0 6px 22px #24304a08' } }, [
+            R.createElement('div', { key: 'r', style: { display: 'flex', alignItems: 'center', gap: 11 } }, [
+              R.createElement('span', { key: 'i', style: { width: 36, height: 36, borderRadius: 10, background: tint, color: col, fontSize: 11, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' } }, j.type),
+              R.createElement('div', { key: 't', style: { flex: 1, minWidth: 0 } }, [
+                R.createElement('div', { key: 'n', style: { fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, j.name),
+                R.createElement('div', { key: 's', style: { fontSize: 12, color: col, marginTop: 2 } }, j.stage)
+              ]),
+              j.status === 'done' ? R.createElement('button', { key: 'a', onClick: () => this.open('pending'), style: { padding: '7px 12px', borderRadius: 10, border: 0, background: '#ff681c', color: '#fff', fontSize: 12.5, fontWeight: 700, fontFamily: 'inherit' } }, '去确认')
+                : j.status === 'failed' ? R.createElement('button', { key: 'a', onClick: () => this.toast('正在重试…'), style: { padding: '7px 12px', borderRadius: 10, border: '1px solid #e4e8ee', background: '#fff', color: '#172032', fontSize: 12.5, fontWeight: 700, fontFamily: 'inherit' } }, '重试')
+                  : R.createElement('span', { key: 'a', style: { fontSize: 13, fontWeight: 700, color: '#ff681c' } }, j.progress + '%')
+            ]),
+            j.status === 'processing' ? R.createElement('div', { key: 'p', style: { height: 5, borderRadius: 9, background: '#f0f2f5', marginTop: 11, overflow: 'hidden' } }, R.createElement('div', { style: { height: '100%', width: j.progress + '%', background: '#ff681c', borderRadius: 9 } })) : null
+          ]);
+        }))
+      ])
+    ]);
+  }
+
+  renderPending(R) {
+    const s = this.state;
+    const lowTag = R.createElement('span', { style: { fontSize: 10, fontWeight: 700, color: '#c2410c', background: '#fff0e8', padding: '1px 6px', borderRadius: 6, marginLeft: 6 } }, '待核对');
+    return this.sheetWrap(R, [
+      this.sheetHeader(R, '待确认记录', { right: R.createElement('span', { onClick: this.bulkConfirm, style: { fontSize: 13.5, color: '#ff681c', fontWeight: 700 } }, s.pending.length ? '全部确认' : '') }),
+      R.createElement('div', { key: 'b', className: 'scroll-y', style: { flex: 1, overflowY: 'auto', padding: '0 16px calc(20px + env(safe-area-inset-bottom))' } }, [
+        R.createElement('div', { key: 'n', style: { fontSize: 12, color: '#8993a3', marginBottom: 12, lineHeight: 1.5 } }, '以下记录由文件识别或 AI 生成，确认后才会正式入账。低置信度字段已标记，请核对。'),
+        s.pending.length === 0 ? R.createElement('div', { key: 'e', style: { textAlign: 'center', padding: '60px 20px', color: '#aab2bd' } }, [
+          R.createElement('div', { key: 'a', style: { fontSize: 15, fontWeight: 600, color: '#8993a3' } }, '没有待确认记录'),
+          R.createElement('div', { key: 'b', style: { fontSize: 13, marginTop: 6 } }, '所有识别结果都已处理')
+        ]) : R.createElement('div', { key: 'l', style: { display: 'flex', flexDirection: 'column', gap: 11 } }, s.pending.map(p => {
+          const c = this.catByKey(p.cat);
+          const lowAmt = p.low.indexOf('amount') >= 0, lowCat = p.low.indexOf('cat') >= 0;
+          return R.createElement('div', { key: p.id, style: { background: '#fff', borderRadius: 15, padding: 14, boxShadow: '0 6px 22px #24304a08' } }, [
+            R.createElement('div', { key: 'r', style: { display: 'flex', alignItems: 'center', gap: 11 } }, [
+              R.createElement('span', { key: 'i', style: { width: 40, height: 40, borderRadius: 12, background: c.color + '1a', color: c.color, fontSize: 16, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' } }, c.char),
+              R.createElement('div', { key: 't', style: { flex: 1, minWidth: 0 } }, [
+                R.createElement('div', { key: 'n', style: { fontSize: 14.5, fontWeight: 600 } }, p.note),
+                R.createElement('div', { key: 's', style: { fontSize: 12, color: '#8993a3', marginTop: 2, display: 'flex', alignItems: 'center' } }, [c.name, lowCat ? lowTag : null, R.createElement('span', { key: 'src', style: { marginLeft: 6 } }, '· ' + p.source + ' · ' + p.date)])
+              ]),
+              R.createElement('div', { key: 'a', style: { textAlign: 'right' } }, [
+                R.createElement('div', { key: 'v', style: { fontSize: 16, fontWeight: 800, color: p.type === 'income' ? '#1f9d57' : '#101827' } }, (p.type === 'income' ? '+¥' : '-¥') + this.fmt(p.amount)),
+                lowAmt ? lowTag : null
+              ])
+            ]),
+            R.createElement('div', { key: 'b', style: { display: 'flex', gap: 8, marginTop: 12 } }, [
+              R.createElement('button', { key: 'ig', onClick: () => this.ignorePending(p), style: { flex: 1, height: 38, borderRadius: 10, border: '1px solid #e4e8ee', background: '#fff', color: '#8993a3', fontSize: 13.5, fontWeight: 700, fontFamily: 'inherit' } }, '忽略'),
+              R.createElement('button', { key: 'ed', onClick: () => { this.close(); this.openAdd(p.type); }, style: { flex: 1, height: 38, borderRadius: 10, border: '1px solid #e4e8ee', background: '#fff', color: '#172032', fontSize: 13.5, fontWeight: 700, fontFamily: 'inherit' } }, '编辑'),
+              R.createElement('button', { key: 'cf', onClick: () => this.confirmPending(p), style: { flex: 1.3, height: 38, borderRadius: 10, border: 0, background: '#ff681c', color: '#fff', fontSize: 13.5, fontWeight: 700, fontFamily: 'inherit' } }, '确认')
+            ])
+          ]);
+        }))
+      ])
+    ]);
+  }
+
+  renderMembers(R) {
+    const s = this.state;
+    const roleColor = (r) => r === '创建者' ? '#ff681c' : r === '管理员' ? '#4c8dff' : '#8993a3';
+    return this.sheetWrap(R, [
+      this.sheetHeader(R, '成员与邀请', { right: R.createElement('span', { onClick: () => this.open('invite'), style: { fontSize: 13.5, color: '#ff681c', fontWeight: 700 } }, '+ 邀请') }),
+      R.createElement('div', { key: 'b', className: 'scroll-y', style: { flex: 1, overflowY: 'auto', padding: '0 16px calc(20px + env(safe-area-inset-bottom))' } }, [
+        R.createElement('div', { key: 'mh', style: { fontSize: 12, fontWeight: 700, color: '#8993a3', margin: '0 4px 9px' } }, '成员 · ' + s.members.length),
+        R.createElement('div', { key: 'm', style: { background: '#fff', borderRadius: 16, overflow: 'hidden', boxShadow: '0 6px 22px #24304a08' } }, s.members.map((m, i) =>
+          R.createElement('div', { key: m.id, style: { display: 'flex', alignItems: 'center', gap: 12, padding: '13px 14px', borderBottom: i < s.members.length - 1 ? '1px solid #f2f4f7' : 'none' } }, [
+            R.createElement('span', { key: 'a', style: { width: 40, height: 40, borderRadius: 999, background: m.color, color: '#fff', fontSize: 15, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' } }, m.initial),
+            R.createElement('div', { key: 't', style: { flex: 1 } }, [
+              R.createElement('div', { key: 'n', style: { fontSize: 14.5, fontWeight: 600 } }, m.name),
+              R.createElement('div', { key: 's', style: { fontSize: 12, color: '#8993a3', marginTop: 1 } }, m.contact)
+            ]),
+            m.me ? R.createElement('span', { key: 'r', style: { fontSize: 12, fontWeight: 700, color: roleColor(m.role) } }, m.role)
+              : R.createElement('div', { key: 'act', style: { display: 'flex', alignItems: 'center', gap: 4 } }, [
+                R.createElement('span', { key: 'r', onClick: () => this.changeRole(m.id, m.role === '管理员' ? '成员' : '管理员'), style: { fontSize: 12, fontWeight: 700, color: roleColor(m.role), padding: '4px 8px', background: roleColor(m.role) + '14', borderRadius: 8 } }, m.role),
+                R.createElement('span', { key: 'x', onClick: () => this.removeMember(m), style: { fontSize: 18, color: '#c2c9d3', padding: '0 4px' } }, '×')
+              ])
+          ]))),
+        R.createElement('div', { key: 'ih', style: { fontSize: 12, fontWeight: 700, color: '#8993a3', margin: '18px 4px 9px' } }, '邀请记录'),
+        R.createElement('div', { key: 'inv', style: { background: '#fff', borderRadius: 16, overflow: 'hidden', boxShadow: '0 6px 22px #24304a08' } }, s.invitations.length === 0
+          ? R.createElement('div', { style: { padding: 18, textAlign: 'center', fontSize: 13, color: '#aab2bd' } }, '暂无邀请')
+          : s.invitations.map((v, i) => {
+            const st = v.stateKey === 'pending' ? { c: '#ff681c', b: '#fff0e8' } : v.stateKey === 'accepted' ? { c: '#1f9d57', b: '#e8f7ef' } : { c: '#8993a3', b: '#f0f2f5' };
+            return R.createElement('div', { key: v.id, style: { display: 'flex', alignItems: 'center', gap: 12, padding: '13px 14px', borderBottom: i < s.invitations.length - 1 ? '1px solid #f2f4f7' : 'none' } }, [
+              R.createElement('span', { key: 'a', style: { width: 36, height: 36, borderRadius: 10, background: '#f0f2f5', display: 'flex', alignItems: 'center', justifyContent: 'center' } }, R.createElement('svg', { width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none' }, R.createElement('path', { d: 'M4 6h16v12H4zM4 7l8 6 8-6', stroke: '#8993a3', strokeWidth: 1.8 }))),
+              R.createElement('div', { key: 't', style: { flex: 1, fontSize: 13.5, fontWeight: 500 } }, v.name),
+              R.createElement('span', { key: 's', style: { fontSize: 11.5, fontWeight: 700, color: st.c, background: st.b, padding: '3px 9px', borderRadius: 8 } }, v.state)
+            ]);
+          })),
+        R.createElement('div', { key: 'danger', style: { marginTop: 20, display: 'flex', flexDirection: 'column', gap: 9 } }, [
+          R.createElement('button', { key: 'l', onClick: this.leaveLedger, style: { width: '100%', height: 44, borderRadius: 13, border: '1px solid #e4e8ee', background: '#fff', color: '#d74035', fontSize: 14, fontWeight: 700, fontFamily: 'inherit' } }, '退出该账本')
+        ])
+      ])
+    ]);
+  }
+
+  renderInvite(R) {
+    const s = this.state;
+    const seg = (k, label) => R.createElement('div', { onClick: () => this.setState({ inviteMethod: k }), style: { flex: 1, textAlign: 'center', padding: '9px 0', borderRadius: 10, fontSize: 14, fontWeight: 700, background: s.inviteMethod === k ? '#fff' : 'transparent', color: s.inviteMethod === k ? '#ff681c' : '#8993a3', boxShadow: s.inviteMethod === k ? '0 2px 8px #1d2a4715' : 'none' } }, label);
+    const rseg = (r) => R.createElement('div', { onClick: () => this.setState({ inviteRole: r }), style: { flex: 1, textAlign: 'center', padding: '10px 0', borderRadius: 11, fontSize: 13.5, fontWeight: 700, border: s.inviteRole === r ? '1.5px solid #ff681c' : '1.5px solid #e7eaef', color: s.inviteRole === r ? '#ff681c' : '#5b6473', background: '#fff' } }, r);
+    return this.sheetWrap(R, [
+      this.sheetHeader(R, '邀请成员', { back: true }),
+      R.createElement('div', { key: 'b', style: { padding: '0 16px calc(20px + env(safe-area-inset-bottom))' } }, [
+        R.createElement('div', { key: 'seg', style: { display: 'flex', gap: 4, background: '#e9edf2', borderRadius: 13, padding: 4, marginBottom: 16 } }, [seg('phone', '手机号'), seg('email', '邮箱')]),
+        R.createElement('input', { key: 'in', value: s.inviteValue, onChange: e => this.setState({ inviteValue: e.target.value }), placeholder: s.inviteMethod === 'phone' ? '输入手机号' : '输入邮箱地址', style: { width: '100%', border: '1px solid #e3e7ed', borderRadius: 13, height: 48, padding: '0 15px', fontSize: 15, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box', background: '#fff' } }),
+        R.createElement('div', { key: 'rl', style: { fontSize: 12.5, fontWeight: 700, color: '#5b6473', margin: '18px 2px 9px' } }, '分配角色'),
+        R.createElement('div', { key: 'roles', style: { display: 'flex', gap: 9 } }, [rseg('成员'), rseg('管理员')]),
+        R.createElement('div', { key: 'note', style: { fontSize: 12, color: '#8993a3', margin: '14px 2px', lineHeight: 1.5 } }, '我们将向对方发送邀请。对方接受后即可查看并记录该账本。邀请有效期 7 天。'),
+        R.createElement('div', { key: 'btn', style: { marginTop: 8 } }, this.btn(R, '发送邀请', this.sendInvite))
+      ])
+    ]);
+  }
+
+  renderUpgrade(R) {
+    const feat = (t, sub) => R.createElement('div', { style: { display: 'flex', gap: 11, alignItems: 'flex-start', padding: '11px 0', borderBottom: '1px solid #f2f4f7' } }, [
+      R.createElement('span', { key: 'i', style: { width: 24, height: 24, borderRadius: 999, background: '#fff0e8', color: '#ff681c', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1, fontSize: 13, fontWeight: 800 } }, '✓'),
+      R.createElement('div', { key: 't' }, [R.createElement('div', { key: 'a', style: { fontSize: 14, fontWeight: 700 } }, t), R.createElement('div', { key: 'b', style: { fontSize: 12, color: '#8993a3', marginTop: 1 } }, sub)])
+    ]);
+    return this.sheetWrap(R, [
+      R.createElement('div', { key: 'top', style: { background: 'linear-gradient(150deg,#2b2620,#1a1714)', padding: '52px 20px 24px', color: '#fff', position: 'relative', flexShrink: 0 } }, [
+        R.createElement('div', { key: 'x', onClick: this.close, style: { position: 'absolute', top: 50, right: 18, width: 30, height: 30, borderRadius: 999, background: '#ffffff1f', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 } }, '×'),
+        R.createElement('div', { key: 'b', style: { display: 'inline-block', padding: '4px 11px', borderRadius: 999, background: '#ff681c', fontSize: 12, fontWeight: 800, marginBottom: 12 } }, 'PRO'),
+        R.createElement('div', { key: 't', style: { fontSize: 24, fontWeight: 800, lineHeight: 1.3 } }, '解锁完整 AI 助手'),
+        R.createElement('div', { key: 's', style: { fontSize: 13.5, color: '#b9b2a8', marginTop: 6 } }, '让记账、查账与分析都交给 AI')
+      ]),
+      R.createElement('div', { key: 'b', className: 'scroll-y', style: { flex: 1, overflowY: 'auto', padding: '6px 20px 0', background: '#fff' } }, [
+        feat('AI 自然语言记账', '"记一笔昨天午餐 38" 即可入账'),
+        feat('AI 智能查账与分析', '用一句话查询、统计、生成报告'),
+        feat('文件批量识别', '小票、账单、Excel 一次处理多份'),
+        feat('高级分析与异常提醒', '趋势、成员贡献、大额预警')
+      ]),
+      R.createElement('div', { key: 'f', style: { padding: '14px 20px calc(20px + env(safe-area-inset-bottom))', background: '#fff', borderTop: '1px solid #f2f4f7', flexShrink: 0 } }, [
+        R.createElement('div', { key: 'n', style: { fontSize: 12, color: '#8993a3', textAlign: 'center', marginBottom: 11 } }, '订阅前需绑定邮箱或手机号 · ¥28/月，随时取消'),
+        this.btn(R, '升级到 Pro', this.upgrade)
+      ])
+    ]);
+  }
+
+  renderExport(R) {
+    const item = (t) => R.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 9, padding: '9px 0', fontSize: 13.5 } }, [R.createElement('span', { key: 'd', style: { width: 6, height: 6, borderRadius: 9, background: '#ff681c' } }), t]);
+    return this.sheetWrap(R, [
+      this.sheetHeader(R, '导出数据'),
+      R.createElement('div', { key: 'b', style: { padding: '0 16px calc(20px + env(safe-area-inset-bottom))' } }, [
+        R.createElement('div', { key: 'c', style: { background: '#fff', borderRadius: 16, padding: '6px 16px 12px', boxShadow: '0 6px 22px #24304a08' } }, [
+          R.createElement('div', { key: 'h', style: { fontSize: 13, fontWeight: 700, color: '#5b6473', padding: '12px 0 4px' } }, '本次导出包含'),
+          item('账本信息与默认货币'), item('全部成员与角色'), item('全部交易与明细'), item('类别与邀请记录'), item('相关元数据（创建/修改信息）')
+        ]),
+        R.createElement('div', { key: 'n', style: { fontSize: 12, color: '#8993a3', margin: '14px 2px', lineHeight: 1.5 } }, '导出格式为 JSON，后续将支持 Excel。文件仅包含你有权访问的数据。'),
+        R.createElement('div', { key: 'btn' }, this.btn(R, '导出为 JSON', this.exportData))
+      ])
+    ]);
+  }
+
+  renderDetail(R) {
+    const t = this.state.detail; if (!t) return null;
+    const c = this.catByKey(t.cat);
+    const row = (k, v) => R.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid #f2f4f7', fontSize: 14 } }, [R.createElement('span', { key: 'k', style: { color: '#8993a3' } }, k), R.createElement('span', { key: 'v', style: { fontWeight: 600 } }, v)]);
+    return this.sheetWrap(R, [
+      this.sheetHeader(R, '交易详情', { right: R.createElement('span', { onClick: () => this.deleteTxn(t), style: { fontSize: 13.5, color: '#d74035', fontWeight: 700 } }, '删除') }),
+      R.createElement('div', { key: 'b', style: { padding: '0 16px calc(20px + env(safe-area-inset-bottom))' } }, [
+        R.createElement('div', { key: 'hero', style: { textAlign: 'center', padding: '8px 0 20px' } }, [
+          R.createElement('span', { key: 'i', style: { width: 56, height: 56, borderRadius: 17, background: c.color + '1a', color: c.color, fontSize: 22, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' } }, c.char),
+          R.createElement('div', { key: 'a', style: { fontSize: 32, fontWeight: 800, marginTop: 12, color: t.type === 'income' ? '#1f9d57' : '#101827' } }, (t.type === 'income' ? '+¥' : '-¥') + this.fmt(t.amount)),
+          R.createElement('div', { key: 'n', style: { fontSize: 14, color: '#5b6473', marginTop: 4 } }, t.note)
+        ]),
+        R.createElement('div', { key: 'rows', style: { background: '#fff', borderRadius: 16, padding: '0 16px', boxShadow: '0 6px 22px #24304a08' } }, [
+          row('类别', c.name), row('类型', t.type === 'income' ? '收入' : '支出'), row('成员', t.member), row('时间', t.day + ' ' + t.time), R.createElement('div', { key: 'last', style: { display: 'flex', justifyContent: 'space-between', padding: '12px 0', fontSize: 14 } }, [R.createElement('span', { key: 'k', style: { color: '#8993a3' } }, '附件'), R.createElement('span', { key: 'v', style: { fontWeight: 600 } }, t.att ? '1 个' : '无')])
+        ]),
+        R.createElement('div', { key: 'btns', style: { display: 'flex', gap: 10, marginTop: 16 } }, [
+          this.btn(R, '编辑', () => { this.close(); this.openAdd(t.type); }, 'outline'),
+          this.btn(R, '复制为新记录', () => { this.close(); this.openAdd(t.type); }, 'secondary')
+        ])
+      ])
+    ]);
+  }
+
+  renderDialog(R) {
+    const d = this.state.dialog; if (!d) return null;
+    return R.createElement('div', { style: { position: 'absolute', inset: 0, zIndex: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 28, animation: 'fadeIn .18s' } }, [
+      R.createElement('div', { key: 'bd', onClick: this.closeDialog, style: { position: 'absolute', inset: 0, background: 'rgba(20,26,38,.45)' } }),
+      R.createElement('div', { key: 'card', style: { position: 'relative', width: '100%', maxWidth: 300, background: '#fff', borderRadius: 22, padding: '24px 22px 18px', textAlign: 'center', animation: 'popIn .22s', boxShadow: '0 20px 50px rgba(0,0,0,.3)' } }, [
+        d.danger ? R.createElement('div', { key: 'i', style: { width: 48, height: 48, borderRadius: 999, background: '#fdeceb', margin: '0 auto 14px', display: 'flex', alignItems: 'center', justifyContent: 'center' } }, R.createElement('svg', { width: 24, height: 24, viewBox: '0 0 24 24', fill: 'none' }, R.createElement('path', { d: 'M12 8v5', stroke: '#d74035', strokeWidth: 2.2, strokeLinecap: 'round' }), R.createElement('circle', { cx: 12, cy: 16.5, r: 1.2, fill: '#d74035' }), R.createElement('path', { d: 'M10.3 4.3 3 17a2 2 0 0 0 1.7 3h14.6a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0z', stroke: '#d74035', strokeWidth: 2 }))) : null,
+        R.createElement('div', { key: 't', style: { fontSize: 18, fontWeight: 800 } }, d.title),
+        R.createElement('div', { key: 'm', style: { fontSize: 13.5, color: '#5b6473', marginTop: 8, lineHeight: 1.55 } }, d.message),
+        R.createElement('div', { key: 'b', style: { display: 'flex', gap: 10, marginTop: 20 } }, [
+          R.createElement('button', { key: 'c', onClick: this.closeDialog, style: { flex: 1, height: 46, borderRadius: 13, border: '1px solid #e4e8ee', background: '#fff', color: '#172032', fontSize: 15, fontWeight: 700, fontFamily: 'inherit' } }, '取消'),
+          R.createElement('button', { key: 'o', onClick: this.confirmDialog, style: { flex: 1, height: 46, borderRadius: 13, border: 0, background: d.danger ? '#d74035' : '#ff681c', color: '#fff', fontSize: 15, fontWeight: 700, fontFamily: 'inherit' } }, d.confirmText || '确认')
+        ])
+      ])
+    ]);
+  }
+
+  renderToast(R) {
+    const t = this.state.toast; if (!t) return null;
+    return R.createElement('div', { style: { position: 'absolute', left: '50%', bottom: 110, transform: 'translateX(-50%)', zIndex: 90, background: 'rgba(23,32,50,.94)', color: '#fff', padding: '11px 20px', borderRadius: 999, fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', boxShadow: '0 10px 30px rgba(0,0,0,.25)', animation: 'popIn .2s', display: 'flex', alignItems: 'center', gap: 8 } }, [
+      R.createElement('span', { key: 'c', style: { width: 18, height: 18, borderRadius: 999, background: '#1f9d57', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11 } }, '✓'), t
+    ]);
+  }
+}
+</script>
+</body>
+</html>

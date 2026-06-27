@@ -1,23 +1,20 @@
-import { XIcon } from "@phosphor-icons/react";
-import { Button } from "@shared-ledger/ui";
+import { SparkleIcon } from "@phosphor-icons/react";
 import { useNavigate } from "react-router-dom";
 import { AiChat } from "../components/ai/AiChat";
+import { FullScreenPanel } from "../components/ios/IosDesign";
 import { useActiveBook } from "../hooks/useActiveBook";
 export function AiPage() {
   const navigate = useNavigate();
   const { book } = useActiveBook();
   return (
-    <div className="ai-standalone-workspace">
-      <header className="ai-workspace-header">
-        <h1>AI 助手</h1>
-        <span className="ai-book-pill" aria-label={`当前账本 ${book?.name ?? "未选择账本"}`}>
-          {book?.name ?? "未选择账本"}
-        </span>
-        <Button type="button" variant="ghost" size="icon" aria-label="关闭 AI 助手" onClick={() => navigate(-1)}>
-          <XIcon size={20} />
-        </Button>
-      </header>
+    <FullScreenPanel
+      className="ios-ai-workspace"
+      title="账本助手"
+      subtitle={`${book?.name ?? "未选择账本"} · AI 助手`}
+      icon={<SparkleIcon size={18} weight="fill" />}
+      onClose={() => navigate(-1)}
+    >
       <AiChat bookId={book?.id} page="AI 助手" />
-    </div>
+    </FullScreenPanel>
   );
 }

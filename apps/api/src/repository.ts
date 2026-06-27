@@ -330,6 +330,32 @@ export class D1LedgerRepository {
     return mapMember({ ...row, role });
   }
 
+  async removeMember(bookId: string, memberId: string) {
+    const row = await this.db
+      .prepare(
+        `SELECT bm.id,bm.book_id AS bookId,bm.user_id AS userId,u.name,bm.role,bm.joined_at AS joinedAt
+         FROM book_members bm JOIN users u ON u.id = bm.user_id WHERE bm.id = ? AND bm.book_id = ?`,
+      )
+      .bind(memberId, bookId)
+      .first<Row>();
+    if (!row || row.role === "creator") return null;
+    await this.db.prepare("DELETE FROM book_members WHERE id = ? AND book_id = ?").bind(memberId, bookId).run();
+    return mapMember(row);
+  }
+
+  async removeMemberByUser(bookId: string, userId: string) {
+    const row = await this.db
+      .prepare(
+        `SELECT bm.id,bm.book_id AS bookId,bm.user_id AS userId,u.name,bm.role,bm.joined_at AS joinedAt
+         FROM book_members bm JOIN users u ON u.id = bm.user_id WHERE bm.user_id = ? AND bm.book_id = ?`,
+      )
+      .bind(userId, bookId)
+      .first<Row>();
+    if (!row || row.role === "creator") return null;
+    await this.db.prepare("DELETE FROM book_members WHERE user_id = ? AND book_id = ?").bind(userId, bookId).run();
+    return mapMember(row);
+  }
+
   private async mapTransaction(row: Row): Promise<Transaction> {
     const [tags, items] = await this.db.batch([
       this.db.prepare("SELECT tag_id AS id FROM transaction_tags WHERE transaction_id = ?").bind(row.id),

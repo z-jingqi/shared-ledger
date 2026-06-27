@@ -13,8 +13,6 @@ import { useAuth } from "../features/auth/AuthProvider";
 import { useActiveBook } from "../hooks/useActiveBook";
 
 export function AppRoutes() {
-  const { user } = useAuth();
-  const plan = user?.plan ?? "free";
   return (
     <Routes>
       <Route path="/" element={<Protected element={<HomeEntry />} />} />
@@ -49,10 +47,7 @@ export function AppRoutes() {
       <Route path="/settings/:tab" element={<Protected element={<ManagementSettingsPage />} />} />
       <Route path="/account" element={<Protected element={<AccountSettingsPage />} />} />
       <Route path="/subscription" element={<Protected element={<SubscriptionPage />} />} />
-      <Route
-        path="/ai"
-        element={<Protected element={plan === "pro" ? <AiPage /> : <Navigate to="/subscription" replace />} />}
-      />
+      <Route path="/ai" element={<Protected element={<AiPage />} />} />
     </Routes>
   );
 }

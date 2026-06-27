@@ -422,6 +422,20 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
       ? jsonError(context, result.error ?? "记录不可确认", result.status ?? 400)
       : context.json(result);
   });
+
+  app.post("/imported-records/:id/ignore", async (context) => {
+    if (!context.env.DB) return jsonError(context, "D1 运行时不可用", 503);
+    const repository = new D1LedgerRepository(context.env.DB);
+    const record = await repository.getImportedRecord(context.req.param("id"));
+    if (!record || record.status !== "pending") return jsonError(context, "记录不可忽略", 400);
+    const job = await repository.getImportJob(record.importJobId);
+    if (!job) return jsonError(context, "导入任务不存在", 404);
+    const denied = await requireMember(context, store, job.bookId);
+    if (denied) return denied;
+    const updated = await repository.updateImportedRecord(record.id, record.suggestedTransaction, "ignored");
+    return context.json({ record: updated });
+  });
+
   app.post("/imports/:id/confirm-all", async (context) => {
     if (!context.env.DB) return jsonError(context, "D1 运行时不可用", 503);
     const repository = new D1LedgerRepository(context.env.DB);
