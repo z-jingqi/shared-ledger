@@ -67,6 +67,14 @@ export const loginSchema = z.object({
   identifier: z.string().trim().min(1),
   password: z.string().min(1).max(128),
 });
+export const updateProfileSchema = z.object({
+  name: z.string().trim().min(1).max(60),
+  email: z.string().trim().email().optional().or(z.literal("")),
+});
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1).max(128),
+  newPassword: z.string().min(6).max(128),
+});
 export const subscriptionContactSchema = z
   .object({ email: z.string().email().optional(), phone: z.string().trim().min(6).max(30).optional() })
   .refine((value) => value.email || value.phone, "订阅前请补充邮箱或手机号");
@@ -109,11 +117,13 @@ export const createTransactionSchema = z
   });
 export const inviteSchema = z
   .object({
-    email: z.string().email().optional(),
-    phone: z.string().min(6).max(30).optional(),
+    target: z.string().trim().min(1).max(120).optional(),
+    email: z.string().trim().email().optional(),
+    phone: z.string().trim().min(6).max(30).optional(),
+    userId: idSchema.optional(),
     role: z.enum(["admin", "member"]).default("member"),
   })
-  .refine((data) => data.email || data.phone, "请提供邮箱或手机号");
+  .refine((data) => data.target || data.email || data.phone || data.userId, "请输入邮箱、手机号、用户名或用户 ID");
 export const categorySchema = z.object({
   name: z.string().trim().min(1).max(30),
   type: z.enum(transactionTypes),
@@ -137,18 +147,32 @@ export const aiImportRecordSchema = z.object({
   warnings: z.array(z.string()).default([]),
 });
 export const aiActionNames = [
+  "chat",
   "create-record",
+  "update-record",
+  "delete-record",
   "search-records",
   "analyze-records",
+  "create-category",
+  "update-category",
+  "delete-category",
+  "create-tag",
+  "update-tag",
+  "delete-tag",
+  "create-book",
+  "update-book",
+  "delete-book",
+  "update-profile",
+  "update-member",
+  "remove-member",
   "invite-member",
+  "export-book",
   "save-attachments",
   "confirm-import-batch",
   "cancel-task",
   "retry-task",
 ] as const;
 export type AiActionName = (typeof aiActionNames)[number];
-export const aiIntentNames = aiActionNames;
-export type AiIntentName = AiActionName;
 export const aiConfirmationActionSchema = z.enum(aiActionNames);
 export type AiConfirmationAction = z.infer<typeof aiConfirmationActionSchema>;
 
@@ -239,45 +263,17 @@ export const aiIngestionResultSchema = z.object({
 });
 export type AiIngestionResult = z.infer<typeof aiIngestionResultSchema>;
 
-export const aiIntentSchema = z.object({
-  action: z.enum(aiActionNames),
-  confidence: z.number().min(0).max(1).default(0),
-  summary: z.string().trim().max(1000).optional(),
-  transaction: aiTransactionCandidateSchema.optional(),
-  search: aiTransactionSearchSchema.optional(),
-  normalizedSearchFilters: aiNormalizedSearchFiltersSchema.optional(),
-  ingestion: aiIngestionResultSchema.optional(),
-  invite: z
-    .object({
-      email: z.string().email().optional(),
-      phone: z.string().trim().min(6).max(30).optional(),
-      role: z.enum(["admin", "member"]).default("member"),
-    })
-    .optional(),
-  task: z
-    .object({
-      taskId: idSchema.optional(),
-      sourceType: z.string().trim().max(80).optional(),
-      sourceId: idSchema.optional(),
-      reason: z.string().trim().max(500).optional(),
-    })
-    .optional(),
-  requiresConfirmation: z.boolean().default(false),
-  confirmation: z
-    .object({
-      action: aiConfirmationActionSchema,
-      summary: z.string().trim().min(1).max(1000),
-      confirmLabel: z.string().trim().min(1).max(40).optional(),
-      cancelLabel: z.string().trim().min(1).max(40).optional(),
-      payload: z.record(z.unknown()).default({}),
-    })
-    .optional(),
-  missingFields: z.array(z.string().trim().min(1).max(80)).default([]),
-  followUpQuestion: z.string().trim().max(500).optional(),
-});
-export type AiIntent = z.infer<typeof aiIntentSchema>;
 export type CreateBookInput = z.infer<typeof createBookSchema>;
 export type CreateTransactionInput = z.infer<typeof createTransactionSchema>;
+
+export const aiToolCallPlanSchema = z.object({
+  toolName: z.enum(aiActionNames),
+  args: z.record(z.unknown()).default({}),
+  userMessage: z.string().trim().max(2000).optional(),
+  requiresConfirmation: z.boolean().default(false),
+  confidence: z.number().min(0).max(1).default(0.7),
+});
+export type AiToolCallPlan = z.infer<typeof aiToolCallPlanSchema>;
 
 export const aiConfirmationStatuses = ["pending", "confirmed", "cancelled"] as const;
 export type AiConfirmationStatus = (typeof aiConfirmationStatuses)[number];
@@ -341,16 +337,32 @@ export type AiConfirmationCardPart = {
     cancelLabel: string;
   };
 };
+export type AiProfileCardPart = {
+  type: "profile-card";
+  title?: string;
+  name?: string;
+  email?: string;
+  avatarUrl?: string;
+};
+export type AiMemberCardPart = {
+  type: "member-card";
+  title?: string;
+  name?: string;
+  role?: Role;
+  status?: string;
+};
 export type AiChatPart =
   | { type: "text"; text: string }
   | AiToolStatusPart
   | AiRecordCardPart
   | AiSearchResultCardPart
   | AiAnalysisCardPart
+  | AiProfileCardPart
+  | AiMemberCardPart
   | AiNavigationCardPart
   | AiConfirmationCardPart;
 export type AiChatResponse = {
-  conversationId: string;
+  sessionId: string;
   message: { id: string; role: "assistant"; parts: AiChatPart[] };
   parts: AiChatPart[];
 };
@@ -369,5 +381,5 @@ export function canMutateTransaction(actorId: string, createdByUserId: string) {
   return actorId === createdByUserId;
 }
 export function canUseAi(plan: SubscriptionPlan) {
-  return plan === "pro";
+  return plan === "free" || plan === "pro";
 }

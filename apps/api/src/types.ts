@@ -3,7 +3,12 @@ export type Env = {
   FILES?: R2Bucket;
   IMPORT_QUEUE?: Queue;
   AI?: { run(model: string, input: unknown): Promise<unknown> };
+  AI_PROVIDER?: string;
+  AI_MODEL?: string;
+  AI_BASE_URL?: string;
   AI_PROVIDER_KEYS?: string;
+  OPENROUTER_API_KEY?: string;
+  OPENROUTER_MODEL?: string;
   ALEPH_OCR_BASE_URL?: string;
   ALEPH_OCR_API_KEY?: string;
   ALEPH_OCR_WEBHOOK_SECRET?: string;
@@ -20,6 +25,7 @@ export type LedgerUser = {
   id: string;
   name: string;
   email: string;
+  phone?: string;
   plan: "free" | "pro";
   avatarUrl?: string;
 };

@@ -1,6 +1,17 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
-const timestamps = { createdAt: text("created_at").notNull(), updatedAt: text("updated_at").notNull() };
+const systemActorId = "0";
+const timestamps = {
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+};
+const actorAudit = {
+  createdByUserId: text("created_by_user_id").notNull().default(systemActorId),
+  updatedByUserId: text("updated_by_user_id").notNull().default(systemActorId),
+  deletedAt: text("deleted_at"),
+  deletedByUserId: text("deleted_by_user_id"),
+};
+const fullAudit = { ...timestamps, ...actorAudit };
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
@@ -8,15 +19,13 @@ export const users = sqliteTable("users", {
   phone: text("phone").unique(),
   avatarUrl: text("avatar_url"),
   passwordHash: text("password_hash").notNull(),
-  ...timestamps,
+  ...fullAudit,
 });
 export const books = sqliteTable("books", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   currency: text("currency").notNull().default("CNY"),
-  createdByUserId: text("created_by_user_id").notNull(),
-  deletedAt: text("deleted_at"),
-  ...timestamps,
+  ...fullAudit,
 });
 export const bookMembers = sqliteTable(
   "book_members",
@@ -26,7 +35,7 @@ export const bookMembers = sqliteTable(
     userId: text("user_id").notNull(),
     role: text("role", { enum: ["creator", "admin", "member"] }).notNull(),
     joinedAt: text("joined_at").notNull(),
-    ...timestamps,
+    ...fullAudit,
   },
   (t) => [
     uniqueIndex("book_members_book_user").on(t.bookId, t.userId),
@@ -44,15 +53,14 @@ export const invitations = sqliteTable("invitations", {
   status: text("status").notNull(),
   expiresAt: text("expires_at").notNull(),
   lastRemindedAt: text("last_reminded_at"),
-  ...timestamps,
+  ...fullAudit,
 });
 export const accounts = sqliteTable("accounts", {
   id: text("id").primaryKey(),
   bookId: text("book_id").notNull(),
   name: text("name").notNull(),
   type: text("type").notNull(),
-  createdByUserId: text("created_by_user_id").notNull(),
-  ...timestamps,
+  ...fullAudit,
 });
 export const categories = sqliteTable("categories", {
   id: text("id").primaryKey(),
@@ -61,14 +69,14 @@ export const categories = sqliteTable("categories", {
   type: text("type").notNull(),
   icon: text("icon").notNull(),
   sortOrder: integer("sort_order").notNull().default(0),
-  ...timestamps,
+  ...fullAudit,
 });
 export const tags = sqliteTable("tags", {
   id: text("id").primaryKey(),
   bookId: text("book_id").notNull(),
   name: text("name").notNull(),
   color: text("color").notNull(),
-  ...timestamps,
+  ...fullAudit,
 });
 export const transactions = sqliteTable(
   "transactions",
@@ -80,11 +88,9 @@ export const transactions = sqliteTable(
     categoryId: text("category_id"),
     accountId: text("account_id"),
     memberId: text("member_id"),
-    createdByUserId: text("created_by_user_id").notNull(),
     note: text("note"),
     occurredAt: text("occurred_at").notNull(),
-    deletedAt: text("deleted_at"),
-    ...timestamps,
+    ...fullAudit,
   },
   (t) => [index("transactions_book_date").on(t.bookId, t.occurredAt)],
 );
@@ -95,11 +101,15 @@ export const transactionItems = sqliteTable("transaction_items", {
   amount: integer("amount_cents").notNull(),
   categoryId: text("category_id"),
   note: text("note"),
-  ...timestamps,
+  ...fullAudit,
 });
 export const transactionTags = sqliteTable(
   "transaction_tags",
-  { transactionId: text("transaction_id").notNull(), tagId: text("tag_id").notNull() },
+  {
+    transactionId: text("transaction_id").notNull(),
+    tagId: text("tag_id").notNull(),
+    ...fullAudit,
+  },
   (t) => [uniqueIndex("transaction_tags_unique").on(t.transactionId, t.tagId)],
 );
 export const attachments = sqliteTable("attachments", {
@@ -111,8 +121,7 @@ export const attachments = sqliteTable("attachments", {
   fileType: text("file_type").notNull(),
   r2Key: text("r2_key").notNull(),
   size: integer("size").notNull(),
-  createdByUserId: text("created_by_user_id").notNull(),
-  createdAt: text("created_at").notNull(),
+  ...fullAudit,
 });
 export const importJobs = sqliteTable("import_jobs", {
   id: text("id").primaryKey(),
@@ -145,7 +154,7 @@ export const importJobs = sqliteTable("import_jobs", {
   ocrTotalPages: integer("ocr_total_pages"),
   ocrCompletedAt: text("ocr_completed_at"),
   ocrEventSequence: integer("ocr_event_sequence").notNull().default(0),
-  ...timestamps,
+  ...fullAudit,
 });
 export const importedRecords = sqliteTable("imported_records", {
   id: text("id").primaryKey(),
@@ -155,7 +164,7 @@ export const importedRecords = sqliteTable("imported_records", {
   status: text("status").notNull(),
   confidence: integer("confidence").notNull(),
   warnings: text("warnings").notNull(),
-  ...timestamps,
+  ...fullAudit,
 });
 export const subscriptions = sqliteTable("subscriptions", {
   id: text("id").primaryKey(),
@@ -164,30 +173,39 @@ export const subscriptions = sqliteTable("subscriptions", {
   status: text("status").notNull(),
   startedAt: text("started_at").notNull(),
   expiresAt: text("expires_at"),
-  ...timestamps,
+  ...fullAudit,
 });
-export const aiConversations = sqliteTable("ai_conversations", {
-  id: text("id").primaryKey(),
-  userId: text("user_id").notNull(),
-  bookId: text("book_id"),
-  title: text("title").notNull(),
-  ...timestamps,
-});
-export const aiMessages = sqliteTable("ai_messages", {
-  id: text("id").primaryKey(),
-  conversationId: text("conversation_id").notNull(),
-  role: text("role").notNull(),
-  content: text("content").notNull(),
-  metadata: text("metadata"),
-  createdAt: text("created_at").notNull(),
-});
+export const aiSessions = sqliteTable(
+  "ai_sessions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    bookId: text("book_id"),
+    title: text("title").notNull(),
+    ...fullAudit,
+  },
+  (t) => [index("ai_sessions_user_updated").on(t.userId, t.updatedAt)],
+);
+export const aiMessages = sqliteTable(
+  "ai_messages",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id").notNull(),
+    role: text("role").notNull(),
+    content: text("content").notNull(),
+    parts: text("parts"),
+    attachments: text("attachments"),
+    ...fullAudit,
+  },
+  (t) => [index("ai_messages_session_created").on(t.sessionId, t.createdAt)],
+);
 export const aiProviderConfigs = sqliteTable("ai_provider_configs", {
   userId: text("user_id").primaryKey(),
   provider: text("provider").notNull(),
   model: text("model").notNull(),
   apiKeyRef: text("api_key_ref"),
   baseUrl: text("base_url"),
-  ...timestamps,
+  ...fullAudit,
 });
 export const aiConfirmations = sqliteTable(
   "ai_confirmations",
@@ -195,6 +213,7 @@ export const aiConfirmations = sqliteTable(
     id: text("id").primaryKey(),
     userId: text("user_id").notNull(),
     bookId: text("book_id"),
+    toolCallId: text("tool_call_id"),
     action: text("action").notNull(),
     status: text("status").notNull(),
     payload: text("payload").notNull(),
@@ -202,48 +221,25 @@ export const aiConfirmations = sqliteTable(
     expiresAt: text("expires_at").notNull(),
     confirmedAt: text("confirmed_at"),
     cancelledAt: text("cancelled_at"),
-    ...timestamps,
+    ...fullAudit,
   },
   (t) => [index("ai_confirmations_user_status").on(t.userId, t.status)],
 );
-export const aiActionAuditLogs = sqliteTable(
-  "ai_action_audit_logs",
+export const aiToolCalls = sqliteTable(
+  "ai_tool_calls",
   {
     id: text("id").primaryKey(),
+    sessionId: text("session_id").notNull(),
     userId: text("user_id").notNull(),
     bookId: text("book_id"),
-    action: text("action").notNull(),
-    targetType: text("target_type"),
-    targetId: text("target_id"),
-    idempotencyKey: text("idempotency_key").notNull(),
+    toolName: text("tool_name").notNull(),
     status: text("status").notNull(),
-    payload: text("payload").notNull(),
+    args: text("args").notNull(),
     result: text("result"),
     errorMessage: text("error_message"),
-    createdAt: text("created_at").notNull(),
+    ...fullAudit,
   },
-  (t) => [
-    uniqueIndex("ai_action_audit_idempotency").on(t.idempotencyKey),
-    index("ai_action_audit_book").on(t.bookId),
-  ],
-);
-export const aiTasks = sqliteTable(
-  "ai_tasks",
-  {
-    id: text("id").primaryKey(),
-    userId: text("user_id").notNull(),
-    bookId: text("book_id"),
-    kind: text("kind").notNull(),
-    status: text("status").notNull(),
-    sourceType: text("source_type"),
-    sourceId: text("source_id"),
-    payload: text("payload"),
-    result: text("result"),
-    errorMessage: text("error_message"),
-    createdAt: text("created_at").notNull(),
-    updatedAt: text("updated_at").notNull(),
-  },
-  (t) => [index("ai_tasks_user_status").on(t.userId, t.status), index("ai_tasks_source").on(t.sourceType, t.sourceId)],
+  (t) => [index("ai_tool_calls_session").on(t.sessionId), index("ai_tool_calls_user_status").on(t.userId, t.status)],
 );
 export const refreshTokens = sqliteTable(
   "refresh_tokens",
@@ -253,7 +249,7 @@ export const refreshTokens = sqliteTable(
     tokenHash: text("token_hash").notNull().unique(),
     expiresAt: text("expires_at").notNull(),
     revokedAt: text("revoked_at"),
-    createdAt: text("created_at").notNull(),
+    ...fullAudit,
   },
   (t) => [index("refresh_tokens_user").on(t.userId)],
 );

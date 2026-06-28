@@ -6,10 +6,9 @@ import { createWorkersAI } from "workers-ai-provider";
 import {
   aiActionNames,
   aiImportRecordSchema,
-  aiIntentSchema,
+  aiToolCallPlanSchema,
   type AiActionName,
-  type AiIntent,
-  type TransactionType,
+  type AiToolCallPlan,
 } from "@shared-ledger/shared";
 import { z } from "zod";
 
@@ -27,7 +26,8 @@ export type LedgerAiEnvironment = {
 };
 export interface AiProvider {
   structureImport(input: AiContext): Promise<z.infer<typeof aiImportRecordSchema>[]>;
-  parseUserIntent(input: AiIntentInput): Promise<AiIntent>;
+  streamChat(messages: ModelMessage[], context: Pick<AiContext, "bookId" | "page">): ReturnType<typeof streamText>;
+  planToolCall(input: AiToolPlanInput): Promise<AiToolCallPlan>;
   chat(input: AiContext): Promise<string>;
 }
 export const defaultAiConfig: LedgerAiConfig = {
@@ -37,31 +37,40 @@ export const defaultAiConfig: LedgerAiConfig = {
 
 const importSystemPrompt =
   "You extract bookkeeping entries. Return only records supported by the supplied text.";
-const chatSystemPrompt = "你是一起记的账本助手。回答基于用户当前账本上下文，简洁、明确、不得编造数据。";
-const intentSystemPrompt = [
-  "你是一起记的业务意图解析器，只返回符合 schema 的结构化结果。",
-  "从 availableActions 中选择且只选择一个 action，不要输出列表外的 action。",
-  "action 语义：create-record=新增收支记录；search-records=查找或筛选记录；analyze-records=分析账本；invite-member=邀请成员；save-attachments=保存或上传附件；confirm-import-batch=确认导入批次；cancel-task=取消任务；retry-task=重试任务。",
-  "不要执行任何业务动作，不要编造金额、日期、联系人或任务 ID。信息缺失时填写 missingFields 和 followUpQuestion。",
-  "日期基于 today 和 timeZone 解释；明确日期时写入 occurredAt/from/to，模糊表达也保留 dateExpression。",
-  "分类和标签优先使用传入的 categories/tags 的 id；没有匹配 id 时可以输出建议名称。",
-  "需要用户确认的动作应设置 requiresConfirmation=true，并填写 confirmation.action/summary。",
+const chatSystemPrompt = [
+  "你是一个正常、友好、可靠的通用聊天机器人，同时也是一起记应用的智能助手。",
+  "用户可以聊任何话题；和账本无关的问题也要自然回答，不要强行转回记账。",
+  "如果回答涉及当前账本数据，只能基于工具或上下文提供的真实数据，不要编造记录、成员、余额或文件状态。",
+].join("\n");
+const toolPlanSystemPrompt = [
+  "你是一起记应用的智能助手。你可以正常聊天，也可以使用工具操作应用数据。",
+  "用户输入可能有错别字、口语、省略、多意图或附件；不要依赖关键词，要理解语义。",
+  "如果用户只是聊天、提问、写作或任何不需要应用数据/操作的内容，选择 toolName=chat，并在 userMessage 中给出自然回复要点。",
+  "如果用户需要真实账本数据，必须选择最合适的查询或分析工具，不要编造数据。",
+  "如果用户要修改应用数据，选择最小必要工具，并把参数放入 args。",
+  "附件会在 attachments 中提供元数据；图片可用于头像或视觉问题，文件可用于导入或分析。用户没要求保存/导入时不要选择 save-attachments。",
+  "删除、移除成员、删除账本、批量修改、发送邀请、导出等高影响动作必须 requiresConfirmation=true。",
+  "只能从 tools 列表中选择 toolName。输出必须符合 schema。",
 ].join("\n");
 
-export type AiIntentEntity = { id?: string; name: string; type?: TransactionType | string; color?: string; icon?: string };
-export type AiIntentInput = {
+export type AiToolDefinition = {
+  name: AiActionName;
+  description: string;
+  confirmation?: "never" | "dangerous" | "always";
+  argsSchemaDescription?: string;
+};
+export type AiToolPlanInput = {
   text: string;
-  bookId: string;
   userId?: string;
+  bookId?: string;
   page: string;
   today: string;
   timeZone: string;
-  categories: AiIntentEntity[];
-  tags: AiIntentEntity[];
-  hasAttachments?: boolean;
-  availableActions: AiActionName[];
+  tools: AiToolDefinition[];
+  context?: Record<string, unknown>;
+  attachments?: Array<Record<string, unknown>>;
 };
-export type ParseUserIntentInput = AiIntentInput & { model: LanguageModel };
+export type PlanToolCallInput = AiToolPlanInput & { model: LanguageModel };
 
 const supportedAiActions = new Set<AiActionName>(aiActionNames);
 
@@ -94,35 +103,34 @@ export function resolveModel(config: LedgerAiConfig, environment: LedgerAiEnviro
   }
 }
 
-export async function parseUserIntent(input: ParseUserIntentInput): Promise<AiIntent> {
-  if (!input.model) throw new Error("AI intent parser requires a configured language model");
-  const availableActions = normalizeAvailableActions(input.availableActions);
+export async function planToolCall(input: PlanToolCallInput): Promise<AiToolCallPlan> {
+  if (!input.model) throw new Error("AI tool planner requires a configured language model");
+  const availableActions = normalizeAvailableActions(input.tools.map((tool) => tool.name));
   const result = await generateText({
     model: input.model,
-    system: intentSystemPrompt,
+    system: toolPlanSystemPrompt,
     prompt: JSON.stringify(
       {
         text: input.text,
-        page: input.page,
-        bookId: input.bookId,
         userId: input.userId,
+        bookId: input.bookId,
+        page: input.page,
         today: input.today,
         timeZone: input.timeZone,
-        categories: input.categories,
-        tags: input.tags,
-        hasAttachments: Boolean(input.hasAttachments),
-        availableActions,
+        tools: input.tools,
+        context: input.context ?? {},
+        attachments: input.attachments ?? [],
       },
       null,
       2,
     ),
-    output: Output.object({ schema: aiIntentSchema }),
+    output: Output.object({ schema: aiToolCallPlanSchema }),
   });
-  const intent = aiIntentSchema.parse(result.output);
-  if (!availableActions.includes(intent.action)) {
-    throw new Error(`AI intent parser returned unavailable action: ${intent.action}`);
+  const plan = aiToolCallPlanSchema.parse(result.output);
+  if (!availableActions.includes(plan.toolName)) {
+    throw new Error(`AI tool planner returned unavailable tool: ${plan.toolName}`);
   }
-  return intent;
+  return plan;
 }
 
 export function createAiProvider(config: LedgerAiConfig, environment: LedgerAiEnvironment) {
@@ -144,8 +152,8 @@ export function createAiProvider(config: LedgerAiConfig, environment: LedgerAiEn
       });
       return result.text;
     },
-    async parseUserIntent(input: AiIntentInput): Promise<AiIntent> {
-      return parseUserIntent({ ...input, model });
+    async planToolCall(input: AiToolPlanInput): Promise<AiToolCallPlan> {
+      return planToolCall({ ...input, model });
     },
     async structureImport(input: AiContext): Promise<z.infer<typeof aiImportRecordSchema>[]> {
       const result = await generateText({
@@ -160,8 +168,8 @@ export function createAiProvider(config: LedgerAiConfig, environment: LedgerAiEn
 }
 
 function normalizeAvailableActions(actions: AiActionName[]) {
-  if (!actions.length) throw new Error("parseUserIntent requires at least one available AI action");
+  if (!actions.length) throw new Error("AI tool planner requires at least one available tool");
   const invalidActions = actions.filter((action) => !supportedAiActions.has(action));
-  if (invalidActions.length) throw new Error(`parseUserIntent received unsupported AI actions: ${invalidActions.join(", ")}`);
+  if (invalidActions.length) throw new Error(`AI tool planner received unsupported tools: ${invalidActions.join(", ")}`);
   return Array.from(new Set(actions));
 }

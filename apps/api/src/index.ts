@@ -1,4 +1,5 @@
 import { createApp } from "./app";
+import { D1LedgerRepository } from "./repository";
 import type { Env } from "./types";
 import { processImportJob, type ImportQueueMessage } from "./services/imports";
 
@@ -20,5 +21,9 @@ export default {
         message.retry({ delaySeconds: 60 });
       }
     }
+  },
+  async scheduled(_controller: ScheduledController, env: Env, context: ExecutionContext) {
+    if (!env.DB) return;
+    context.waitUntil(new D1LedgerRepository(env.DB).cleanupExpiredImportJobs());
   },
 } satisfies ExportedHandler<Env>;

@@ -55,8 +55,10 @@ export function registerBookRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryL
     if (denied) return denied;
     const body = await context.req.json<{ name?: string; currency?: string }>();
     const repository = context.env.DB ? new D1LedgerRepository(context.env.DB) : undefined;
+    const user = await currentUser(context, store);
+    if (!user) return jsonError(context, "请先登录", 401);
     const book = repository
-      ? await repository.updateBook(bookId, body)
+      ? await repository.updateBook(bookId, body, user.id)
       : store?.books.find((item) => item.id === bookId);
     if (!book) return jsonError(context, "账本不存在", 404);
     if (!repository)
@@ -79,7 +81,7 @@ export function registerBookRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryL
     if (!book) return jsonError(context, "账本不存在", 404);
     if (!canDeleteBook((await bookRole(context, store, bookId, user)) ?? "member"))
       return jsonError(context, "只有创建者可以删除账本", 403);
-    if (repository) await repository.deleteBook(bookId);
+    if (repository) await repository.deleteBook(bookId, user.id);
     else if (store) store.books = store.books.filter((item) => item.id !== bookId);
     return context.body(null, 204);
   });

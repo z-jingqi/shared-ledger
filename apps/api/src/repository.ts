@@ -1,10 +1,15 @@
 import type { AiProviderName } from "@shared-ledger/shared";
 import type { Book, Member, Transaction } from "./types";
-import type { AiActionAuditLog, AiConfirmation, AiTask, ImportedRecord, ImportJob, Invitation, SimpleEntity } from "./store";
+import type { AiConfirmation, ImportedRecord, ImportJob, Invitation, SimpleEntity } from "./store";
 
 type Row = Record<string, any>;
 const now = () => new Date().toISOString();
 const id = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
+export const systemActorId = "0";
+export const importJobRetentionDays = 7;
+const importJobRetentionMs = importJobRetentionDays * 24 * 60 * 60 * 1000;
+const importJobCutoff = () => new Date(Date.now() - importJobRetentionMs).toISOString();
+export type ImportJobStatusFilter = "all" | "processing" | "success" | "failed";
 
 const mapBook = (row: Row): Book => ({
   id: row.id,
@@ -73,36 +78,6 @@ const mapAiConfirmation = (row: Row): AiConfirmation => ({
   updatedAt: row.updatedAt,
 });
 
-const mapAiActionAuditLog = (row: Row): AiActionAuditLog => ({
-  id: row.id,
-  userId: row.userId,
-  ...(row.bookId ? { bookId: row.bookId } : {}),
-  action: row.action,
-  ...(row.targetType ? { targetType: row.targetType } : {}),
-  ...(row.targetId ? { targetId: row.targetId } : {}),
-  idempotencyKey: row.idempotencyKey,
-  status: row.status,
-  payload: parseJson(row.payload) ?? {},
-  ...(row.result ? { result: parseJson(row.result) ?? {} } : {}),
-  ...(row.errorMessage ? { errorMessage: row.errorMessage } : {}),
-  createdAt: row.createdAt,
-});
-
-const mapAiTask = (row: Row): AiTask => ({
-  id: row.id,
-  userId: row.userId,
-  ...(row.bookId ? { bookId: row.bookId } : {}),
-  kind: row.kind,
-  status: row.status,
-  ...(row.sourceType ? { sourceType: row.sourceType } : {}),
-  ...(row.sourceId ? { sourceId: row.sourceId } : {}),
-  ...(row.payload ? { payload: parseJson(row.payload) ?? {} } : {}),
-  ...(row.result ? { result: parseJson(row.result) ?? {} } : {}),
-  ...(row.errorMessage ? { errorMessage: row.errorMessage } : {}),
-  createdAt: row.createdAt,
-  updatedAt: row.updatedAt,
-});
-
 const mapImportJob = (row: Row): ImportJob => ({
   id: row.id,
   bookId: row.bookId,
@@ -138,16 +113,20 @@ const mapImportJob = (row: Row): ImportJob => ({
   ocrEventSequence: row.ocrEventSequence ?? 0,
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
+  ...(row.deletedAt ? { deletedAt: row.deletedAt } : {}),
+  ...(row.deletedByUserId ? { deletedByUserId: row.deletedByUserId } : {}),
 });
 
 const importJobColumns =
-  "id,book_id AS bookId,user_id AS userId,file_name AS fileName,file_type AS fileType,r2_key AS r2Key,status,auto_confirm AS autoConfirm,error_message AS errorMessage,error_code AS errorCode,error_stage AS errorStage,error_request_id AS errorRequestId,error_retryable AS errorRetryable,error_terminal AS errorTerminal,failed_external_job_id AS failedExternalJobId,cancelable,retryable,retry_count AS retryCount,convert_job_id AS convertJobId,convert_event_sequence AS convertEventSequence,converted_r2_key AS convertedR2Key,converted_file_type AS convertedFileType,ocr_job_id AS ocrJobId,ocr_submitted_at AS ocrSubmittedAt,ocr_progress AS ocrProgress,ocr_stage AS ocrStage,ocr_current_page AS ocrCurrentPage,ocr_total_pages AS ocrTotalPages,ocr_completed_at AS ocrCompletedAt,ocr_event_sequence AS ocrEventSequence,created_at AS createdAt,updated_at AS updatedAt";
+  "id,book_id AS bookId,user_id AS userId,file_name AS fileName,file_type AS fileType,r2_key AS r2Key,status,auto_confirm AS autoConfirm,error_message AS errorMessage,error_code AS errorCode,error_stage AS errorStage,error_request_id AS errorRequestId,error_retryable AS errorRetryable,error_terminal AS errorTerminal,failed_external_job_id AS failedExternalJobId,cancelable,retryable,retry_count AS retryCount,convert_job_id AS convertJobId,convert_event_sequence AS convertEventSequence,converted_r2_key AS convertedR2Key,converted_file_type AS convertedFileType,ocr_job_id AS ocrJobId,ocr_submitted_at AS ocrSubmittedAt,ocr_progress AS ocrProgress,ocr_stage AS ocrStage,ocr_current_page AS ocrCurrentPage,ocr_total_pages AS ocrTotalPages,ocr_completed_at AS ocrCompletedAt,ocr_event_sequence AS ocrEventSequence,created_at AS createdAt,updated_at AS updatedAt,deleted_at AS deletedAt,deleted_by_user_id AS deletedByUserId";
 const aiConfirmationColumns =
   "id,user_id AS userId,book_id AS bookId,action,status,payload,result,expires_at AS expiresAt,confirmed_at AS confirmedAt,cancelled_at AS cancelledAt,created_at AS createdAt,updated_at AS updatedAt";
-const aiActionAuditColumns =
-  "id,user_id AS userId,book_id AS bookId,action,target_type AS targetType,target_id AS targetId,idempotency_key AS idempotencyKey,status,payload,result,error_message AS errorMessage,created_at AS createdAt";
-const aiTaskColumns =
-  "id,user_id AS userId,book_id AS bookId,kind,status,source_type AS sourceType,source_id AS sourceId,payload,result,error_message AS errorMessage,created_at AS createdAt,updated_at AS updatedAt";
+const aiSessionColumns =
+  "id,user_id AS userId,book_id AS bookId,title,created_at AS createdAt,updated_at AS updatedAt";
+const aiMessageColumns =
+  "id,session_id AS sessionId,role,content,parts,attachments,created_at AS createdAt";
+const aiToolCallColumns =
+  "id,session_id AS sessionId,user_id AS userId,book_id AS bookId,tool_name AS toolName,status,args,result,error_message AS errorMessage,created_at AS createdAt,updated_at AS updatedAt";
 
 const mapRecord = (row: Row): ImportedRecord => ({
   id: row.id,
@@ -169,7 +148,7 @@ export class D1LedgerRepository {
   async getAiProviderConfig(userId: string) {
     const row = await this.db
       .prepare(
-        "SELECT provider,model,api_key_ref AS apiKeyRef,base_url AS baseUrl FROM ai_provider_configs WHERE user_id = ?",
+        "SELECT provider,model,api_key_ref AS apiKeyRef,base_url AS baseUrl FROM ai_provider_configs WHERE user_id = ? AND deleted_at IS NULL",
       )
       .bind(userId)
       .first<{ provider: AiProviderName; model: string; apiKeyRef: string | null; baseUrl: string | null }>();
@@ -180,9 +159,9 @@ export class D1LedgerRepository {
     const timestamp = now();
     await this.db
       .prepare(
-        "INSERT OR IGNORE INTO ai_provider_configs (user_id,provider,model,created_at,updated_at) VALUES (?,?,?,?,?)",
+        "INSERT OR IGNORE INTO ai_provider_configs (user_id,provider,model,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
       )
-      .bind(userId, "workers-ai", "@cf/meta/llama-3.1-8b-instruct", timestamp, timestamp)
+      .bind(userId, "workers-ai", "@cf/meta/llama-3.1-8b-instruct", userId, userId, timestamp, timestamp)
       .run();
     return this.getAiProviderConfig(userId);
   }
@@ -194,9 +173,9 @@ export class D1LedgerRepository {
     const timestamp = now();
     await this.db
       .prepare(
-        `INSERT INTO ai_provider_configs (user_id,provider,model,api_key_ref,base_url,created_at,updated_at)
-         VALUES (?,?,?,?,?,?,?)
-         ON CONFLICT(user_id) DO UPDATE SET provider=excluded.provider,model=excluded.model,api_key_ref=excluded.api_key_ref,base_url=excluded.base_url,updated_at=excluded.updated_at`,
+        `INSERT INTO ai_provider_configs (user_id,provider,model,api_key_ref,base_url,created_by_user_id,updated_by_user_id,created_at,updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?)
+         ON CONFLICT(user_id) DO UPDATE SET provider=excluded.provider,model=excluded.model,api_key_ref=excluded.api_key_ref,base_url=excluded.base_url,updated_by_user_id=excluded.updated_by_user_id,updated_at=excluded.updated_at,deleted_at=NULL,deleted_by_user_id=NULL`,
       )
       .bind(
         userId,
@@ -204,6 +183,8 @@ export class D1LedgerRepository {
         config.model,
         config.apiKeyRef ?? null,
         config.baseUrl ?? null,
+        userId,
+        userId,
         timestamp,
         timestamp,
       )
@@ -213,7 +194,7 @@ export class D1LedgerRepository {
 
   async role(bookId: string, userId: string) {
     const result = await this.db
-      .prepare("SELECT role FROM book_members WHERE book_id = ? AND user_id = ?")
+      .prepare("SELECT role FROM book_members WHERE book_id = ? AND user_id = ? AND deleted_at IS NULL")
       .bind(bookId, userId)
       .first<{ role: Member["role"] }>();
     return result?.role;
@@ -224,7 +205,7 @@ export class D1LedgerRepository {
       .prepare(
         `SELECT b.id,b.name,b.currency,b.created_by_user_id AS createdByUserId,b.created_at AS createdAt,b.updated_at AS updatedAt
          FROM books b JOIN book_members bm ON bm.book_id = b.id
-         WHERE bm.user_id = ? AND b.deleted_at IS NULL ORDER BY b.updated_at DESC`,
+         WHERE bm.user_id = ? AND bm.deleted_at IS NULL AND b.deleted_at IS NULL ORDER BY b.updated_at DESC`,
       )
       .bind(userId)
       .all<Row>();
@@ -254,19 +235,19 @@ export class D1LedgerRepository {
     await this.db.batch([
       this.db
         .prepare(
-          "INSERT INTO books (id,name,currency,created_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?)",
+          "INSERT INTO books (id,name,currency,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
         )
-        .bind(book.id, book.name, book.currency, userId, timestamp, timestamp),
+        .bind(book.id, book.name, book.currency, userId, userId, timestamp, timestamp),
       this.db
         .prepare(
-          "INSERT INTO book_members (id,book_id,user_id,role,joined_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
+          "INSERT INTO book_members (id,book_id,user_id,role,joined_at,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
         )
-        .bind(id("member"), book.id, userId, "creator", timestamp, timestamp, timestamp),
+        .bind(id("member"), book.id, userId, "creator", timestamp, userId, userId, timestamp, timestamp),
     ]);
     return book;
   }
 
-  async updateBook(bookId: string, input: Partial<Pick<Book, "name" | "currency">>) {
+  async updateBook(bookId: string, input: Partial<Pick<Book, "name" | "currency">>, actorId = systemActorId) {
     const book = await this.getBook(bookId);
     if (!book) return null;
     const timestamp = now();
@@ -277,16 +258,17 @@ export class D1LedgerRepository {
       updatedAt: timestamp,
     };
     await this.db
-      .prepare("UPDATE books SET name = ?, currency = ?, updated_at = ? WHERE id = ?")
-      .bind(updated.name, updated.currency, timestamp, bookId)
+      .prepare("UPDATE books SET name = ?, currency = ?, updated_at = ?, updated_by_user_id = ? WHERE id = ?")
+      .bind(updated.name, updated.currency, timestamp, actorId, bookId)
       .run();
     return updated;
   }
 
-  async deleteBook(bookId: string) {
+  async deleteBook(bookId: string, actorId = systemActorId) {
+    const timestamp = now();
     await this.db
-      .prepare("UPDATE books SET deleted_at = ?, updated_at = ? WHERE id = ?")
-      .bind(now(), now(), bookId)
+      .prepare("UPDATE books SET deleted_at = ?, deleted_by_user_id = ?, updated_at = ?, updated_by_user_id = ? WHERE id = ?")
+      .bind(timestamp, actorId, timestamp, actorId, bookId)
       .run();
   }
 
@@ -307,39 +289,43 @@ export class D1LedgerRepository {
     const result = await this.db
       .prepare(
         `SELECT bm.id,bm.book_id AS bookId,bm.user_id AS userId,u.name,bm.role,bm.joined_at AS joinedAt
-         FROM book_members bm JOIN users u ON u.id = bm.user_id WHERE bm.book_id = ? ORDER BY bm.joined_at`,
+         FROM book_members bm JOIN users u ON u.id = bm.user_id WHERE bm.book_id = ? AND bm.deleted_at IS NULL ORDER BY bm.joined_at`,
       )
       .bind(bookId)
       .all<Row>();
     return result.results.map(mapMember);
   }
 
-  async updateMemberRole(bookId: string, memberId: string, role: "admin" | "member") {
+  async updateMemberRole(bookId: string, memberId: string, role: "admin" | "member", actorId = systemActorId) {
     const row = await this.db
       .prepare(
         `SELECT bm.id,bm.book_id AS bookId,bm.user_id AS userId,u.name,bm.role,bm.joined_at AS joinedAt
-         FROM book_members bm JOIN users u ON u.id = bm.user_id WHERE bm.id = ? AND bm.book_id = ?`,
+         FROM book_members bm JOIN users u ON u.id = bm.user_id WHERE bm.id = ? AND bm.book_id = ? AND bm.deleted_at IS NULL`,
       )
       .bind(memberId, bookId)
       .first<Row>();
     if (!row || row.role === "creator") return null;
     await this.db
-      .prepare("UPDATE book_members SET role = ?, updated_at = ? WHERE id = ?")
-      .bind(role, now(), memberId)
+      .prepare("UPDATE book_members SET role = ?, updated_at = ?, updated_by_user_id = ? WHERE id = ?")
+      .bind(role, now(), actorId, memberId)
       .run();
     return mapMember({ ...row, role });
   }
 
-  async removeMember(bookId: string, memberId: string) {
+  async removeMember(bookId: string, memberId: string, actorId = systemActorId) {
     const row = await this.db
       .prepare(
         `SELECT bm.id,bm.book_id AS bookId,bm.user_id AS userId,u.name,bm.role,bm.joined_at AS joinedAt
-         FROM book_members bm JOIN users u ON u.id = bm.user_id WHERE bm.id = ? AND bm.book_id = ?`,
+         FROM book_members bm JOIN users u ON u.id = bm.user_id WHERE bm.id = ? AND bm.book_id = ? AND bm.deleted_at IS NULL`,
       )
       .bind(memberId, bookId)
       .first<Row>();
     if (!row || row.role === "creator") return null;
-    await this.db.prepare("DELETE FROM book_members WHERE id = ? AND book_id = ?").bind(memberId, bookId).run();
+    const timestamp = now();
+    await this.db
+      .prepare("UPDATE book_members SET deleted_at=?,deleted_by_user_id=?,updated_at=?,updated_by_user_id=? WHERE id = ? AND book_id = ?")
+      .bind(timestamp, actorId, timestamp, actorId, memberId, bookId)
+      .run();
     return mapMember(row);
   }
 
@@ -347,21 +333,25 @@ export class D1LedgerRepository {
     const row = await this.db
       .prepare(
         `SELECT bm.id,bm.book_id AS bookId,bm.user_id AS userId,u.name,bm.role,bm.joined_at AS joinedAt
-         FROM book_members bm JOIN users u ON u.id = bm.user_id WHERE bm.user_id = ? AND bm.book_id = ?`,
+         FROM book_members bm JOIN users u ON u.id = bm.user_id WHERE bm.user_id = ? AND bm.book_id = ? AND bm.deleted_at IS NULL`,
       )
       .bind(userId, bookId)
       .first<Row>();
     if (!row || row.role === "creator") return null;
-    await this.db.prepare("DELETE FROM book_members WHERE user_id = ? AND book_id = ?").bind(userId, bookId).run();
+    const timestamp = now();
+    await this.db
+      .prepare("UPDATE book_members SET deleted_at=?,deleted_by_user_id=?,updated_at=?,updated_by_user_id=? WHERE user_id = ? AND book_id = ?")
+      .bind(timestamp, userId, timestamp, userId, userId, bookId)
+      .run();
     return mapMember(row);
   }
 
   private async mapTransaction(row: Row): Promise<Transaction> {
     const [tags, items] = await this.db.batch([
-      this.db.prepare("SELECT tag_id AS id FROM transaction_tags WHERE transaction_id = ?").bind(row.id),
+      this.db.prepare("SELECT tag_id AS id FROM transaction_tags WHERE transaction_id = ? AND deleted_at IS NULL").bind(row.id),
       this.db
         .prepare(
-          "SELECT id,name,amount_cents / 100.0 AS amount,category_id AS categoryId,note FROM transaction_items WHERE transaction_id = ? ORDER BY created_at",
+          "SELECT id,name,amount_cents / 100.0 AS amount,category_id AS categoryId,note FROM transaction_items WHERE transaction_id = ? AND deleted_at IS NULL ORDER BY created_at",
         )
         .bind(row.id),
     ]);
@@ -416,7 +406,7 @@ export class D1LedgerRepository {
     const statements: D1PreparedStatement[] = [
       this.db
         .prepare(
-          "INSERT INTO transactions (id,book_id,type,amount_cents,category_id,account_id,member_id,created_by_user_id,note,occurred_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+          "INSERT INTO transactions (id,book_id,type,amount_cents,category_id,account_id,member_id,created_by_user_id,updated_by_user_id,note,occurred_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         )
         .bind(
           transaction.id,
@@ -427,6 +417,7 @@ export class D1LedgerRepository {
           null,
           transaction.memberId ?? null,
           userId,
+          userId,
           transaction.note ?? null,
           transaction.occurredAt,
           timestamp,
@@ -436,14 +427,14 @@ export class D1LedgerRepository {
     for (const tagId of transaction.tagIds)
       statements.push(
         this.db
-          .prepare("INSERT INTO transaction_tags (transaction_id,tag_id) VALUES (?,?)")
-          .bind(transaction.id, tagId),
+          .prepare("INSERT INTO transaction_tags (transaction_id,tag_id,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?)")
+          .bind(transaction.id, tagId, userId, userId, timestamp, timestamp),
       );
     for (const item of transaction.items)
       statements.push(
         this.db
           .prepare(
-            "INSERT INTO transaction_items (id,transaction_id,name,amount_cents,category_id,note,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
+            "INSERT INTO transaction_items (id,transaction_id,name,amount_cents,category_id,note,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
           )
           .bind(
             item.id,
@@ -452,6 +443,8 @@ export class D1LedgerRepository {
             Math.round(item.amount * 100),
             item.categoryId ?? null,
             item.note ?? null,
+            userId,
+            userId,
             timestamp,
             timestamp,
           ),
@@ -463,6 +456,7 @@ export class D1LedgerRepository {
   async updateTransaction(
     transactionId: string,
     input: Omit<Transaction, "id" | "bookId" | "createdByUserId">,
+    actorId = systemActorId,
   ) {
     const current = await this.getTransaction(transactionId);
     if (!current) return null;
@@ -473,12 +467,12 @@ export class D1LedgerRepository {
       id: current.id,
       bookId: current.bookId,
       createdByUserId: current.createdByUserId,
-      items: input.items.map((item) => ({ ...item, id: item.id || id("item") })),
+      items: input.items.map((item) => ({ ...item, id: id("item") })),
     };
     const statements: D1PreparedStatement[] = [
       this.db
         .prepare(
-          "UPDATE transactions SET type=?,amount_cents=?,category_id=?,account_id=?,member_id=?,note=?,occurred_at=?,updated_at=? WHERE id=?",
+          "UPDATE transactions SET type=?,amount_cents=?,category_id=?,account_id=?,member_id=?,note=?,occurred_at=?,updated_at=?,updated_by_user_id=? WHERE id=?",
         )
         .bind(
           transaction.type,
@@ -489,22 +483,27 @@ export class D1LedgerRepository {
           transaction.note ?? null,
           transaction.occurredAt,
           timestamp,
+          actorId,
           transactionId,
         ),
-      this.db.prepare("DELETE FROM transaction_tags WHERE transaction_id = ?").bind(transactionId),
-      this.db.prepare("DELETE FROM transaction_items WHERE transaction_id = ?").bind(transactionId),
+      this.db
+        .prepare("UPDATE transaction_tags SET deleted_at=?,deleted_by_user_id=?,updated_at=?,updated_by_user_id=? WHERE transaction_id = ? AND deleted_at IS NULL")
+        .bind(timestamp, actorId, timestamp, actorId, transactionId),
+      this.db
+        .prepare("UPDATE transaction_items SET deleted_at=?,deleted_by_user_id=?,updated_at=?,updated_by_user_id=? WHERE transaction_id = ? AND deleted_at IS NULL")
+        .bind(timestamp, actorId, timestamp, actorId, transactionId),
     ];
     for (const tagId of transaction.tagIds)
       statements.push(
         this.db
-          .prepare("INSERT INTO transaction_tags (transaction_id,tag_id) VALUES (?,?)")
-          .bind(transactionId, tagId),
+          .prepare("INSERT INTO transaction_tags (transaction_id,tag_id,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?)")
+          .bind(transactionId, tagId, actorId, actorId, timestamp, timestamp),
       );
     for (const item of transaction.items)
       statements.push(
         this.db
           .prepare(
-            "INSERT INTO transaction_items (id,transaction_id,name,amount_cents,category_id,note,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
+            "INSERT INTO transaction_items (id,transaction_id,name,amount_cents,category_id,note,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
           )
           .bind(
             item.id,
@@ -513,6 +512,8 @@ export class D1LedgerRepository {
             Math.round(item.amount * 100),
             item.categoryId ?? null,
             item.note ?? null,
+            actorId,
+            actorId,
             timestamp,
             timestamp,
           ),
@@ -521,10 +522,11 @@ export class D1LedgerRepository {
     return transaction;
   }
 
-  async deleteTransaction(transactionId: string) {
+  async deleteTransaction(transactionId: string, actorId = systemActorId) {
+    const timestamp = now();
     await this.db
-      .prepare("UPDATE transactions SET deleted_at = ?, updated_at = ? WHERE id = ?")
-      .bind(now(), now(), transactionId)
+      .prepare("UPDATE transactions SET deleted_at = ?, deleted_by_user_id = ?, updated_at = ?, updated_by_user_id = ? WHERE id = ?")
+      .bind(timestamp, actorId, timestamp, actorId, transactionId)
       .run();
   }
 
@@ -538,7 +540,7 @@ export class D1LedgerRepository {
         ? "id,book_id AS bookId,name,type,icon,sort_order AS sortOrder"
         : "id,book_id AS bookId,name,color";
     const result = await this.db
-      .prepare(`SELECT ${columns} FROM ${this.tableFor(kind)} WHERE book_id = ? ORDER BY created_at`)
+      .prepare(`SELECT ${columns} FROM ${this.tableFor(kind)} WHERE book_id = ? AND deleted_at IS NULL ORDER BY created_at`)
       .bind(bookId)
       .all<Row>();
     return result.results.map(mapSimple);
@@ -548,7 +550,7 @@ export class D1LedgerRepository {
     if (!name) return null;
     const row = await this.db
       .prepare(
-        "SELECT id,book_id AS bookId,name,type,icon,sort_order AS sortOrder FROM categories WHERE book_id = ? AND name = ? LIMIT 1",
+        "SELECT id,book_id AS bookId,name,type,icon,sort_order AS sortOrder FROM categories WHERE book_id = ? AND name = ? AND deleted_at IS NULL LIMIT 1",
       )
       .bind(bookId, name)
       .first<Row>();
@@ -607,7 +609,7 @@ export class D1LedgerRepository {
       values.push(filters.categoryId);
     }
     if (filters.categoryName) {
-      clauses.push("category_id IN (SELECT id FROM categories WHERE book_id = ? AND name = ?)");
+      clauses.push("category_id IN (SELECT id FROM categories WHERE book_id = ? AND name = ? AND deleted_at IS NULL)");
       values.push(bookId, filters.categoryName);
     }
     if (filters.q) {
@@ -616,6 +618,7 @@ export class D1LedgerRepository {
         `(note LIKE ? ESCAPE '\\' OR EXISTS (
           SELECT 1 FROM transaction_items
           WHERE transaction_items.transaction_id = transactions.id
+            AND transaction_items.deleted_at IS NULL
             AND (name LIKE ? ESCAPE '\\' OR note LIKE ? ESCAPE '\\')
         ))`,
       );
@@ -637,7 +640,7 @@ export class D1LedgerRepository {
   async findMember(bookId: string, userId: string) {
     const row = await this.db
       .prepare(
-        "SELECT id,book_id AS bookId,user_id AS userId FROM book_members WHERE book_id = ? AND user_id = ?",
+        "SELECT id,book_id AS bookId,user_id AS userId FROM book_members WHERE book_id = ? AND user_id = ? AND deleted_at IS NULL",
       )
       .bind(bookId, userId)
       .first<Row>();
@@ -650,19 +653,19 @@ export class D1LedgerRepository {
         ? "id,book_id AS bookId,name,type,icon,sort_order AS sortOrder"
         : "id,book_id AS bookId,name,color";
     const result = await this.db
-      .prepare(`SELECT ${columns} FROM ${this.tableFor(kind)} WHERE id = ?`)
+      .prepare(`SELECT ${columns} FROM ${this.tableFor(kind)} WHERE id = ? AND deleted_at IS NULL`)
       .bind(entityId)
       .first<Row>();
     return result ? mapSimple(result) : null;
   }
 
-  async createSimple(kind: "categories" | "tags", bookId: string, data: Omit<SimpleEntity, "id" | "bookId">) {
+  async createSimple(kind: "categories" | "tags", bookId: string, data: Omit<SimpleEntity, "id" | "bookId">, actorId = systemActorId) {
     const timestamp = now();
     const entity: SimpleEntity = { ...data, id: id(kind.slice(0, -1)), bookId };
     if (kind === "categories")
       await this.db
         .prepare(
-          "INSERT INTO categories (id,book_id,name,type,icon,sort_order,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
+          "INSERT INTO categories (id,book_id,name,type,icon,sort_order,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
         )
         .bind(
           entity.id,
@@ -671,14 +674,16 @@ export class D1LedgerRepository {
           entity.type,
           entity.icon,
           entity.sortOrder ?? 0,
+          actorId,
+          actorId,
           timestamp,
           timestamp,
         )
         .run();
     else if (kind === "tags")
       await this.db
-        .prepare("INSERT INTO tags (id,book_id,name,color,created_at,updated_at) VALUES (?,?,?,?,?,?)")
-        .bind(entity.id, bookId, entity.name, entity.color, timestamp, timestamp)
+        .prepare("INSERT INTO tags (id,book_id,name,color,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)")
+        .bind(entity.id, bookId, entity.name, entity.color, actorId, actorId, timestamp, timestamp)
         .run();
     return entity;
   }
@@ -687,34 +692,44 @@ export class D1LedgerRepository {
     kind: "categories" | "tags",
     entityId: string,
     data: Omit<SimpleEntity, "id" | "bookId">,
+    actorId = systemActorId,
   ) {
     const current = await this.getSimple(kind, entityId);
     if (!current) return null;
     const entity = { ...current, ...data };
     if (kind === "categories")
       await this.db
-        .prepare("UPDATE categories SET name=?,type=?,icon=?,sort_order=?,updated_at=? WHERE id=?")
-        .bind(entity.name, entity.type, entity.icon, entity.sortOrder ?? 0, now(), entityId)
+        .prepare("UPDATE categories SET name=?,type=?,icon=?,sort_order=?,updated_at=?,updated_by_user_id=? WHERE id=?")
+        .bind(entity.name, entity.type, entity.icon, entity.sortOrder ?? 0, now(), actorId, entityId)
         .run();
     else if (kind === "tags")
       await this.db
-        .prepare("UPDATE tags SET name=?,color=?,updated_at=? WHERE id=?")
-        .bind(entity.name, entity.color, now(), entityId)
+        .prepare("UPDATE tags SET name=?,color=?,updated_at=?,updated_by_user_id=? WHERE id=?")
+        .bind(entity.name, entity.color, now(), actorId, entityId)
         .run();
     return entity;
   }
 
-  async deleteSimple(kind: "categories" | "tags", entityId: string) {
-    await this.db
-      .prepare(`DELETE FROM ${this.tableFor(kind)} WHERE id = ?`)
-      .bind(entityId)
-      .run();
+  async deleteSimple(kind: "categories" | "tags", entityId: string, actorId = systemActorId) {
+    const timestamp = now();
+    if (kind === "categories") {
+      await this.db.batch([
+        this.db.prepare("UPDATE transactions SET category_id=NULL, updated_at=?, updated_by_user_id=? WHERE category_id=?").bind(timestamp, actorId, entityId),
+        this.db.prepare("UPDATE transaction_items SET category_id=NULL, updated_at=?, updated_by_user_id=? WHERE category_id=?").bind(timestamp, actorId, entityId),
+        this.db.prepare("UPDATE categories SET deleted_at=?,deleted_by_user_id=?,updated_at=?,updated_by_user_id=? WHERE id=?").bind(timestamp, actorId, timestamp, actorId, entityId),
+      ]);
+      return;
+    }
+    await this.db.batch([
+      this.db.prepare("UPDATE transaction_tags SET deleted_at=?,deleted_by_user_id=?,updated_at=?,updated_by_user_id=? WHERE tag_id=? AND deleted_at IS NULL").bind(timestamp, actorId, timestamp, actorId, entityId),
+      this.db.prepare("UPDATE tags SET deleted_at=?,deleted_by_user_id=?,updated_at=?,updated_by_user_id=? WHERE id=?").bind(timestamp, actorId, timestamp, actorId, entityId),
+    ]);
   }
 
   async listInvitations(bookId: string) {
     const result = await this.db
       .prepare(
-        "SELECT id,book_id AS bookId,inviter_user_id AS inviterUserId,invitee_email AS inviteeEmail,invitee_phone AS inviteePhone,invitee_user_id AS inviteeUserId,role,status,expires_at AS expiresAt,last_reminded_at AS lastRemindedAt FROM invitations WHERE book_id=? ORDER BY created_at DESC",
+        "SELECT id,book_id AS bookId,inviter_user_id AS inviterUserId,invitee_email AS inviteeEmail,invitee_phone AS inviteePhone,invitee_user_id AS inviteeUserId,role,status,expires_at AS expiresAt,last_reminded_at AS lastRemindedAt FROM invitations WHERE book_id=? AND deleted_at IS NULL ORDER BY created_at DESC",
       )
       .bind(bookId)
       .all<Row>();
@@ -728,7 +743,7 @@ export class D1LedgerRepository {
       .first<{ email: string | null; phone: string | null }>();
     const result = await this.db
       .prepare(
-        "SELECT id,book_id AS bookId,inviter_user_id AS inviterUserId,invitee_email AS inviteeEmail,invitee_phone AS inviteePhone,invitee_user_id AS inviteeUserId,role,status,expires_at AS expiresAt,last_reminded_at AS lastRemindedAt FROM invitations WHERE invitee_user_id=? OR (invitee_email IS NOT NULL AND invitee_email=?) OR (invitee_phone IS NOT NULL AND invitee_phone=?) ORDER BY created_at DESC",
+        "SELECT id,book_id AS bookId,inviter_user_id AS inviterUserId,invitee_email AS inviteeEmail,invitee_phone AS inviteePhone,invitee_user_id AS inviteeUserId,role,status,expires_at AS expiresAt,last_reminded_at AS lastRemindedAt FROM invitations WHERE deleted_at IS NULL AND (invitee_user_id=? OR (invitee_email IS NOT NULL AND invitee_email=?) OR (invitee_phone IS NOT NULL AND invitee_phone=?)) ORDER BY created_at DESC",
       )
       .bind(userId, user?.email ?? "", user?.phone ?? "")
       .all<Row>();
@@ -738,7 +753,7 @@ export class D1LedgerRepository {
   async getInvitation(invitationId: string) {
     const row = await this.db
       .prepare(
-        "SELECT id,book_id AS bookId,inviter_user_id AS inviterUserId,invitee_email AS inviteeEmail,invitee_phone AS inviteePhone,invitee_user_id AS inviteeUserId,role,status,expires_at AS expiresAt,last_reminded_at AS lastRemindedAt FROM invitations WHERE id=?",
+        "SELECT id,book_id AS bookId,inviter_user_id AS inviterUserId,invitee_email AS inviteeEmail,invitee_phone AS inviteePhone,invitee_user_id AS inviteeUserId,role,status,expires_at AS expiresAt,last_reminded_at AS lastRemindedAt FROM invitations WHERE id=? AND deleted_at IS NULL",
       )
       .bind(invitationId)
       .first<Row>();
@@ -755,7 +770,7 @@ export class D1LedgerRepository {
     };
     await this.db
       .prepare(
-        "INSERT INTO invitations (id,book_id,inviter_user_id,invitee_email,invitee_phone,invitee_user_id,role,status,expires_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO invitations (id,book_id,inviter_user_id,invitee_email,invitee_phone,invitee_user_id,role,status,expires_at,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
       )
       .bind(
         invitation.id,
@@ -763,10 +778,12 @@ export class D1LedgerRepository {
         invitation.inviterUserId,
         invitation.inviteeEmail ?? null,
         invitation.inviteePhone ?? null,
-        null,
+        invitation.inviteeUserId ?? null,
         invitation.role,
         invitation.status,
         invitation.expiresAt,
+        invitation.inviterUserId,
+        invitation.inviterUserId,
         timestamp,
         timestamp,
       )
@@ -774,41 +791,43 @@ export class D1LedgerRepository {
     return invitation;
   }
 
-  async findPendingInvitation(bookId: string, email?: string, phone?: string) {
+  async findPendingInvitation(bookId: string, email?: string, phone?: string, userId?: string) {
     return this.db
       .prepare(
-        "SELECT id,book_id AS bookId,inviter_user_id AS inviterUserId,invitee_email AS inviteeEmail,invitee_phone AS inviteePhone,invitee_user_id AS inviteeUserId,role,status,expires_at AS expiresAt,last_reminded_at AS lastRemindedAt FROM invitations WHERE book_id=? AND status='pending' AND ((? != '' AND invitee_email=?) OR (? != '' AND invitee_phone=?)) LIMIT 1",
+        "SELECT id,book_id AS bookId,inviter_user_id AS inviterUserId,invitee_email AS inviteeEmail,invitee_phone AS inviteePhone,invitee_user_id AS inviteeUserId,role,status,expires_at AS expiresAt,last_reminded_at AS lastRemindedAt FROM invitations WHERE book_id=? AND status='pending' AND deleted_at IS NULL AND ((? != '' AND invitee_email=?) OR (? != '' AND invitee_phone=?) OR (? != '' AND invitee_user_id=?)) LIMIT 1",
       )
-      .bind(bookId, email ?? "", email ?? "", phone ?? "", phone ?? "")
+      .bind(bookId, email ?? "", email ?? "", phone ?? "", phone ?? "", userId ?? "", userId ?? "")
       .first<Row>()
       .then((row) => (row ? mapInvitation(row) : null));
   }
   async updateInvitation(
     invitationId: string,
     fields: Partial<Pick<Invitation, "status" | "inviteeUserId" | "lastRemindedAt">>,
+    actorId = systemActorId,
   ) {
     const invitation = await this.getInvitation(invitationId);
     if (!invitation) return null;
     const changed = { ...invitation, ...fields };
     await this.db
-      .prepare("UPDATE invitations SET status=?,invitee_user_id=?,last_reminded_at=?,updated_at=? WHERE id=?")
+      .prepare("UPDATE invitations SET status=?,invitee_user_id=?,last_reminded_at=?,updated_at=?,updated_by_user_id=? WHERE id=?")
       .bind(
         changed.status,
         changed.inviteeUserId ?? null,
         changed.lastRemindedAt ?? null,
         now(),
+        actorId,
         invitationId,
       )
       .run();
     return changed;
   }
-  async addMember(bookId: string, userId: string, role: "admin" | "member") {
+  async addMember(bookId: string, userId: string, role: "admin" | "member", actorId = systemActorId) {
     const timestamp = now();
     await this.db
       .prepare(
-        "INSERT OR IGNORE INTO book_members (id,book_id,user_id,role,joined_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
+        "INSERT OR IGNORE INTO book_members (id,book_id,user_id,role,joined_at,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
       )
-      .bind(id("member"), bookId, userId, role, timestamp, timestamp, timestamp)
+      .bind(id("member"), bookId, userId, role, timestamp, actorId, actorId, timestamp, timestamp)
       .run();
   }
 
@@ -829,7 +848,7 @@ export class D1LedgerRepository {
     };
     await this.db
       .prepare(
-        "INSERT INTO import_jobs (id,book_id,user_id,file_name,file_type,r2_key,status,auto_confirm,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO import_jobs (id,book_id,user_id,file_name,file_type,r2_key,status,auto_confirm,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
       )
       .bind(
         job.id,
@@ -840,40 +859,58 @@ export class D1LedgerRepository {
         job.r2Key,
         job.status,
         job.autoConfirm ? 1 : 0,
+        job.userId,
+        job.userId,
         timestamp,
         timestamp,
       )
       .run();
     return job;
   }
-  async listImportJobs(bookId: string) {
+  async cleanupExpiredImportJobs() {
+    const timestamp = now();
+    await this.db
+      .prepare("UPDATE import_jobs SET deleted_at=?,deleted_by_user_id=?,updated_at=?,updated_by_user_id=? WHERE deleted_at IS NULL AND created_at < ?")
+      .bind(timestamp, systemActorId, timestamp, systemActorId, importJobCutoff())
+      .run();
+  }
+  async listImportJobs(bookId: string, input: { status?: ImportJobStatusFilter } = {}) {
+    await this.cleanupExpiredImportJobs();
+    const clauses = ["book_id=?", "deleted_at IS NULL", "created_at >= ?"];
+    const values: unknown[] = [bookId, importJobCutoff()];
+    const status = input.status ?? "all";
+    if (status === "processing") clauses.push("status NOT IN ('completed','pending_confirmation','failed','cancelled')");
+    if (status === "success") clauses.push("status IN ('completed','pending_confirmation')");
+    if (status === "failed") clauses.push("status = 'failed'");
     const result = await this.db
-      .prepare(`SELECT ${importJobColumns} FROM import_jobs WHERE book_id=? ORDER BY created_at DESC`)
-      .bind(bookId)
+      .prepare(`SELECT ${importJobColumns} FROM import_jobs WHERE ${clauses.join(" AND ")} ORDER BY created_at DESC`)
+      .bind(...values)
       .all<Row>();
     return result.results.map(mapImportJob);
   }
   async listImportJobsForUser(userId: string) {
+    await this.cleanupExpiredImportJobs();
     const result = await this.db
-      .prepare(`SELECT ${importJobColumns} FROM import_jobs WHERE user_id=? ORDER BY created_at DESC`)
-      .bind(userId)
+      .prepare(`SELECT ${importJobColumns} FROM import_jobs WHERE user_id=? AND deleted_at IS NULL AND created_at >= ? ORDER BY created_at DESC`)
+      .bind(userId, importJobCutoff())
       .all<Row>();
     return result.results.map(mapImportJob);
   }
   async getImportJob(jobId: string) {
     const row = await this.db
-      .prepare(`SELECT ${importJobColumns} FROM import_jobs WHERE id=?`)
+      .prepare(`SELECT ${importJobColumns} FROM import_jobs WHERE id=? AND deleted_at IS NULL`)
       .bind(jobId)
       .first<Row>();
     return row ? mapImportJob(row) : null;
   }
   async updateImportJob(jobId: string, status: string, errorMessage?: string) {
     const terminal = ["completed", "pending_confirmation", "failed", "cancelled"].includes(status) ? 1 : 0;
+    const timestamp = now();
     await this.db
       .prepare(
-        "UPDATE import_jobs SET status=?,error_message=?,cancelable=CASE WHEN ? THEN 0 ELSE cancelable END,retryable=CASE WHEN ? THEN 0 ELSE retryable END,updated_at=? WHERE id=?",
+        "UPDATE import_jobs SET status=?,error_message=?,cancelable=CASE WHEN ? THEN 0 ELSE cancelable END,retryable=CASE WHEN ? THEN 0 ELSE retryable END,updated_at=?,updated_by_user_id=? WHERE id=?",
       )
-      .bind(status, errorMessage ?? null, terminal, terminal, now(), jobId)
+      .bind(status, errorMessage ?? null, terminal, terminal, timestamp, systemActorId, jobId)
       .run();
     return this.getImportJob(jobId);
   }
@@ -1066,6 +1103,8 @@ export class D1LedgerRepository {
       warnings: string[];
     }>,
   ) {
+    const job = await this.getImportJob(jobId);
+    const actorId = job?.userId ?? systemActorId;
     const timestamp = now();
     const records: ImportedRecord[] = suggestions.map((suggestedTransaction) => ({
       id: id("import_record"),
@@ -1079,7 +1118,7 @@ export class D1LedgerRepository {
       records.map((record) =>
         this.db
           .prepare(
-            "INSERT INTO imported_records (id,import_job_id,raw_data,suggested_transaction,status,confidence,warnings,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO imported_records (id,import_job_id,raw_data,suggested_transaction,status,confidence,warnings,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
           )
           .bind(
             record.id,
@@ -1089,6 +1128,8 @@ export class D1LedgerRepository {
             record.status,
             Math.round(record.confidence * 100),
             JSON.stringify(record.warnings),
+            actorId,
+            actorId,
             timestamp,
             timestamp,
           ),
@@ -1099,7 +1140,7 @@ export class D1LedgerRepository {
   async listImportedRecords(jobId: string) {
     const result = await this.db
       .prepare(
-        "SELECT id,import_job_id AS importJobId,suggested_transaction AS suggestedTransaction,status,confidence,warnings FROM imported_records WHERE import_job_id=? ORDER BY created_at",
+        "SELECT id,import_job_id AS importJobId,suggested_transaction AS suggestedTransaction,status,confidence,warnings FROM imported_records WHERE import_job_id=? AND deleted_at IS NULL ORDER BY created_at",
       )
       .bind(jobId)
       .all<Row>();
@@ -1108,7 +1149,7 @@ export class D1LedgerRepository {
   async getImportedRecord(recordId: string) {
     const row = await this.db
       .prepare(
-        "SELECT id,import_job_id AS importJobId,suggested_transaction AS suggestedTransaction,status,confidence,warnings FROM imported_records WHERE id=?",
+        "SELECT id,import_job_id AS importJobId,suggested_transaction AS suggestedTransaction,status,confidence,warnings FROM imported_records WHERE id=? AND deleted_at IS NULL",
       )
       .bind(recordId)
       .first<Row>();
@@ -1118,13 +1159,14 @@ export class D1LedgerRepository {
     recordId: string,
     suggestion: Record<string, unknown>,
     status?: ImportedRecord["status"],
+    actorId = systemActorId,
   ) {
     const record = await this.getImportedRecord(recordId);
     if (!record) return null;
     const updated = { ...record, suggestedTransaction: suggestion, status: status ?? record.status };
     await this.db
-      .prepare("UPDATE imported_records SET suggested_transaction=?,status=?,updated_at=? WHERE id=?")
-      .bind(JSON.stringify(updated.suggestedTransaction), updated.status, now(), recordId)
+      .prepare("UPDATE imported_records SET suggested_transaction=?,status=?,updated_at=?,updated_by_user_id=? WHERE id=?")
+      .bind(JSON.stringify(updated.suggestedTransaction), updated.status, now(), actorId, recordId)
       .run();
     return updated;
   }
@@ -1150,7 +1192,7 @@ export class D1LedgerRepository {
     };
     await this.db
       .prepare(
-        "INSERT INTO ai_confirmations (id,user_id,book_id,action,status,payload,expires_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO ai_confirmations (id,user_id,book_id,action,status,payload,expires_at,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
       )
       .bind(
         confirmation.id,
@@ -1160,6 +1202,8 @@ export class D1LedgerRepository {
         confirmation.status,
         JSON.stringify(confirmation.payload),
         confirmation.expiresAt,
+        confirmation.userId,
+        confirmation.userId,
         timestamp,
         timestamp,
       )
@@ -1169,7 +1213,7 @@ export class D1LedgerRepository {
 
   async getAiConfirmation(userId: string, confirmationId: string) {
     const row = await this.db
-      .prepare(`SELECT ${aiConfirmationColumns} FROM ai_confirmations WHERE id=? AND user_id=?`)
+      .prepare(`SELECT ${aiConfirmationColumns} FROM ai_confirmations WHERE id=? AND user_id=? AND deleted_at IS NULL`)
       .bind(confirmationId, userId)
       .first<Row>();
     return row ? mapAiConfirmation(row) : null;
@@ -1178,7 +1222,7 @@ export class D1LedgerRepository {
   async findPendingAiInviteConfirmation(bookId: string, email?: string, phone?: string) {
     const rows = await this.db
       .prepare(
-        `SELECT ${aiConfirmationColumns} FROM ai_confirmations WHERE book_id=? AND action='invite-member' AND status='pending' ORDER BY created_at DESC LIMIT 20`,
+        `SELECT ${aiConfirmationColumns} FROM ai_confirmations WHERE book_id=? AND action='invite-member' AND status='pending' AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 20`,
       )
       .bind(bookId)
       .all<Row>();
@@ -1199,11 +1243,12 @@ export class D1LedgerRepository {
       confirmedAt?: string | null;
       cancelledAt?: string | null;
     },
+    actorId = systemActorId,
   ) {
     const timestamp = now();
     await this.db
       .prepare(
-        "UPDATE ai_confirmations SET status=?,result=?,confirmed_at=?,cancelled_at=?,updated_at=? WHERE id=?",
+        "UPDATE ai_confirmations SET status=?,result=?,confirmed_at=?,cancelled_at=?,updated_at=?,updated_by_user_id=? WHERE id=?",
       )
       .bind(
         fields.status,
@@ -1211,124 +1256,16 @@ export class D1LedgerRepository {
         fields.confirmedAt ?? null,
         fields.cancelledAt ?? null,
         timestamp,
+        actorId,
         confirmationId,
       )
       .run();
   }
 
-  async getAiActionAuditLog(idempotencyKey: string) {
-    const row = await this.db
-      .prepare(`SELECT ${aiActionAuditColumns} FROM ai_action_audit_logs WHERE idempotency_key=?`)
-      .bind(idempotencyKey)
-      .first<Row>();
-    return row ? mapAiActionAuditLog(row) : null;
-  }
-
-  async createAiActionAuditLog(input: {
-    userId: string;
-    bookId?: string;
-    action: string;
-    targetType?: string;
-    targetId?: string;
-    idempotencyKey: string;
-    status: "success" | "error";
-    payload: Record<string, unknown>;
-    result?: Record<string, unknown>;
-    errorMessage?: string;
-  }) {
+  async createAiSession(userId: string, bookId: string | undefined, title: string) {
     const timestamp = now();
-    const log: AiActionAuditLog = {
-      id: id("ai_audit"),
-      userId: input.userId,
-      ...(input.bookId ? { bookId: input.bookId } : {}),
-      action: input.action,
-      ...(input.targetType ? { targetType: input.targetType } : {}),
-      ...(input.targetId ? { targetId: input.targetId } : {}),
-      idempotencyKey: input.idempotencyKey,
-      status: input.status,
-      payload: input.payload,
-      ...(input.result ? { result: input.result } : {}),
-      ...(input.errorMessage ? { errorMessage: input.errorMessage } : {}),
-      createdAt: timestamp,
-    };
-    await this.db
-      .prepare(
-        `INSERT OR IGNORE INTO ai_action_audit_logs
-         (id,user_id,book_id,action,target_type,target_id,idempotency_key,status,payload,result,error_message,created_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-      )
-      .bind(
-        log.id,
-        log.userId,
-        log.bookId ?? null,
-        log.action,
-        log.targetType ?? null,
-        log.targetId ?? null,
-        log.idempotencyKey,
-        log.status,
-        JSON.stringify(log.payload),
-        log.result ? JSON.stringify(log.result) : null,
-        log.errorMessage ?? null,
-        timestamp,
-      )
-      .run();
-    return (await this.getAiActionAuditLog(input.idempotencyKey)) ?? log;
-  }
-
-  async createAiTask(input: {
-    userId: string;
-    bookId?: string;
-    kind: string;
-    status: string;
-    sourceType?: string;
-    sourceId?: string;
-    payload?: Record<string, unknown>;
-  }) {
-    const timestamp = now();
-    const task: AiTask = {
-      id: id("ai_task"),
-      userId: input.userId,
-      ...(input.bookId ? { bookId: input.bookId } : {}),
-      kind: input.kind,
-      status: input.status,
-      ...(input.sourceType ? { sourceType: input.sourceType } : {}),
-      ...(input.sourceId ? { sourceId: input.sourceId } : {}),
-      ...(input.payload ? { payload: input.payload } : {}),
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
-    await this.db
-      .prepare(
-        "INSERT INTO ai_tasks (id,user_id,book_id,kind,status,source_type,source_id,payload,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-      )
-      .bind(
-        task.id,
-        task.userId,
-        task.bookId ?? null,
-        task.kind,
-        task.status,
-        task.sourceType ?? null,
-        task.sourceId ?? null,
-        task.payload ? JSON.stringify(task.payload) : null,
-        timestamp,
-        timestamp,
-      )
-      .run();
-    return task;
-  }
-
-  async listAiTasks(userId: string) {
-    const result = await this.db
-      .prepare(`SELECT ${aiTaskColumns} FROM ai_tasks WHERE user_id=? ORDER BY created_at DESC`)
-      .bind(userId)
-      .all<Row>();
-    return result.results.map(mapAiTask);
-  }
-
-  async createConversation(userId: string, bookId: string | undefined, title: string) {
-    const timestamp = now();
-    const conversation = {
-      id: id("conversation"),
+    const session = {
+      id: id("ai_session"),
       userId,
       bookId,
       title,
@@ -1337,44 +1274,149 @@ export class D1LedgerRepository {
     };
     await this.db
       .prepare(
-        "INSERT INTO ai_conversations (id,user_id,book_id,title,created_at,updated_at) VALUES (?,?,?,?,?,?)",
+        "INSERT INTO ai_sessions (id,user_id,book_id,title,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
       )
-      .bind(conversation.id, userId, bookId ?? null, title, timestamp, timestamp)
+      .bind(session.id, userId, bookId ?? null, title, userId, userId, timestamp, timestamp)
       .run();
-    return conversation;
+    return session;
   }
-  async appendMessage(conversationId: string, role: "user" | "assistant" | "system", content: string) {
+  async updateAiSession(userId: string, sessionId: string, input: { title?: string; bookId?: string | null }) {
+    const session = await this.getAiSession(userId, sessionId);
+    if (!session) return null;
+    const timestamp = now();
+    const title = input.title ?? session.title;
+    const bookId = input.bookId === undefined ? session.bookId : input.bookId;
+    await this.db
+      .prepare("UPDATE ai_sessions SET title=?,book_id=?,updated_at=?,updated_by_user_id=? WHERE id=? AND user_id=?")
+      .bind(title, bookId ?? null, timestamp, userId, sessionId, userId)
+      .run();
+    return this.getAiSession(userId, sessionId);
+  }
+  async deleteAiSession(userId: string, sessionId: string) {
+    const timestamp = now();
+    await this.db.batch([
+      this.db.prepare("UPDATE ai_confirmations SET deleted_at=?,deleted_by_user_id=?,updated_at=?,updated_by_user_id=? WHERE user_id=? AND tool_call_id IN (SELECT id FROM ai_tool_calls WHERE session_id=?) AND deleted_at IS NULL").bind(timestamp, userId, timestamp, userId, userId, sessionId),
+      this.db.prepare("UPDATE ai_tool_calls SET deleted_at=?,deleted_by_user_id=?,updated_at=?,updated_by_user_id=? WHERE session_id=? AND user_id=? AND deleted_at IS NULL").bind(timestamp, userId, timestamp, userId, sessionId, userId),
+      this.db.prepare("UPDATE ai_messages SET deleted_at=?,deleted_by_user_id=?,updated_at=?,updated_by_user_id=? WHERE session_id=? AND deleted_at IS NULL").bind(timestamp, userId, timestamp, userId, sessionId),
+      this.db.prepare("UPDATE ai_sessions SET deleted_at=?,deleted_by_user_id=?,updated_at=?,updated_by_user_id=? WHERE id=? AND user_id=?").bind(timestamp, userId, timestamp, userId, sessionId, userId),
+    ]);
+  }
+  async appendAiMessage(
+    sessionId: string,
+    actorId: string,
+    role: "user" | "assistant" | "system" | "tool",
+    content: string,
+    input?: { parts?: unknown[]; attachments?: unknown[] },
+  ) {
     const timestamp = now();
     await this.db.batch([
       this.db
-        .prepare("INSERT INTO ai_messages (id,conversation_id,role,content,created_at) VALUES (?,?,?,?,?)")
-        .bind(id("ai_message"), conversationId, role, content, timestamp),
-      this.db.prepare("UPDATE ai_conversations SET updated_at=? WHERE id=?").bind(timestamp, conversationId),
+        .prepare("INSERT INTO ai_messages (id,session_id,role,content,parts,attachments,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
+        .bind(
+          id("ai_message"),
+          sessionId,
+          role,
+          content,
+          input?.parts ? JSON.stringify(input.parts) : null,
+          input?.attachments ? JSON.stringify(input.attachments) : null,
+          actorId,
+          actorId,
+          timestamp,
+          timestamp,
+        ),
+      this.db.prepare("UPDATE ai_sessions SET updated_at=?,updated_by_user_id=? WHERE id=?").bind(timestamp, actorId, sessionId),
     ]);
   }
-  async listConversations(userId: string) {
+  async listAiSessions(userId: string) {
     const result = await this.db
       .prepare(
-        "SELECT id,user_id AS userId,book_id AS bookId,title,created_at AS createdAt,updated_at AS updatedAt FROM ai_conversations WHERE user_id=? ORDER BY updated_at DESC",
+        `SELECT ${aiSessionColumns} FROM ai_sessions WHERE user_id=? AND deleted_at IS NULL ORDER BY updated_at DESC`,
       )
       .bind(userId)
       .all<Row>();
     return result.results;
   }
-  async getConversation(userId: string, conversationId: string): Promise<(Row & { messages: Row[] }) | null> {
-    const conversation = await this.db
+  async getAiSession(userId: string, sessionId: string): Promise<(Row & { messages: Row[] }) | null> {
+    const session = await this.db
       .prepare(
-        "SELECT id,user_id AS userId,book_id AS bookId,title,created_at AS createdAt,updated_at AS updatedAt FROM ai_conversations WHERE id=? AND user_id=?",
+        `SELECT ${aiSessionColumns} FROM ai_sessions WHERE id=? AND user_id=? AND deleted_at IS NULL`,
       )
-      .bind(conversationId, userId)
+      .bind(sessionId, userId)
       .first<Row>();
-    if (!conversation) return null;
+    if (!session) return null;
     const messages = await this.db
       .prepare(
-        "SELECT id,role,content,metadata,created_at AS createdAt FROM ai_messages WHERE conversation_id=? ORDER BY created_at",
+        `SELECT ${aiMessageColumns} FROM ai_messages WHERE session_id=? AND deleted_at IS NULL ORDER BY created_at`,
       )
-      .bind(conversationId)
+      .bind(sessionId)
       .all<Row>();
-    return { ...conversation, messages: messages.results as Row[] };
+    return { ...session, messages: messages.results as Row[] };
+  }
+  async createAiToolCall(input: {
+    sessionId: string;
+    userId: string;
+    bookId?: string;
+    toolName: string;
+    status: string;
+    args: Record<string, unknown>;
+  }) {
+    const timestamp = now();
+    const toolCall = {
+      id: id("ai_tool_call"),
+      sessionId: input.sessionId,
+      userId: input.userId,
+      bookId: input.bookId,
+      toolName: input.toolName,
+      status: input.status,
+      args: input.args,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    await this.db
+      .prepare(
+        "INSERT INTO ai_tool_calls (id,session_id,user_id,book_id,tool_name,status,args,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+      )
+      .bind(
+        toolCall.id,
+        input.sessionId,
+        input.userId,
+        input.bookId ?? null,
+        input.toolName,
+        input.status,
+        JSON.stringify(input.args),
+        input.userId,
+        input.userId,
+        timestamp,
+        timestamp,
+      )
+      .run();
+    return toolCall;
+  }
+  async updateAiToolCall(
+    toolCallId: string,
+    input: { status: string; result?: Record<string, unknown>; errorMessage?: string },
+    actorId = systemActorId,
+  ) {
+    await this.db
+      .prepare("UPDATE ai_tool_calls SET status=?,result=?,error_message=?,updated_at=?,updated_by_user_id=? WHERE id=?")
+      .bind(input.status, input.result ? JSON.stringify(input.result) : null, input.errorMessage ?? null, now(), actorId, toolCallId)
+      .run();
+  }
+  async listRecentAiToolCalls(userId: string, sessionId: string, toolName?: string) {
+    const clauses = ["user_id=?", "session_id=?", "deleted_at IS NULL"];
+    const values: unknown[] = [userId, sessionId];
+    if (toolName) {
+      clauses.push("tool_name=?");
+      values.push(toolName);
+    }
+    const result = await this.db
+      .prepare(`SELECT ${aiToolCallColumns} FROM ai_tool_calls WHERE ${clauses.join(" AND ")} ORDER BY created_at DESC LIMIT 20`)
+      .bind(...values)
+      .all<Row>();
+    return result.results.map((row) => ({
+      ...row,
+      args: parseJson(row.args) ?? {},
+      result: parseJson(row.result) ?? undefined,
+    }));
   }
 }

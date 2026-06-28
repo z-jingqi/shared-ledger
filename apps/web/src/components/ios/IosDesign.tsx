@@ -1,4 +1,5 @@
-import type { ButtonHTMLAttributes, CSSProperties, FormEvent, ReactNode } from "react";
+import type { ButtonHTMLAttributes, CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CaretLeftIcon } from "@phosphor-icons/react";
 
 export type IosBookLike = { id?: string; name?: string; currency?: string; color?: string };
@@ -96,6 +97,27 @@ export function IosCard({ children, className = "", onClick }: { children: React
   return <section className={`ios-card ${className}`}>{children}</section>;
 }
 
+export function IosSkeleton({ className = "" }: { className?: string }) {
+  return <span className={`ios-skeleton ${className}`} aria-hidden="true" />;
+}
+
+export function IosListSkeleton({ rows = 3, className = "" }: { rows?: number; className?: string }) {
+  return (
+    <div className={`ios-list-skeleton ${className}`} aria-label="加载中" aria-busy="true">
+      {Array.from({ length: rows }).map((_, index) => (
+        <div className="ios-list-skeleton-row" key={index}>
+          <IosSkeleton className="ios-list-skeleton-leading" />
+          <span>
+            <IosSkeleton className="ios-list-skeleton-title" />
+            <IosSkeleton className="ios-list-skeleton-subtitle" />
+          </span>
+          <IosSkeleton className="ios-list-skeleton-amount" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function IosMetric({ label, value, tone = "neutral" }: { label: string; value: ReactNode; tone?: "neutral" | "income" | "accent" }) {
   return (
     <div className={`ios-metric ${tone}`}>
@@ -128,67 +150,148 @@ export function IosSheet({
   children,
   footer,
   onClose,
+  onBack,
   back,
+  left,
   right,
   full = false,
   className = "",
+  hideGrabber = false,
+  disableDragClose = false,
+  disableBackdropClose = false,
 }: {
   title: string;
   children: ReactNode;
   footer?: ReactNode;
   onClose: () => void;
+  onBack?: () => void;
   back?: boolean;
+  left?: ReactNode;
   right?: ReactNode;
   full?: boolean;
   className?: string;
+  hideGrabber?: boolean;
+  disableDragClose?: boolean;
+  disableBackdropClose?: boolean;
 }) {
+  const [closing, setClosing] = useState(false);
+  const [dragY, setDragY] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const draggingRef = useRef(false);
+  const startYRef = useRef(0);
+  const latestYRef = useRef(0);
+  const currentDragYRef = useRef(0);
+  const closeTimerRef = useRef<number | undefined>(undefined);
+
+  const closeAnimated = () => {
+    if (closing) return;
+    setClosing(true);
+    window.clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = window.setTimeout(onClose, 190);
+  };
+  const applyDrag = (clientY: number) => {
+    if (!draggingRef.current) return;
+    const delta = clientY - startYRef.current;
+    const next = Math.max(-28, latestYRef.current + delta);
+    currentDragYRef.current = next;
+    setDragY(next);
+  };
+  const finishDrag = () => {
+    if (!draggingRef.current) return;
+    draggingRef.current = false;
+    setDragging(false);
+    const threshold = Math.min(220, Math.max(120, window.innerHeight * 0.18));
+    if (currentDragYRef.current > threshold) closeAnimated();
+    else {
+      currentDragYRef.current = 0;
+      setDragY(0);
+    }
+  };
+  const beginDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    if (disableDragClose) return;
+    startYRef.current = event.clientY;
+    latestYRef.current = dragY;
+    currentDragYRef.current = dragY;
+    draggingRef.current = true;
+    setDragging(true);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const moveDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    applyDrag(event.clientY);
+  };
+  const endDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    finishDrag();
+  };
+
+  useEffect(() => {
+    if (!dragging) return undefined;
+    const handleMove = (event: globalThis.PointerEvent) => applyDrag(event.clientY);
+    const handleEnd = () => finishDrag();
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleEnd);
+    window.addEventListener("pointercancel", handleEnd);
+    window.addEventListener("blur", handleEnd);
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleEnd);
+      window.removeEventListener("pointercancel", handleEnd);
+      window.removeEventListener("blur", handleEnd);
+    };
+  }, [dragging]);
+
+  useEffect(() => () => window.clearTimeout(closeTimerRef.current), []);
+
   return (
-    <div className={`ios-overlay ${full ? "full" : ""}`}>
-      <button className="ios-overlay-backdrop" type="button" aria-label="关闭" onClick={onClose} />
-      <section className={`ios-sheet ${full ? "full" : ""} ${className}`} role="dialog" aria-modal="true" aria-label={title}>
+    <div className={`ios-overlay ${full ? "full" : ""}${closing ? " closing" : ""}`}>
+      <button
+        className="ios-overlay-backdrop"
+        type="button"
+        aria-label="弹层背景"
+        onClick={disableBackdropClose ? undefined : closeAnimated}
+      />
+      <section
+        className={`ios-sheet ${full ? "full" : ""} ${className}${closing ? " closing" : ""}${dragging ? " dragging" : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        style={{
+          transform: `translateY(${closing ? "110%" : `${dragY}px`})`,
+          marginBottom: !closing && dragY < 0 ? `${dragY}px` : undefined,
+        }}
+      >
         <header className={`ios-sheet-header ${full ? "full" : ""}`}>
-          {!full && <span className="ios-sheet-grabber" aria-hidden="true" />}
-          <button className="ios-sheet-back" type="button" onClick={back ? onClose : undefined} aria-label={back ? "返回" : undefined}>
-            {back ? "‹ 返回" : ""}
-          </button>
+          {!hideGrabber && (
+            <span
+              className="ios-sheet-grabber"
+              role="button"
+              aria-label="拖动关闭"
+              tabIndex={0}
+              onPointerDown={beginDrag}
+              onPointerMove={moveDrag}
+              onPointerUp={endDrag}
+              onPointerCancel={endDrag}
+            />
+          )}
+          {left ? (
+            <span className="ios-sheet-back ios-sheet-left-action">{left}</span>
+          ) : back ? (
+            <button className="ios-sheet-back" type="button" onClick={onBack ?? closeAnimated} aria-label="返回">
+              <CaretLeftIcon size={22} weight="bold" aria-hidden />
+            </button>
+          ) : (
+            <span className="ios-sheet-back" aria-hidden="true" />
+          )}
           <h2>{title}</h2>
-          <div className="ios-sheet-right">{right}</div>
+          <div className={`ios-sheet-right${right ? " with-action" : ""}`}>
+            {right ? <span className="ios-sheet-right-action">{right}</span> : null}
+          </div>
         </header>
         <div className="ios-sheet-body ios-scroll">{children}</div>
         {footer ? <footer className="ios-sheet-footer">{footer}</footer> : null}
       </section>
-    </div>
-  );
-}
-
-export function FullScreenPanel({
-  children,
-  onClose,
-  title,
-  subtitle,
-  icon,
-  className = "",
-}: {
-  children: ReactNode;
-  onClose: () => void;
-  title: string;
-  subtitle?: ReactNode;
-  icon?: ReactNode;
-  className?: string;
-}) {
-  return (
-    <div className={`ios-fullscreen ${className}`}>
-      <header className="ios-fullscreen-header">
-        <button type="button" aria-label="返回" onClick={onClose}>
-          <CaretLeftIcon size={24} weight="bold" />
-        </button>
-        {icon ? <span className="ios-fullscreen-icon">{icon}</span> : null}
-        <div>
-          <h1>{title}</h1>
-          {subtitle ? <p>{subtitle}</p> : null}
-        </div>
-      </header>
-      {children}
     </div>
   );
 }

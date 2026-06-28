@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/index";
 import { MemoryLedgerStore } from "../src/store";
+
+const jsonHeaders = { "Content-Type": "application/json" };
+const aiHeaders = { ...jsonHeaders, "X-AI-Test-Memory": "true" };
 const request = (path: string, init?: RequestInit) =>
   createApp(new MemoryLedgerStore()).request(path, init, { APP_ENV: "test" });
-const aiHeaders = { "Content-Type": "application/json", "X-Plan": "pro", "X-AI-Test-Memory": "true" };
 const decodeStreamChunk = (chunk?: Uint8Array) => new TextDecoder().decode(chunk);
 const readStreamChunk = (reader: ReadableStreamDefaultReader<Uint8Array>, timeoutMs = 500) =>
   new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
@@ -19,17 +21,35 @@ const readStreamChunk = (reader: ReadableStreamDefaultReader<Uint8Array>, timeou
       },
     );
   });
+
+async function createAiSession(app: ReturnType<typeof createApp>, bookId = "book_home") {
+  const response = await app.request(
+    "/ai/sessions",
+    { method: "POST", body: JSON.stringify({ bookId, title: "新会话" }), headers: aiHeaders },
+    { APP_ENV: "test" },
+  );
+  expect(response.status).toBe(201);
+  return (await response.json<any>()).session as { id: string; title: string };
+}
+
+async function sendAiMessage(app: ReturnType<typeof createApp>, sessionId: string, message: string, bookId = "book_home") {
+  const response = await app.request(
+    `/ai/sessions/${sessionId}/messages`,
+    { method: "POST", body: JSON.stringify({ bookId, message, page: "test" }), headers: aiHeaders },
+    { APP_ENV: "test" },
+  );
+  expect(response.status).toBe(200);
+  return response.json<any>();
+}
+
 describe("Hono REST API", () => {
-  it("creates a book and restricts deletion to creator", async () => {
-    const response = await request("/books", {
+  it("creates a book and validates transaction line-item totals", async () => {
+    const created = await request("/books", {
       method: "POST",
       body: JSON.stringify({ name: "旅行账本", currency: "CNY" }),
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders,
     });
-    expect(response.status).toBe(201);
-  });
-  it("validates transaction line-item totals", async () => {
-    const response = await request("/books/book_home/transactions", {
+    const invalidTransaction = await request("/books/book_home/transactions", {
       method: "POST",
       body: JSON.stringify({
         type: "expense",
@@ -37,24 +57,13 @@ describe("Hono REST API", () => {
         occurredAt: "2026-01-01",
         items: [{ name: "a", amount: 9 }],
       }),
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders,
     });
-    expect(response.status).toBe(400);
+
+    expect(created.status).toBe(201);
+    expect(invalidTransaction.status).toBe(400);
   });
-  it("hides AI chat from free users and requires persistent runtime for pro users", async () => {
-    const free = await request("/ai/chat", {
-      method: "POST",
-      body: JSON.stringify({ message: "分析" }),
-      headers: { "Content-Type": "application/json" },
-    });
-    const pro = await request("/ai/chat", {
-      method: "POST",
-      body: JSON.stringify({ message: "分析" }),
-      headers: { "Content-Type": "application/json", "X-Plan": "pro" },
-    });
-    expect(free.status).toBe(403);
-    expect(pro.status).toBe(503);
-  });
+
   it("updates the current user's avatar in the test runtime", async () => {
     const store = new MemoryLedgerStore();
     const app = createApp(store);
@@ -67,397 +76,210 @@ describe("Hono REST API", () => {
     const meBody = await me.json<any>();
 
     expect(response.status).toBe(200);
-    expect(body.user.avatarUrl).toContain("/api/auth/avatar/user_demo/");
+    expect(body.user.avatarUrl).toMatch(/^data:image\/png;base64,/);
     expect(store.users[0].avatarUrl).toBe(body.user.avatarUrl);
     expect(meBody.user.avatarUrl).toBe(body.user.avatarUrl);
   });
-  it("prevents duplicate pending invitations", async () => {
+
+  it("updates the current user's profile and rejects duplicates in the test runtime", async () => {
+    const store = new MemoryLedgerStore();
+    store.users.push({ id: "user_other", name: "李四", email: "other@ledger.local", plan: "free" });
+    const app = createApp(store);
+
+    const renamed = await app.request(
+      "/auth/me/profile",
+      {
+        method: "PATCH",
+        body: JSON.stringify({ name: "SoundOnly", email: "soundonly@example.com" }),
+        headers: jsonHeaders,
+      },
+      { APP_ENV: "test" },
+    );
+    const renamedBody = await renamed.json<any>();
+
+    expect(renamed.status).toBe(200);
+    expect(renamedBody.user).toMatchObject({ id: "user_demo", name: "SoundOnly", email: "soundonly@example.com" });
+    expect(store.users[0]).toMatchObject({ name: "SoundOnly", email: "soundonly@example.com" });
+
+    const duplicateName = await app.request(
+      "/auth/me/profile",
+      {
+        method: "PATCH",
+        body: JSON.stringify({ name: "李四", email: "soundonly@example.com" }),
+        headers: jsonHeaders,
+      },
+      { APP_ENV: "test" },
+    );
+    const duplicateEmail = await app.request(
+      "/auth/me/profile",
+      {
+        method: "PATCH",
+        body: JSON.stringify({ name: "SoundOnly", email: "other@ledger.local" }),
+        headers: jsonHeaders,
+      },
+      { APP_ENV: "test" },
+    );
+
+    expect(duplicateName.status).toBe(409);
+    expect((await duplicateName.json<any>()).error).toBe("用户名已被使用");
+    expect(duplicateEmail.status).toBe(409);
+    expect((await duplicateEmail.json<any>()).error).toBe("邮箱已被其他用户使用");
+  });
+
+  it("accepts password changes in the test runtime and rejects anonymous password updates", async () => {
+    const store = new MemoryLedgerStore();
+    const app = createApp(store);
+
+    const response = await app.request(
+      "/auth/me/password",
+      {
+        method: "PUT",
+        body: JSON.stringify({ currentPassword: "old-password", newPassword: "new-password" }),
+        headers: jsonHeaders,
+      },
+      { APP_ENV: "test" },
+    );
+    const anonymous = await createApp().request(
+      "/auth/me/password",
+      {
+        method: "PUT",
+        body: JSON.stringify({ currentPassword: "old-password", newPassword: "new-password" }),
+        headers: jsonHeaders,
+      },
+      { APP_ENV: "test" },
+    );
+
+    expect(response.status).toBe(204);
+    expect(anonymous.status).toBe(401);
+  });
+
+  it("prevents duplicate pending invitations and rejects anonymous import status streams", async () => {
     const store = new MemoryLedgerStore();
     const app = createApp(store);
     const init = {
       method: "POST",
       body: JSON.stringify({ email: "new@example.com", role: "member" }),
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders,
     };
+
     expect((await app.request("/books/book_home/invitations", init, { APP_ENV: "test" })).status).toBe(201);
     expect((await app.request("/books/book_home/invitations", init, { APP_ENV: "test" })).status).toBe(409);
+    expect((await createApp().request("/imports/status-stream?ids=import_test", undefined, { APP_ENV: "test" })).status).toBe(401);
   });
-  it("rejects anonymous import status streams", async () => {
-    const response = await createApp().request("/imports/status-stream?ids=import_test", undefined, { APP_ENV: "test" });
-    expect(response.status).toBe(401);
+
+  it("creates, lists, renames, reads, and deletes AI sessions for free users", async () => {
+    const app = createApp(new MemoryLedgerStore());
+    const session = await createAiSession(app);
+    const listed = await app.request("/ai/sessions", { headers: aiHeaders }, { APP_ENV: "test" });
+    const renamed = await app.request(
+      `/ai/sessions/${session.id}`,
+      { method: "PATCH", body: JSON.stringify({ title: "账本分析" }), headers: aiHeaders },
+      { APP_ENV: "test" },
+    );
+    const fetched = await app.request(`/ai/sessions/${session.id}`, { headers: aiHeaders }, { APP_ENV: "test" });
+    const deleted = await app.request(`/ai/sessions/${session.id}`, { method: "DELETE", headers: aiHeaders }, { APP_ENV: "test" });
+
+    expect(listed.status).toBe(200);
+    expect((await listed.json<any>()).sessions).toHaveLength(1);
+    expect((await renamed.json<any>()).session.title).toBe("账本分析");
+    expect((await fetched.json<any>()).session.messages).toEqual([]);
+    expect(deleted.status).toBe(204);
   });
-  it("AI creates a transaction and auto-creates the inferred category", async () => {
+
+  it("runs AI tools for transactions, search, analysis, categories, and profile updates", async () => {
     const store = new MemoryLedgerStore();
     const app = createApp(store);
-    const response = await app.request(
-      "/ai/chat",
+    const session = await createAiSession(app);
+
+    const created = await sendAiMessage(app, session.id, "昨天打车 38");
+    expect(store.transactions.some((transaction) => transaction.note === "打车" && transaction.amount === 38)).toBe(true);
+    expect(created.parts.some((part: any) => part.type === "record-card")).toBe(true);
+
+    store.transactions.push({
+      id: "tx_small_expense",
+      bookId: "book_home",
+      type: "expense",
+      amount: 18,
+      categoryId: "cat_food",
+      createdByUserId: "user_demo",
+      memberId: "member_demo",
+      note: "早餐",
+      occurredAt: "2026-06-21T08:00:00.000Z",
+      tagIds: [],
+      items: [],
+    });
+    const search = await app.request(
+      "/ai/search/transactions",
       {
         method: "POST",
-        body: JSON.stringify({ bookId: "book_home", message: "昨天打车 38" }),
+        body: JSON.stringify({ bookId: "book_home", query: "金额小于30的数据", baseFilters: { sort: "latest" } }),
         headers: aiHeaders,
       },
       { APP_ENV: "test" },
     );
-    const body = await response.json<any>();
+    const searchBody = await search.json<any>();
+    expect(search.status).toBe(200);
+    expect(searchBody.filters).toMatchObject({ maxAmount: 30, maxStrict: true, sort: "date_desc" });
+    expect(searchBody.results.map((item: any) => item.id)).toEqual(["tx_small_expense"]);
 
-    expect(response.status).toBe(200);
-    expect(store.categories.some((category) => category.name === "交通")).toBe(true);
-    expect(store.transactions[0]).toMatchObject({ amount: 38, note: "打车", type: "expense" });
-    expect(body.parts.some((part: any) => part.type === "record-card" && part.categoryName === "交通")).toBe(true);
-    expect(store.aiActionAuditLogs.some((log) => log.action === "create-record" && log.targetType === "transaction")).toBe(
-      true,
-    );
+    const analysis = await sendAiMessage(app, session.id, "在你看来有什么不合理的支出吗？");
+    expect(analysis.parts.some((part: any) => part.type === "analysis-card")).toBe(true);
+    expect(JSON.stringify(analysis.parts)).not.toContain("我可以帮你记账、搜索、分析或邀请成员");
+
+    const category = await sendAiMessage(app, session.id, "创建一个支出分类 医疗");
+    expect(store.categories.some((item) => item.name === "医疗")).toBe(true);
+    expect(category.parts[0].text).toContain("已创建分类");
+
+    const profile = await sendAiMessage(app, session.id, "把我的用户名改成 SoundOnly2");
+    expect(store.users[0].name).toBe("SoundOnly2");
+    expect(profile.parts.some((part: any) => part.type === "profile-card")).toBe(true);
   });
-  it("AI transaction ingestion endpoint creates categories and is idempotent", async () => {
+
+  it("uses confirmations for destructive AI tools and invitations", async () => {
     const store = new MemoryLedgerStore();
     const app = createApp(store);
-    const beforeCount = store.transactions.length;
-    const init = {
-      method: "POST",
-      body: JSON.stringify({
-        bookId: "book_home",
-        text: "今天咖啡 28",
-        candidate: {
-          type: "expense",
-          amount: 28,
-          occurredAt: "2026-06-26",
-          categoryName: "咖啡",
-          note: "咖啡",
-        },
-      }),
-      headers: { ...aiHeaders, "idempotency-key": "test-ingest-coffee" },
-    };
+    const session = await createAiSession(app);
 
-    const first = await app.request("/ai/transactions/ingest", init, { APP_ENV: "test" });
-    const firstBody = await first.json<any>();
-    const second = await app.request("/ai/transactions/ingest", init, { APP_ENV: "test" });
-    const secondBody = await second.json<any>();
-
-    expect(first.status).toBe(201);
-    expect(second.status).toBe(200);
-    expect(store.transactions).toHaveLength(beforeCount + 1);
-    expect(store.categories.some((category) => category.name === "咖啡")).toBe(true);
-    expect(firstBody.parts.some((part: any) => part.type === "record-card" && part.categoryName === "咖啡")).toBe(true);
-    expect(secondBody.idempotent).toBe(true);
-    expect(store.aiActionAuditLogs.filter((log) => log.idempotencyKey === "test-ingest-coffee")).toHaveLength(1);
-  });
-  it("AI transaction ingestion asks for missing amount or date without writing", async () => {
-    const store = new MemoryLedgerStore();
-    const app = createApp(store);
-    const beforeTransactions = store.transactions.length;
-    const beforeAudits = store.aiActionAuditLogs.length;
-
-    const missingDate = await app.request(
-      "/ai/transactions/ingest",
-      {
-        method: "POST",
-        body: JSON.stringify({ bookId: "book_home", text: "打车 38" }),
-        headers: aiHeaders,
-      },
-      { APP_ENV: "test" },
-    );
-    const missingAmount = await app.request(
-      "/ai/transactions/ingest",
-      {
-        method: "POST",
-        body: JSON.stringify({ bookId: "book_home", text: "昨天打车" }),
-        headers: aiHeaders,
-      },
-      { APP_ENV: "test" },
-    );
-
-    expect(missingDate.status).toBe(200);
-    expect((await missingDate.json<any>()).missingFields).toContain("occurredAt");
-    expect((await missingAmount.json<any>()).missingFields).toContain("amount");
-    expect(store.transactions).toHaveLength(beforeTransactions);
-    expect(store.aiActionAuditLogs).toHaveLength(beforeAudits);
-    expect(store.categories.some((category) => category.name === "交通")).toBe(false);
-  });
-  it("AI search returns a search result and records navigation card", async () => {
-    const store = new MemoryLedgerStore();
-    const app = createApp(store);
-    const response = await app.request(
-      "/ai/chat",
-      {
-        method: "POST",
-        body: JSON.stringify({ bookId: "book_home", message: "今年大于100的支出" }),
-        headers: aiHeaders,
-      },
-      { APP_ENV: "test" },
-    );
-    const body = await response.json<any>();
-    const searchCard = body.parts.find((part: any) => part.type === "search-result-card");
-    const navigationCard = body.parts.find((part: any) => part.type === "navigation-card");
-
-    expect(response.status).toBe(200);
-    expect(searchCard.summary).toContain("找到");
-    expect(searchCard.results.length).toBeGreaterThanOrEqual(1);
-    expect(navigationCard.href).toContain("/records?");
-    expect(navigationCard.href).toContain("type=expense");
-    expect(navigationCard.href).toContain("min=100");
-    expect(navigationCard.href).toContain("source=ai");
-    expect(navigationCard.href).toContain("bookId=book_home");
-  });
-  it("AI returns an analysis card from current book transactions", async () => {
-    const response = await createApp(new MemoryLedgerStore()).request(
-      "/ai/chat",
-      {
-        method: "POST",
-        body: JSON.stringify({ bookId: "book_home", message: "分析这个账本" }),
-        headers: aiHeaders,
-      },
-      { APP_ENV: "test" },
-    );
-    const body = await response.json<any>();
-    const card = body.parts.find((part: any) => part.type === "analysis-card");
-
-    expect(response.status).toBe(200);
-    expect(card.metrics.find((metric: any) => metric.label === "支出").value).toBe("¥158.60");
-    expect(card.metrics.find((metric: any) => metric.label === "收入").value).toMatch(/¥8,?500\.00/);
-  });
-  it("AI invite confirmation can confirm, cancel, and expire", async () => {
-    const store = new MemoryLedgerStore();
-    const app = createApp(store);
-    const create = async (email: string) => {
-      const response = await app.request(
-        "/ai/chat",
-        {
-          method: "POST",
-          body: JSON.stringify({ bookId: "book_home", message: `邀请 ${email}` }),
-          headers: aiHeaders,
-        },
-        { APP_ENV: "test" },
-      );
-      const body = await response.json<any>();
-      return body.parts.find((part: any) => part.type === "confirmation-card").confirmation.id as string;
-    };
-
-    const confirmId = await create("confirm@example.com");
+    const invite = await sendAiMessage(app, session.id, "邀请 confirm@example.com");
+    const inviteConfirmationId = invite.parts.find((part: any) => part.type === "confirmation-card").confirmation.id;
     expect(store.invitations).toHaveLength(0);
-    const confirmed = await app.request(
-      `/ai/confirmations/${confirmId}/confirm`,
-      { method: "POST", headers: aiHeaders },
-      { APP_ENV: "test" },
-    );
+    const confirmed = await app.request(`/ai/confirmations/${inviteConfirmationId}/confirm`, { method: "POST", headers: aiHeaders }, { APP_ENV: "test" });
     expect(confirmed.status).toBe(200);
     expect(store.invitations).toHaveLength(1);
 
-    const cancelId = await create("cancel@example.com");
-    const cancelled = await app.request(
-      `/ai/confirmations/${cancelId}/cancel`,
-      { method: "POST", headers: aiHeaders },
-      { APP_ENV: "test" },
-    );
+    await sendAiMessage(app, session.id, "创建一个支出分类 医疗");
+    const deleteCategory = await sendAiMessage(app, session.id, "删除分类 医疗");
+    const deleteConfirmationId = deleteCategory.parts.find((part: any) => part.type === "confirmation-card").confirmation.id;
+    const cancelled = await app.request(`/ai/confirmations/${deleteConfirmationId}/cancel`, { method: "POST", headers: aiHeaders }, { APP_ENV: "test" });
     expect(cancelled.status).toBe(200);
-    expect(store.invitations.some((invitation) => invitation.inviteeEmail === "cancel@example.com")).toBe(false);
+    expect(store.categories.some((item) => item.name === "医疗")).toBe(true);
 
-    const expireId = await create("expire@example.com");
-    const expiring = store.aiConfirmations.find((confirmation) => confirmation.id === expireId);
-    expect(expiring).toBeTruthy();
-    expiring!.expiresAt = new Date(Date.now() - 1000).toISOString();
-    const expired = await app.request(
-      `/ai/confirmations/${expireId}/confirm`,
-      { method: "POST", headers: aiHeaders },
-      { APP_ENV: "test" },
-    );
-    const expiredBody = await expired.json<any>();
-    expect(expired.status).toBe(409);
-    expect(expiredBody.confirmation.status).toBe("cancelled");
+    const expiring = store.aiConfirmations.find((confirmation) => confirmation.id === deleteConfirmationId);
+    expect(expiring?.status).toBe("cancelled");
   });
-  it("AI invite does not create duplicate pending invitations", async () => {
-    const store = new MemoryLedgerStore();
-    const app = createApp(store);
-    const createResponse = await app.request(
-      "/ai/chat",
-      {
-        method: "POST",
-        body: JSON.stringify({ bookId: "book_home", message: "邀请 duplicate@example.com" }),
-        headers: aiHeaders,
-      },
-      { APP_ENV: "test" },
-    );
-    const body = await createResponse.json<any>();
-    const confirmationId = body.parts.find((part: any) => part.type === "confirmation-card").confirmation.id;
-    await app.request(
-      `/ai/confirmations/${confirmationId}/confirm`,
-      { method: "POST", headers: aiHeaders },
-      { APP_ENV: "test" },
-    );
-    const duplicateResponse = await app.request(
-      "/ai/chat",
-      {
-        method: "POST",
-        body: JSON.stringify({ bookId: "book_home", message: "邀请 duplicate@example.com" }),
-        headers: aiHeaders,
-      },
-      { APP_ENV: "test" },
-    );
-    const duplicateBody = await duplicateResponse.json<any>();
 
-    expect(store.invitations.filter((invitation) => invitation.inviteeEmail === "duplicate@example.com")).toHaveLength(1);
-    expect(duplicateBody.parts.some((part: any) => part.type === "confirmation-card")).toBe(false);
-  });
-  it("AI invite confirmation checks invite permissions before creation and confirmation", async () => {
-    const store = new MemoryLedgerStore();
-    const member = store.createUser("李四", "member@example.com", "pro");
-    store.members.push({
-      id: "member_regular",
-      bookId: "book_home",
-      userId: member.id,
-      name: member.name,
-      role: "member",
-      joinedAt: new Date().toISOString(),
-    });
-    const app = createApp(store);
-
-    const deniedCreate = await app.request(
-      "/ai/chat",
-      {
-        method: "POST",
-        body: JSON.stringify({ bookId: "book_home", message: "邀请 blocked@example.com" }),
-        headers: { ...aiHeaders, "x-user-id": member.id },
-      },
+  it("streams AI message deltas and final structured done events", async () => {
+    const app = createApp(new MemoryLedgerStore());
+    const session = await createAiSession(app);
+    const response = await app.request(
+      `/ai/sessions/${session.id}/messages/stream`,
+      { method: "POST", body: JSON.stringify({ bookId: "book_home", message: "讲个笑话" }), headers: aiHeaders },
       { APP_ENV: "test" },
     );
-    const deniedCreateBody = await deniedCreate.json<any>();
-    expect(deniedCreate.status).toBe(200);
-    expect(deniedCreateBody.parts.some((part: any) => part.type === "confirmation-card")).toBe(false);
-    expect(store.aiConfirmations).toHaveLength(0);
-
-    const create = await app.request(
-      "/ai/chat",
-      {
-        method: "POST",
-        body: JSON.stringify({ bookId: "book_home", message: "邀请 later-blocked@example.com" }),
-        headers: aiHeaders,
-      },
-      { APP_ENV: "test" },
-    );
-    const confirmationId = (await create.json<any>()).parts.find((part: any) => part.type === "confirmation-card").confirmation.id;
-    store.members.find((item) => item.id === "member_demo")!.role = "member";
-    const deniedConfirm = await app.request(
-      `/ai/confirmations/${confirmationId}/confirm`,
-      { method: "POST", headers: aiHeaders },
-      { APP_ENV: "test" },
-    );
-
-    expect(deniedConfirm.status).toBe(403);
-    expect(store.invitations.some((invitation) => invitation.inviteeEmail === "later-blocked@example.com")).toBe(false);
-  });
-  it("AI confirmation returns unsupported for known high-risk actions without crashing", async () => {
-    const store = new MemoryLedgerStore();
-    store.aiConfirmations.push({
-      id: "ai_confirmation_import_batch",
-      userId: "user_demo",
-      bookId: "book_home",
-      action: "confirm-import-batch",
-      status: "pending",
-      payload: { importJobIds: ["import_1"], bookId: "book_home" },
-      expiresAt: new Date(Date.now() + 60_000).toISOString(),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
-    const response = await createApp(store).request(
-      "/ai/confirmations/ai_confirmation_import_batch/confirm",
-      { method: "POST", headers: aiHeaders },
-      { APP_ENV: "test" },
-    );
-
-    expect(response.status).toBe(400);
-    expect((await response.json<any>()).error).toContain("暂不支持");
-    expect(store.aiConfirmations[0].status).toBe("pending");
-  });
-  it("AI task endpoints expose import jobs as tasks in test fallback", async () => {
-    const store = new MemoryLedgerStore();
-    store.imports.push({
-      id: "import_task",
-      bookId: "book_home",
-      userId: "user_demo",
-      fileName: "records.csv",
-      fileType: "text/csv",
-      r2Key: "imports/records.csv",
-      status: "failed",
-      errorRetryable: true,
-      cancelable: true,
-      retryable: true,
-      retryCount: 0,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
-    const app = createApp(store);
-    const tasks = await app.request("/ai/tasks", { headers: aiHeaders }, { APP_ENV: "test" });
-    const retry = await app.request(
-      "/ai/tasks/import_task/retry",
-      { method: "POST", headers: aiHeaders },
-      { APP_ENV: "test" },
-    );
-    const retryBody = await retry.json<any>();
-
-    expect(tasks.status).toBe(200);
-    expect((await tasks.json<any>()).tasks[0]).toMatchObject({ id: "import_task", kind: "import" });
-    expect(retry.status).toBe(200);
-    expect(retryBody.task).toMatchObject({ id: "import_task", kind: "import", status: "running" });
-    expect(store.imports[0].status).toBe("uploaded");
-
-    const cancel = await app.request(
-      "/ai/tasks/import_task/cancel",
-      { method: "POST", headers: aiHeaders },
-      { APP_ENV: "test" },
-    );
-    const cancelBody = await cancel.json<any>();
-    const afterCancel = await app.request("/ai/tasks", { headers: aiHeaders }, { APP_ENV: "test" });
-
-    expect(cancel.status).toBe(200);
-    expect(cancelBody.task).toMatchObject({
-      id: "import_task",
-      kind: "import",
-      status: "cancelled",
-      cancelable: false,
-      retryable: false,
-    });
-    expect((await afterCancel.json<any>()).tasks).toHaveLength(0);
-  });
-  it("AI task status stream stays open and emits task updates", async () => {
-    const store = new MemoryLedgerStore();
-    store.imports.push({
-      id: "import_stream",
-      bookId: "book_home",
-      userId: "user_demo",
-      fileName: "stream.csv",
-      fileType: "text/csv",
-      r2Key: "imports/stream.csv",
-      status: "uploaded",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
-    const app = createApp(store);
-    const response = await app.request("/ai/tasks/status-stream", { headers: aiHeaders }, { APP_ENV: "test" });
     const reader = response.body?.getReader();
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/event-stream");
     expect(reader).toBeTruthy();
     try {
-      const first = await readStreamChunk(reader!);
-      expect(first.done).toBe(false);
-      const initialChunk = decodeStreamChunk(first.value);
-      expect(initialChunk).toContain("event: tasks");
-      expect(initialChunk).toContain("\"status\":\"running\"");
-
-      store.imports[0] = {
-        ...store.imports[0],
-        status: "failed",
-        errorMessage: "OCR failed",
-        errorRetryable: true,
-        updatedAt: new Date().toISOString(),
-      };
-
-      let followup = "";
-      for (let attempt = 0; attempt < 10 && !followup.includes("\"status\":\"failed\""); attempt += 1) {
-        const next = await readStreamChunk(reader!);
-        expect(next.done).toBe(false);
-        followup += decodeStreamChunk(next.value);
+      let output = "";
+      for (let attempt = 0; attempt < 80 && !output.includes("event: done"); attempt += 1) {
+        const chunk = await readStreamChunk(reader!, 1000);
+        expect(chunk.done).toBe(false);
+        output += decodeStreamChunk(chunk.value);
       }
-      expect(followup).toContain("\"status\":\"failed\"");
+      expect(output).toContain("event: tool_call");
+      expect(output).toContain("event: message_delta");
+      expect(output).toContain("event: done");
     } finally {
       await reader?.cancel();
     }

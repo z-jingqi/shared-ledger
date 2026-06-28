@@ -1,12 +1,15 @@
 import { ChartBarIcon, HouseIcon, ListBulletsIcon, UserCircleIcon } from "@phosphor-icons/react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, type Location } from "react-router-dom";
 import { toast } from "sonner";
 import {
   ImportFileUploadInput,
   type ImportFileUploadInputHandle,
 } from "../components/imports/ImportFileUploadInput";
 import { useAuth } from "../features/auth/AuthProvider";
+import { useInvitationBadge } from "../features/invitations/useInvitationBadge";
+import { AppSheetHost } from "../features/sheets/AppSheetHost";
+import { AppSheetProvider, useAppSheetActions } from "../features/sheets/SheetContext";
 import { useActiveBook } from "../hooks/useActiveBook";
 import { AddActionMenu } from "./AddActionMenu";
 
@@ -18,18 +21,30 @@ const tabs = [
 ] as const;
 
 export function AppFrame({ children }: { children: ReactNode }) {
+  return (
+    <AppSheetProvider>
+      <AppFrameInner>{children}</AppFrameInner>
+    </AppSheetProvider>
+  );
+}
+
+function AppFrameInner({ children }: { children: ReactNode }) {
   const location = useLocation();
-  const navigate = useNavigate();
   const { user } = useAuth();
   const { book } = useActiveBook();
+  const { openSheet } = useAppSheetActions();
+  const { unreadCount: invitationBadge } = useInvitationBadge(user?.id);
   const uploadInputRef = useRef<ImportFileUploadInputHandle>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const routeState = location.state as { backgroundLocation?: Location } | null;
+  const backgroundLocation = routeState?.backgroundLocation ?? location;
+  const shellPathname = backgroundLocation.pathname;
   const isAuthPage = ["/login", "/register"].includes(location.pathname);
   const isCreateBookPage = location.pathname === "/books/new";
-  const bottomNavTab = getBottomNavTab(location.pathname);
+  const bottomNavTab = getBottomNavTab(shellPathname);
   const showBottomNav = Boolean(
-    user && bottomNavTab && !isAuthPage && !isCreateBookPage && location.pathname !== "/ai",
+    user && bottomNavTab && !isAuthPage && !isCreateBookPage && shellPathname !== "/ai",
   );
   const bookQuery = book?.id ? `?bookId=${encodeURIComponent(book.id)}` : "";
 
@@ -43,7 +58,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
       return;
     }
     setAddMenuOpen(false);
-    navigate(`/records/new${bookQuery}`);
+    openSheet({ type: "record-form", initialType: "expense" });
   };
 
   const openUploadInput = () => {
@@ -69,7 +84,13 @@ export function AppFrame({ children }: { children: ReactNode }) {
             <span className="ios-bottom-nav-spacer" aria-hidden="true" />
             <div className="ios-bottom-nav-group">
               {tabs.slice(2).map((tab) => (
-                <BottomTab {...tab} active={bottomNavTab === tab.key} bookQuery={bookQuery} key={tab.key} />
+                <BottomTab
+                  {...tab}
+                  active={bottomNavTab === tab.key}
+                  badge={tab.key === "settings" ? invitationBadge : 0}
+                  bookQuery={bookQuery}
+                  key={tab.key}
+                />
               ))}
             </div>
           </nav>
@@ -77,7 +98,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
             ref={uploadInputRef}
             bookId={book?.id}
             onUploadingChange={setUploading}
-            onUploaded={() => navigate(`/records/imports${bookQuery}`, { state: { backgroundLocation: location } })}
+            onUploaded={() => openSheet({ type: "imports" })}
           />
           <AddActionMenu
             open={addMenuOpen}
@@ -88,6 +109,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
           />
         </>
       )}
+      <AppSheetHost bookId={book?.id} currency={book?.currency} />
     </main>
   );
 }
@@ -96,24 +118,30 @@ function BottomTab({
   to,
   label,
   active,
+  badge = 0,
   Icon,
   bookQuery,
 }: {
   to: string;
   label: string;
   active: boolean;
+  badge?: number;
   Icon: (props: { size?: number; weight?: "regular" | "fill"; "aria-hidden"?: boolean }) => ReactNode;
   bookQuery: string;
 }) {
   return (
     <Link className={`ios-bottom-tab${active ? " active" : ""}`} to={`${to}${bookQuery}`} aria-current={active ? "page" : undefined}>
-      <Icon size={24} weight={active ? "fill" : "regular"} aria-hidden />
+      <span className="ios-bottom-tab-icon">
+        <Icon size={24} weight={active ? "fill" : "regular"} aria-hidden />
+        {badge > 0 ? <em>{badge > 9 ? "9+" : badge}</em> : null}
+      </span>
       <span>{label}</span>
     </Link>
   );
 }
 
 function getBottomNavTab(pathname: string): "home" | "records" | "analysis" | "settings" | null {
+  if (pathname.startsWith("/books/manage") || /^\/books\/[^/]+\/settings/.test(pathname)) return "settings";
   if (pathname === "/" || pathname.startsWith("/home") || pathname.startsWith("/books/")) return "home";
   if (pathname.startsWith("/records") || pathname.startsWith("/imports")) return "records";
   if (pathname.startsWith("/analysis")) return "analysis";

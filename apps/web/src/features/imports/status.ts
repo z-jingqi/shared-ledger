@@ -5,6 +5,7 @@ export const terminalImportStatuses = new Set(["completed", "pending_confirmatio
 export type ImportJobStatus = {
   id: string;
   fileName: string;
+  fileType?: string;
   status: string;
   errorMessage?: string;
   errorCode?: string;
@@ -16,6 +17,8 @@ export type ImportJobStatus = {
   stage?: string;
   currentPage?: number;
   totalPages?: number;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export function watchImportJobs(

@@ -2,7 +2,7 @@ import { api } from "../../lib";
 
 export type AiTransactionSearchBaseFilters = {
   type?: "income" | "expense";
-  sort: "latest" | "amount_desc";
+  sort?: "date_desc" | "amount_desc";
 };
 
 export type AiTransactionSearchInput = {

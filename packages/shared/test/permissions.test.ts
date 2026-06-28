@@ -18,10 +18,10 @@ describe("permissions and transaction constraints", () => {
     expect(canManageMembers("creator")).toBe(true);
     expect(canManageMembers("member")).toBe(false);
   });
-  it("limits transaction mutation and AI access", () => {
+  it("limits transaction mutation and allows AI for all plans", () => {
     expect(canMutateTransaction("u1", "u1")).toBe(true);
     expect(canMutateTransaction("u2", "u1")).toBe(false);
-    expect(canUseAi("free")).toBe(false);
+    expect(canUseAi("free")).toBe(true);
     expect(canUseAi("pro")).toBe(true);
   });
   it("rejects line-item totals that do not match", () => {

@@ -8,9 +8,10 @@ import { createBookSchema } from "@shared-ledger/shared";
 import { Input, Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue, Textarea } from "@shared-ledger/ui";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
-import { Link, type NavigateFunction, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import { BookSwitcherSheet } from "../components/books/BookSwitcherSheet";
-import type { LedgerTransaction } from "../components/ledger/Transactions";
+import { IosTransactionRow, type LedgerTransaction } from "../components/ledger/Transactions";
 import {
   AiSparkButton,
   BookMark,
@@ -18,11 +19,13 @@ import {
   IosButton,
   IosCard,
   IosField,
+  IosListSkeleton,
   IosPage,
   IosScroll,
   IosTopBar,
   yuan,
 } from "../components/ios/IosDesign";
+import { useAppSheetActions } from "../features/sheets/SheetContext";
 import { useActiveBook, writeLastActiveBookId } from "../hooks/useActiveBook";
 import { useApi } from "../hooks/useApi";
 import { api } from "../lib";
@@ -41,11 +44,13 @@ type ImportJob = {
 type ImportResponse = { imports: ImportJob[] };
 
 export function BookHomePage() {
-  const navigate = useNavigate();
-  const { book, books, loading, error, setActiveBook } = useActiveBook();
+  const { book, books, loading, setActiveBook } = useActiveBook();
+  const { openSheet } = useAppSheetActions();
   const [bookSwitcherOpen, setBookSwitcherOpen] = useState(false);
-  const { data: txData } = useApi<TransactionResponse>(book ? `/books/${book.id}/transactions` : undefined);
+  const { data: txData, loading: transactionsLoading } = useApi<TransactionResponse>(book ? `/books/${book.id}/transactions` : undefined);
   const { data: imports } = useApi<ImportResponse>(book ? `/books/${book.id}/imports` : undefined);
+  const hasBook = Boolean(book?.id);
+  const displayBook = book ?? { id: "", name: "一起记", currency: "CNY" };
   const transactions = txData?.transactions ?? [];
   const monthTransactions = transactions.filter((item) => isSameMonth(item.occurredAt, new Date()));
   const todayTransactions = transactions.filter((item) => isSameDay(item.occurredAt, new Date()));
@@ -60,41 +65,44 @@ export function BookHomePage() {
     .sort((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime())
     .slice(0, 5);
 
-  if (loading) return <p className="muted auth-loading">正在读取账本…</p>;
-  if (error) return <p className="field-error">{error}</p>;
-  if (!book)
+  if (loading)
     return (
       <IosPage>
-        <IosTopBar title="一起记" action={<AiSparkButton onClick={() => navigate("/ai")} />} />
-        <div className="ios-empty">
-          <b>还没有账本</b>
-          <p>创建一个账本，开始记录共同生活里的收支。</p>
-          <Link className="ios-link-button" to="/books/new">
-            创建账本
-          </Link>
-        </div>
+        <IosScroll className="ios-main-tab-scroll">
+          <IosCard>
+            <IosListSkeleton rows={4} />
+          </IosCard>
+        </IosScroll>
       </IosPage>
     );
+  const openRecordForm = () => {
+    if (!hasBook) {
+      toast.error("请先创建或选择账本", { duration: 3000, closeButton: true });
+      return;
+    }
+    openSheet({ type: "record-form", initialType: "expense" });
+  };
 
   return (
     <IosPage className="ios-home">
       <IosTopBar
-        book={book}
-        onLedgerClick={() => setBookSwitcherOpen(true)}
-        action={<AiSparkButton onClick={() => navigate(`/ai?bookId=${book.id}`)} />}
+        book={hasBook ? book : undefined}
+        title={hasBook ? undefined : "一起记"}
+        onLedgerClick={hasBook ? () => setBookSwitcherOpen(true) : undefined}
+        action={<AiSparkButton onClick={() => openSheet({ type: "ai" })} />}
       />
       <IosScroll className="ios-home-scroll">
         <section className="ios-balance-hero">
           <span>6月净收支</span>
-          <strong>{yuan(income - expense, book.currency)}</strong>
+          <strong>{yuan(income - expense, displayBook.currency)}</strong>
           <div>
             <p>
               <small>收入</small>
-              <b>{yuan(income, book.currency)}</b>
+              <b>{yuan(income, displayBook.currency)}</b>
             </p>
             <p>
               <small>支出</small>
-              <b>{yuan(expense, book.currency)}</b>
+              <b>{yuan(expense, displayBook.currency)}</b>
             </p>
           </div>
         </section>
@@ -106,10 +114,10 @@ export function BookHomePage() {
           <div>
             <b>今日记账</b>
             <small>
-              {todayTransactions.length} 笔 · 支出 {yuan(todayExpense, book.currency)}
+              {todayTransactions.length} 笔 · 支出 {yuan(todayExpense, displayBook.currency)}
             </small>
           </div>
-          <Link to={`/records/new?bookId=${book.id}`}>继续记账</Link>
+          <button type="button" onClick={openRecordForm}>继续记账</button>
         </IosCard>
 
         {(processing.length > 0 || pending.length > 0 || failed.length > 0) && (
@@ -117,7 +125,7 @@ export function BookHomePage() {
             <h2>待处理</h2>
             <div className="ios-reminder-list">
               {processing.length > 0 && (
-                <Link className="ios-reminder-row" to={`/records/imports?bookId=${book.id}`}>
+                <button className="ios-reminder-row" type="button" onClick={() => openSheet({ type: "imports" })}>
                   <IconTile tint="#eaf1ff" color="#4c8dff">
                     {processing.length}
                   </IconTile>
@@ -126,20 +134,20 @@ export function BookHomePage() {
                     <small>{formatHomeImportProgress(processing)} — 点击查看进度</small>
                   </span>
                   <CaretRightIcon size={18} />
-                </Link>
+                </button>
               )}
               {pending.length > 0 && (
-                <Link className="ios-reminder-row" to={`/records/pending?bookId=${book.id}`}>
+                <button className="ios-reminder-row" type="button" onClick={() => openSheet({ type: "pending-imports" })}>
                   <IconTile>{pending.length}</IconTile>
                   <span>
                     <b>{pending.length} 条待确认记录</b>
                     <small>来自文件识别与 AI — 需你审核入账</small>
                   </span>
                   <CaretRightIcon size={18} />
-                </Link>
+                </button>
               )}
               {failed.length > 0 && (
-                <Link className="ios-reminder-row danger" to={`/records/imports?bookId=${book.id}`}>
+                <button className="ios-reminder-row danger" type="button" onClick={() => openSheet({ type: "imports" })}>
                   <IconTile tint="#fdeceb" color="#d74035">
                     {failed.length}
                   </IconTile>
@@ -148,7 +156,7 @@ export function BookHomePage() {
                     <small>查看失败原因或重试</small>
                   </span>
                   <CaretRightIcon size={18} />
-                </Link>
+                </button>
               )}
             </div>
           </section>
@@ -157,20 +165,29 @@ export function BookHomePage() {
         <section className="ios-section">
           <header>
             <h2>最近交易</h2>
-            <Link to={`/records?bookId=${book.id}`}>查看全部</Link>
+            {hasBook ? <Link to={`/records?bookId=${book!.id}`}>查看全部</Link> : <Link to="/books/new">创建账本</Link>}
           </header>
           <IosCard className="ios-transaction-card">
-            {recent.length ? (
-              recent.map((item) => <HomeTransactionRow transaction={item} book={book} key={item.id} />)
+            {hasBook && transactionsLoading ? (
+              <IosListSkeleton rows={3} />
+            ) : recent.length ? (
+              recent.map((item) => <IosTransactionRow transaction={item} currency={displayBook.currency} key={item.id} />)
             ) : (
               <div className="ios-transaction-empty" data-testid="recent-empty-state">
-                <p>还没有记录，记下第一笔吧。</p>
+                {hasBook ? (
+                  <p>还没有记录，记下第一笔吧。</p>
+                ) : (
+                  <>
+                    <b>还没有账本</b>
+                    <p>创建一个账本后就可以开始记账。</p>
+                  </>
+                )}
               </div>
             )}
           </IosCard>
         </section>
       </IosScroll>
-      {bookSwitcherOpen && (
+      {bookSwitcherOpen && book && (
         <BookSwitcherSheet
           books={books}
           currentBookId={book.id}
@@ -190,14 +207,14 @@ export function BooksPage() {
   const navigate = useNavigate();
   return (
     <IosPage>
-      <IosTopBar title="管理账本" back onBack={() => goBack(navigate, "/settings")} />
+      <IosTopBar title="管理账本" back onBack={() => navigate("/settings")} />
       <IosScroll className="ios-book-list-screen">
-        {loading && <p className="muted">正在读取账本…</p>}
+        {loading && <IosListSkeleton rows={3} />}
         {error && <p className="field-error">{error}</p>}
         {!loading && !error && books.length === 0 && (
           <div className="ios-empty">
             <b>当前还没有账本</b>
-            <Link className="ios-link-button" to="/books/new">创建一个</Link>
+            <Link className="ios-link-button" to="/books/new?source=manage">创建一个</Link>
           </div>
         )}
         {books.map((item) => {
@@ -206,7 +223,7 @@ export function BooksPage() {
             <button
               className={`ios-book-list-row${active ? " active" : ""}`}
               type="button"
-              onClick={() => navigate(`/books/${item.id}/settings`)}
+              onClick={() => navigate(`/books/${item.id}/settings`, { replace: false })}
               key={item.id}
             >
               <BookMark book={item} size={44} />
@@ -218,8 +235,7 @@ export function BooksPage() {
             </button>
           );
         })}
-        <Link className="ios-create-book-row" to="/books/new">
-          <span>+</span>
+        <Link className="ios-create-book-row ios-button primary" to="/books/new?source=manage">
           <b>创建新账本</b>
         </Link>
       </IosScroll>
@@ -229,6 +245,9 @@ export function BooksPage() {
 
 export function CreateBookPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const source = new URLSearchParams(location.search).get("source");
+  const fromManage = source === "manage";
   const form = useForm({
     resolver: zodResolver(createBookSchema),
     defaultValues: { name: "", currency: "CNY", note: "" },
@@ -238,15 +257,19 @@ export function CreateBookPage() {
   const submit = form.handleSubmit(async (value) => {
     try {
       const result = await api<{ book: Book }>("/books", { method: "POST", body: JSON.stringify(value) });
-      writeLastActiveBookId(result.book.id);
-      navigate(`/home?bookId=${result.book.id}`);
+      if (fromManage) {
+        navigate("/books/manage");
+      } else {
+        writeLastActiveBookId(result.book.id);
+        navigate(`/home?bookId=${result.book.id}`);
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "创建失败");
     }
   });
   return (
     <form className="ios-create-book-screen" onSubmit={submit}>
-      <IosTopBar title="创建账本" back onBack={() => goBack(navigate, "/home")} />
+      <IosTopBar title="创建账本" back onBack={() => navigate(fromManage ? "/books/manage" : "/home")} />
       <IosScroll className="ios-create-book-scroll">
         <section className="ios-create-book-hero">
           <IconTile>
@@ -285,33 +308,6 @@ export function CreateBookPage() {
   );
 }
 
-function HomeTransactionRow({ transaction, book }: { transaction: LedgerTransaction; book: Book }) {
-  const amount = `${transaction.type === "income" ? "+" : "-"}${yuan(transaction.amount, book.currency)}`;
-  return (
-    <Link className="ios-home-transaction" to={`/records/${transaction.id}`}>
-      <IconTile tint={`${categoryColor(transaction)}1a`} color={categoryColor(transaction)}>
-        {categoryLabel(transaction)[0] ?? "记"}
-      </IconTile>
-      <span>
-        <b>{transaction.note || "未命名记录"}</b>
-        <small>{categoryLabel(transaction)} · {new Date(transaction.occurredAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</small>
-      </span>
-      <strong className={transaction.type}>{amount}</strong>
-    </Link>
-  );
-}
-
-function categoryLabel(transaction: LedgerTransaction) {
-  return transaction.categoryName ?? transaction.categoryId ?? (transaction.type === "income" ? "收入" : "支出");
-}
-
-function categoryColor(transaction: LedgerTransaction) {
-  if (transaction.type === "income") return "#1f9d57";
-  if (transaction.note?.includes("餐") || transaction.note?.includes("饭")) return "#ff7a45";
-  if (transaction.note?.includes("车") || transaction.note?.includes("地铁")) return "#4c8dff";
-  return "#ff5d8f";
-}
-
 function sum(transactions: LedgerTransaction[], type: "income" | "expense") {
   return transactions.filter((item) => item.type === type).reduce((total, item) => total + item.amount, 0);
 }
@@ -341,9 +337,4 @@ function formatHomeImportProgress(jobs: ImportJob[]) {
     return jobs.length > 1 ? `${jobs.length} 个文件，OCR ${first.progress}%` : `OCR ${first.progress}%`;
   }
   return `${jobs.length} 个文件正在识别`;
-}
-
-function goBack(navigate: NavigateFunction, fallback: string) {
-  if (window.history.length > 1) navigate(-1);
-  else navigate(fallback);
 }

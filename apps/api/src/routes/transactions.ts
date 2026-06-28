@@ -56,7 +56,7 @@ export function registerTransactionRoutes(app: Hono<{ Bindings: Env }>, store?: 
     const candidate = createTransactionSchema.safeParse({ ...transaction, ...body });
     if (!candidate.success) return jsonError(context, "记录数据不合法，检查金额与明细总额");
     const updated = repository
-      ? await repository.updateTransaction(transaction.id, candidate.data as any)
+      ? await repository.updateTransaction(transaction.id, candidate.data as any, user.id)
       : Object.assign(transaction, candidate.data);
     return context.json({ transaction: updated });
   });
@@ -71,7 +71,7 @@ export function registerTransactionRoutes(app: Hono<{ Bindings: Env }>, store?: 
     if (!user) return jsonError(context, "请先登录", 401);
     if (!canMutateTransaction(user.id, transaction.createdByUserId))
       return jsonError(context, "只能删除自己创建的记录", 403);
-    if (repository) await repository.deleteTransaction(transaction.id);
+    if (repository) await repository.deleteTransaction(transaction.id, user.id);
     else if (store) store.transactions = store.transactions.filter((item) => item.id !== transaction.id);
     return context.body(null, 204);
   });

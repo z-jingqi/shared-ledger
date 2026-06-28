@@ -1,15 +1,16 @@
 import { CaretRightIcon, SparkleIcon, WarningCircleIcon } from "@phosphor-icons/react";
 import { useState } from "react";
-import { Link } from "react-router-dom";
 import { BookSwitcherSheet } from "../components/books/BookSwitcherSheet";
 import type { LedgerTransaction } from "../components/ledger/Transactions";
 import { IosMetric, IosPage, IosScroll, IosTopBar, yuan } from "../components/ios/IosDesign";
+import { useAppSheetActions } from "../features/sheets/SheetContext";
 import { useActiveBook } from "../hooks/useActiveBook";
 import { useApi } from "../hooks/useApi";
 
 type Range = "month" | "quarter" | "year";
 
 export function AnalysisPage() {
+  const { openSheet } = useAppSheetActions();
   const { book, books, setActiveBook } = useActiveBook();
   const [range, setRange] = useState<Range>("month");
   const [bookSwitcherOpen, setBookSwitcherOpen] = useState(false);
@@ -55,14 +56,14 @@ export function AnalysisPage() {
         ))}
       </div>
       <IosScroll className="ios-analysis-scroll">
-        <Link className="ios-analysis-ai-action" to={`/ai?bookId=${book.id}`}>
+        <button className="ios-analysis-ai-action" type="button" onClick={() => openSheet({ type: "ai" })}>
           <SparkleIcon size={18} weight="fill" />
           <span>
             <b>用 AI 做更多分析</b>
             <small>按分类、成员和异常继续拆解</small>
           </span>
           <CaretRightIcon size={17} />
-        </Link>
+        </button>
 
         <div className="ios-analysis-summary">
           <IosMetric label="收入" value={yuan(income, book?.currency)} tone="income" />

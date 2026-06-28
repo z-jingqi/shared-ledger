@@ -1,6 +1,8 @@
 import {
-  CaretRightIcon,
+  CheckCircleIcon,
   EnvelopeSimpleIcon,
+  ClockCounterClockwiseIcon,
+  ProhibitIcon,
   PhoneIcon,
   ShieldCheckIcon,
   UserCircleIcon,
@@ -9,7 +11,7 @@ import {
   XIcon,
 } from "@phosphor-icons/react";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useLocation, useNavigate, useSearchParams, type Location } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
   IconTile,
@@ -17,11 +19,11 @@ import {
   IosCard,
   IosDialog,
   IosField,
-  IosPage,
-  IosSegment,
   IosSheet,
 } from "../components/ios/IosDesign";
 import { useAuth } from "../features/auth/AuthProvider";
+import { useInvitationBadge } from "../features/invitations/useInvitationBadge";
+import { markInvitationIdsViewed } from "../features/invitations/viewed";
 import { useActiveBook } from "../hooks/useActiveBook";
 import { useApi } from "../hooks/useApi";
 import { api } from "../lib";
@@ -31,22 +33,47 @@ type SentInvitation = {
   id: string;
   inviteeEmail?: string;
   inviteePhone?: string;
+  inviteeUserId?: string;
   role: "admin" | "member";
   status: string;
 };
+type MemberSheetView = { type: "list" } | { type: "invite" } | { type: "role"; memberId: string } | { type: "sent" };
 
 export function MembersPage() {
+  return <Navigate to="/settings" replace />;
+}
+
+export function MembersSheet({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
-  const location = useLocation();
   const { user } = useAuth();
   const { book } = useActiveBook();
   const { data, reload } = useApi<{ members: Member[] }>(book ? `/books/${book.id}/members` : undefined);
-  const { data: sentInvitations } = useApi<{ invitations: SentInvitation[] }>(book ? `/books/${book.id}/invitations` : undefined);
+  const { data: sentInvitations, reload: reloadSentInvitations } = useApi<{ invitations: SentInvitation[] }>(book ? `/books/${book.id}/invitations` : undefined);
+  const {
+    pendingInvitations: receivedInvitations,
+    reload: reloadReceivedInvitations,
+    unreadCount,
+  } = useInvitationBadge(user?.id);
   const [removing, setRemoving] = useState<Member | "me" | undefined>();
-  const pendingInvitations = sentInvitations?.invitations.filter((item) => item.status === "pending") ?? [];
+  const [view, setView] = useState<MemberSheetView>({ type: "list" });
+  const pendingSentInvitations = sentInvitations?.invitations.filter((item) => item.status === "pending") ?? [];
   const myMember = data?.members.find((member) => member.userId === user?.id);
-  const modalState = modalLinkState(location);
-  const close = () => closeSheet(navigate, location, book ? `/settings?bookId=${book.id}` : "/settings");
+  const close = onClose;
+
+  useEffect(() => {
+    if (user?.id && receivedInvitations.length) markInvitationIdsViewed(user.id, receivedInvitations.map((item) => item.id));
+  }, [receivedInvitations.map((item) => item.id).join(","), user?.id]);
+
+  const handleReceivedInvitation = async (id: string, action: "accept" | "decline") => {
+    try {
+      await api(`/invitations/${id}/${action}`, { method: "POST" });
+      toast.success(action === "accept" ? "已加入账本" : "已拒绝邀请", { duration: 2600, closeButton: true });
+      await Promise.all([reload(), reloadReceivedInvitations()]);
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "操作失败", { duration: 3000, closeButton: true });
+    }
+  };
+
   const removeMember = async () => {
     if (!book || !removing) return;
     try {
@@ -64,16 +91,66 @@ export function MembersPage() {
       toast.error(cause instanceof Error ? cause.message : "操作失败", { duration: 3000, closeButton: true });
     }
   };
+  const handleSentInvitation = async (id: string, endpoint: "remind" | "revoke") => {
+    try {
+      await api(`/invitations/${id}/${endpoint}`, { method: "POST" });
+      toast.success(endpoint === "remind" ? "提醒已发送" : "邀请已撤回", { duration: 2600, closeButton: true });
+      await reloadSentInvitations();
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "操作失败", { duration: 3000, closeButton: true });
+    }
+  };
+
+  if (view.type === "invite") {
+    return (
+      <InviteMemberSheet
+        onClose={close}
+        onBack={() => setView({ type: "list" })}
+        onSent={() => {
+          void reloadSentInvitations();
+          setView({ type: "list" });
+        }}
+      />
+    );
+  }
+  if (view.type === "role") {
+    return (
+      <MemberRoleSheet
+        memberId={view.memberId}
+        onClose={close}
+        onBack={() => setView({ type: "list" })}
+        onSaved={() => {
+          void reload();
+          setView({ type: "list" });
+        }}
+      />
+    );
+  }
+  if (view.type === "sent") {
+    return (
+      <SentInvitationsSheet
+        invitations={sentInvitations?.invitations ?? []}
+        onBack={() => setView({ type: "list" })}
+        onClose={close}
+        onAction={handleSentInvitation}
+      />
+    );
+  }
 
   return (
-    <IosPage>
+    <>
       <IosSheet
         title="成员与邀请"
         onClose={close}
         right={
-          <Link className="ios-sheet-text-action" to={`/members/invite?bookId=${book?.id ?? ""}`} state={modalState}>
-            + 邀请
-          </Link>
+          <button className="ios-sheet-text-action" type="button" onClick={() => setView({ type: "sent" })}>
+            已发邀请
+          </button>
+        }
+        footer={
+          <button className="ios-button primary ios-member-invite-footer" type="button" onClick={() => setView({ type: "invite" })}>
+            邀请成员
+          </button>
         }
       >
         <div className="ios-members-sheet">
@@ -85,7 +162,34 @@ export function MembersPage() {
               <b>{data?.members.length ?? 0} 位成员</b>
               <small>{book?.name ?? "当前账本"} · 共同维护</small>
             </span>
+            {unreadCount > 0 ? <em className="ios-row-badge">{unreadCount}</em> : null}
           </IosCard>
+          {receivedInvitations.length > 0 && (
+            <section>
+              <h3>收到的邀请</h3>
+              <IosCard className="ios-member-list">
+                {receivedInvitations.map((invitation) => (
+                  <div className="ios-member-row ios-received-invite-row" key={invitation.id}>
+                    <IconTile tint="#fff0e8" color="#ff681c">
+                      <EnvelopeSimpleIcon size={18} weight="bold" />
+                    </IconTile>
+                    <span>
+                      <b>账本邀请</b>
+                      <small>将加入为 {roleLabel(invitation.role)} · 等待处理</small>
+                    </span>
+                    <div className="ios-inline-actions">
+                      <button type="button" onClick={() => void handleReceivedInvitation(invitation.id, "accept")}>
+                        接受
+                      </button>
+                      <button className="danger" type="button" onClick={() => void handleReceivedInvitation(invitation.id, "decline")}>
+                        拒绝
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </IosCard>
+            </section>
+          )}
           <section>
             <h3>成员 · {data?.members.length ?? 0}</h3>
             <IosCard className="ios-member-list">
@@ -94,8 +198,7 @@ export function MembersPage() {
                   member={member}
                   isMe={member.userId === user?.id}
                   canRemove={member.role !== "creator" && myMember?.role !== "member"}
-                  bookId={book?.id}
-                  state={modalState}
+                  onRole={() => setView({ type: "role", memberId: member.id })}
                   onRemove={() => setRemoving(member)}
                   key={member.id}
                 />
@@ -106,25 +209,26 @@ export function MembersPage() {
           <section>
             <h3>邀请记录</h3>
             <IosCard className="ios-member-list">
-              {pendingInvitations.map((invitation) => (
+              {pendingSentInvitations.map((invitation) => (
                 <div className="ios-member-row" key={invitation.id}>
                   <IconTile tint="#f0f2f5" color="#5b6473">
-                    {invitation.inviteeEmail ? <EnvelopeSimpleIcon size={18} weight="bold" /> : <PhoneIcon size={18} weight="bold" />}
+                    {invitation.inviteePhone ? <PhoneIcon size={18} weight="bold" /> : <EnvelopeSimpleIcon size={18} weight="bold" />}
                   </IconTile>
                   <span>
-                    <b>{invitation.inviteeEmail || invitation.inviteePhone || "邀请链接"}</b>
+                    <b>{invitation.inviteeEmail || invitation.inviteePhone || invitation.inviteeUserId || "指定用户"}</b>
                     <small>将加入为 {roleLabel(invitation.role)} · 待接受</small>
                   </span>
-                  <Link to="/invitations/sent">管理</Link>
+                  <button type="button" onClick={() => setView({ type: "sent" })}>管理</button>
                 </div>
               ))}
-              {!pendingInvitations.length && <p className="muted">暂无待接受邀请</p>}
+              {!pendingSentInvitations.length && (
+                <div className="ios-member-empty-note">
+                  <b>暂无待接受邀请</b>
+                  <small>发送给邮箱、手机号、用户名或用户 ID 后，会在这里看到记录。</small>
+                </div>
+              )}
             </IosCard>
           </section>
-          <div className="ios-member-links">
-            <Link to="/invitations/received">我的邀请 <CaretRightIcon size={17} /></Link>
-            <Link to="/invitations/sent">已发邀请 <CaretRightIcon size={17} /></Link>
-          </div>
           {myMember?.role !== "creator" && (
             <IosButton variant="outline" className="danger-text" onClick={() => setRemoving("me")}>
               退出该账本
@@ -146,37 +250,56 @@ export function MembersPage() {
           onConfirm={() => void removeMember()}
         />
       )}
-    </IosPage>
+    </>
   );
 }
 
 export function InviteMemberPage() {
-  const navigate = useNavigate();
-  const location = useLocation();
+  return <Navigate to="/settings" replace />;
+}
+
+function InviteMemberSheet({
+  onClose,
+  onBack,
+  onSent,
+}: {
+  onClose: () => void;
+  onBack: () => void;
+  onSent: () => void;
+}) {
   const { book } = useActiveBook();
-  const modalState = modalLinkState(location);
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [method, setMethod] = useState<"email" | "phone">("email");
+  const [target, setTarget] = useState("");
   const [role, setRole] = useState<"member" | "admin">("member");
   const [message, setMessage] = useState("");
   const send = async () => {
     if (!book) return;
+    const normalizedTarget = target.trim();
     setMessage("");
+    if (!normalizedTarget) {
+      setMessage("请输入对方的邮箱、手机号、用户名或用户 ID。");
+      return;
+    }
+    if (looksLikeEmail(normalizedTarget) && !isValidEmail(normalizedTarget)) {
+      setMessage("邮箱格式不正确，请检查 @ 和域名。");
+      return;
+    }
+    if (looksLikePhone(normalizedTarget) && !isValidPhone(normalizedTarget)) {
+      setMessage("手机号格式不正确，请输入至少 6 位数字，可包含 + 号。");
+      return;
+    }
     try {
       await api(`/books/${book.id}/invitations`, {
         method: "POST",
-        body: JSON.stringify({ email: method === "email" ? email || undefined : undefined, phone: method === "phone" ? phone || undefined : undefined, role }),
+        body: JSON.stringify({ target: normalizedTarget, role }),
       });
       toast.success("邀请已发送", { duration: 2600, closeButton: true });
-      navigate(`/members?bookId=${book.id}`, { state: modalState });
+      onSent();
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : "邀请失败");
     }
   };
   return (
-    <IosPage>
-      <IosSheet title="邀请成员" onClose={() => navigate(`/members${book ? `?bookId=${book.id}` : ""}`, { state: modalState })} back>
+    <IosSheet title="邀请成员" onClose={onClose} onBack={onBack} back>
         <div className="ios-invite-sheet">
           <IosCard className="ios-invite-intro">
             <IconTile>
@@ -187,21 +310,14 @@ export function InviteMemberPage() {
               <small>对方接受后即可查看并记录该账本。邀请有效期 7 天。</small>
             </span>
           </IosCard>
-          <IosField label="邀请方式">
-            <IosSegment
-              value={method}
-              onChange={setMethod}
-              options={[
-                { value: "email", label: "邮箱" },
-                { value: "phone", label: "手机号" },
-              ]}
-            />
-          </IosField>
-          <IosField label={method === "email" ? "邮箱" : "手机号"}>
+          <IosField label="邀请对象" error={message}>
             <input
-              value={method === "email" ? email : phone}
-              placeholder={method === "email" ? "输入对方邮箱" : "输入对方手机号"}
-              onChange={(event) => (method === "email" ? setEmail(event.currentTarget.value) : setPhone(event.currentTarget.value))}
+              value={target}
+              placeholder="邮箱 / 手机号 / 用户名 / 用户 ID"
+              onChange={(event) => {
+                setTarget(event.currentTarget.value);
+                if (message) setMessage("");
+              }}
             />
           </IosField>
           <IosField label="分配角色">
@@ -215,23 +331,31 @@ export function InviteMemberPage() {
               ))}
             </div>
           </IosField>
-          {message && <p className="field-error">{message}</p>}
           <IosButton onClick={() => void send()}>发送邀请</IosButton>
         </div>
-      </IosSheet>
-    </IosPage>
+    </IosSheet>
   );
 }
 
 export function MemberRolePage() {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const [search] = useSearchParams();
-  const bookId = search.get("bookId");
-  const memberId = search.get("memberId");
+  return <Navigate to="/settings" replace />;
+}
+
+function MemberRoleSheet({
+  memberId,
+  onClose,
+  onBack,
+  onSaved,
+}: {
+  memberId: string;
+  onClose: () => void;
+  onBack: () => void;
+  onSaved: () => void;
+}) {
+  const { book } = useActiveBook();
+  const bookId = book?.id;
   const { data } = useApi<{ members: Member[] }>(bookId ? `/books/${bookId}/members` : undefined);
   const member = useMemo(() => data?.members.find((item) => item.id === memberId), [data?.members, memberId]);
-  const modalState = modalLinkState(location);
   const [role, setRole] = useState<"admin" | "member">("member");
   const [error, setError] = useState("");
 
@@ -248,16 +372,17 @@ export function MemberRolePage() {
         body: JSON.stringify({ role }),
       });
       toast.success("成员权限已更新", { duration: 2600, closeButton: true });
-      navigate(`/members?bookId=${bookId}`, { state: modalState });
+      onSaved();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "保存失败");
     }
   };
   return (
-    <IosPage>
       <IosSheet
         title="成员权限"
-        onClose={() => navigate(`/members${bookId ? `?bookId=${bookId}` : ""}`, { state: modalState })}
+        onClose={onClose}
+        onBack={onBack}
+        back
         footer={<IosButton onClick={() => void save()}>保存权限</IosButton>}
       >
         <div className="ios-member-role-sheet">
@@ -282,7 +407,6 @@ export function MemberRolePage() {
           {error && <p className="field-error">{error}</p>}
         </div>
       </IosSheet>
-    </IosPage>
   );
 }
 
@@ -290,15 +414,13 @@ function MemberRow({
   member,
   isMe,
   canRemove,
-  bookId,
-  state,
+  onRole,
   onRemove,
 }: {
   member: Member;
   isMe: boolean;
   canRemove: boolean;
-  bookId?: string;
-  state?: { backgroundLocation: Location };
+  onRole: () => void;
   onRemove: () => void;
 }) {
   return (
@@ -309,9 +431,9 @@ function MemberRow({
         <small>{roleLabel(member.role)}</small>
       </span>
       {member.role !== "creator" && (
-        <Link className="ios-role-pill" to={`/members/role?memberId=${member.id}${bookId ? `&bookId=${bookId}` : ""}`} state={state}>
+        <button className="ios-role-pill" type="button" onClick={onRole}>
           {roleLabel(member.role)}
-        </Link>
+        </button>
       )}
       {canRemove && (
         <button className="ios-member-remove" type="button" aria-label="移除成员" onClick={onRemove}>
@@ -322,15 +444,84 @@ function MemberRow({
   );
 }
 
-function modalLinkState(location: Location) {
-  const state = location.state as { backgroundLocation?: Location } | null;
-  return { backgroundLocation: state?.backgroundLocation ?? location };
+function SentInvitationsSheet({
+  invitations,
+  onBack,
+  onClose,
+  onAction,
+}: {
+  invitations: SentInvitation[];
+  onBack: () => void;
+  onClose: () => void;
+  onAction: (id: string, endpoint: "remind" | "revoke") => void;
+}) {
+  return (
+    <IosSheet title="已发邀请" onClose={onClose} onBack={onBack} back>
+      <IosCard className="ios-invitation-list">
+        {invitations.map((invitation) => (
+          <div className="ios-invitation-row" key={invitation.id}>
+            <IconTile tint="#eaf1ff" color="#4c8dff">
+              <ClockCounterClockwiseIcon size={20} weight="fill" />
+            </IconTile>
+            <span>
+              <b>{invitation.inviteeEmail || invitation.inviteePhone || invitation.inviteeUserId || "指定用户"}</b>
+              <small>
+                {roleLabel(invitation.role)} · {statusLabel(invitation.status)}
+              </small>
+            </span>
+            {invitation.status === "pending" ? (
+              <div className="ios-inline-actions">
+                <button type="button" onClick={() => onAction(invitation.id, "remind")}>
+                  提醒
+                </button>
+                <button className="danger" type="button" onClick={() => onAction(invitation.id, "revoke")}>
+                  撤回
+                </button>
+              </div>
+            ) : (
+              <em>{statusIcon(invitation.status)}</em>
+            )}
+          </div>
+        ))}
+        {!invitations.length && (
+          <div className="ios-member-empty-note">
+            <b>还没有已发邀请</b>
+            <small>从成员与邀请底部发送邀请后，这里会显示状态和撤回操作。</small>
+          </div>
+        )}
+      </IosCard>
+    </IosSheet>
+  );
 }
 
-function closeSheet(navigate: ReturnType<typeof useNavigate>, location: Location, fallback: string) {
-  const state = location.state as { backgroundLocation?: Location } | null;
-  if (state?.backgroundLocation) navigate(-1);
-  else navigate(fallback);
+function looksLikeEmail(value: string) {
+  return value.includes("@");
+}
+
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function looksLikePhone(value: string) {
+  return /^[+\d][\d\s-]*$/.test(value);
+}
+
+function isValidPhone(value: string) {
+  return /^\+?\d[\d\s-]{4,}\d$/.test(value);
+}
+
+function statusIcon(status: string) {
+  if (status === "accepted") return <CheckCircleIcon size={19} weight="fill" />;
+  if (status === "declined" || status === "revoked") return <ProhibitIcon size={19} weight="fill" />;
+  return statusLabel(status);
+}
+
+function statusLabel(status: string) {
+  if (status === "pending") return "待处理";
+  if (status === "accepted") return "已接受";
+  if (status === "declined") return "已拒绝";
+  if (status === "revoked") return "已撤回";
+  return status;
 }
 
 function roleLabel(role: Member["role"] | "admin" | "member") {

@@ -69,6 +69,22 @@ export type AiInviteCardPart = {
   href?: string;
 };
 
+export type AiProfileCardPart = {
+  type: "profile-card";
+  title?: string;
+  name?: string;
+  email?: string;
+  avatarUrl?: string;
+};
+
+export type AiMemberCardPart = {
+  type: "member-card";
+  title?: string;
+  name?: string;
+  role?: string;
+  status?: string;
+};
+
 export type AiNavigationCardPart = {
   type: "navigation-card";
   pageName: string;
@@ -98,6 +114,8 @@ export type AiStructuredPart =
   | AiAnalysisCardPart
   | AiImportJobCardPart
   | AiInviteCardPart
+  | AiProfileCardPart
+  | AiMemberCardPart
   | AiNavigationCardPart
   | AiConfirmationPart;
 
@@ -114,6 +132,8 @@ const structuredPartTypes = new Set([
   "analysis-card",
   "import-job-card",
   "invite-card",
+  "profile-card",
+  "member-card",
   "navigation-card",
   "confirmation",
   "confirmation-card",

@@ -1,9 +1,10 @@
-import { loginSchema, registerSchema, subscriptionContactSchema } from "@shared-ledger/shared";
+import { changePasswordSchema, loginSchema, registerSchema, subscriptionContactSchema, updateProfileSchema } from "@shared-ledger/shared";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { Hono } from "hono";
 import { jsonError, parseJson } from "../lib/http";
 import {
   authenticatePassword,
+  changeUserPassword,
   consumeOAuthState,
   createOAuthState,
   createOrFindOAuthUser,
@@ -14,6 +15,7 @@ import {
   revokeRefreshToken,
   revokeSession,
   updateUserAvatar,
+  updateUserProfile,
   upgradeSubscription,
 } from "../services/auth";
 import { currentUser } from "../services/access";
@@ -43,7 +45,7 @@ const avatarTypes: Record<string, string> = {
   "image/png": "png",
   "image/webp": "webp",
 };
-const maxAvatarBytes = 3 * 1024 * 1024;
+const maxAvatarBytes = 1024 * 1024;
 
 function callbackUrl(context: any, provider: Provider) {
   return new URL(`/auth/oauth/${provider}/callback`, context.req.url).toString();
@@ -65,13 +67,18 @@ function clearAuthCookies(context: any) {
   deleteCookie(context, "ledger_session", { path: "/" });
   deleteCookie(context, "ledger_refresh", { path: "/" });
 }
-function publicAvatarUrl(context: any, userId: string, fileName: string) {
-  const path = `/api/auth/avatar/${encodeURIComponent(userId)}/${encodeURIComponent(fileName)}`;
-  return context.env.API_PUBLIC_ORIGIN ? new URL(path, context.env.API_PUBLIC_ORIGIN).toString() : path;
-}
 function avatarContentType(file: File) {
   const type = file.type.toLowerCase();
   return avatarTypes[type] ? type : undefined;
+}
+function dataUrlFromBytes(contentType: string, buffer: ArrayBuffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.slice(index, index + chunkSize));
+  }
+  return `data:${contentType};base64,${btoa(binary)}`;
 }
 
 export function registerAuthRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryLedgerStore) {
@@ -126,6 +133,54 @@ export function registerAuthRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryL
     return user ? context.json({ user }) : jsonError(context, "未登录", 401);
   });
 
+  app.patch("/auth/me/profile", async (context) => {
+    const user = await currentUser(context, store);
+    if (!user) return jsonError(context, "未登录", 401);
+    const body = await parseJson(context, updateProfileSchema);
+    if (!body) return jsonError(context, "资料不合法");
+
+    if (context.env.DB) {
+      try {
+        return context.json({ user: await updateUserProfile(context.env.DB, user.id, body) });
+      } catch (error) {
+        return jsonError(context, error instanceof Error ? error.message : "保存失败", 409);
+      }
+    }
+
+    if (context.env.APP_ENV === "test" && store) {
+      const duplicateName = store.users.find((item) => item.name === body.name && item.id !== user.id);
+      if (duplicateName) return jsonError(context, "用户名已被使用", 409);
+      const email = body.email?.trim() || "";
+      const duplicateEmail = email && store.users.find((item) => item.email === email && item.id !== user.id);
+      if (duplicateEmail) return jsonError(context, "邮箱已被其他用户使用", 409);
+      const stored = store.users.find((item) => item.id === user.id);
+      if (!stored) return jsonError(context, "用户不存在", 404);
+      stored.name = body.name;
+      stored.email = email;
+      return context.json({ user: stored });
+    }
+    return jsonError(context, "资料编辑需要 D1 运行时", 503);
+  });
+
+  app.put("/auth/me/password", async (context) => {
+    const user = await currentUser(context, store);
+    if (!user) return jsonError(context, "未登录", 401);
+    const body = await parseJson(context, changePasswordSchema);
+    if (!body) return jsonError(context, "密码不合法");
+
+    if (context.env.DB) {
+      try {
+        await changeUserPassword(context.env.DB, user.id, body);
+        return context.body(null, 204);
+      } catch (error) {
+        return jsonError(context, error instanceof Error ? error.message : "修改密码失败", 400);
+      }
+    }
+
+    if (context.env.APP_ENV === "test") return context.body(null, 204);
+    return jsonError(context, "密码修改需要 D1 运行时", 503);
+  });
+
   app.put("/auth/me/avatar", async (context) => {
     const user = await currentUser(context, store);
     if (!user) return jsonError(context, "未登录", 401);
@@ -134,44 +189,20 @@ export function registerAuthRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryL
     if (!(avatar instanceof File)) return jsonError(context, "请选择头像文件");
     const contentType = avatarContentType(avatar);
     if (!contentType) return jsonError(context, "头像仅支持 JPG、PNG 或 WebP");
-    if (avatar.size > maxAvatarBytes) return jsonError(context, "头像不能超过 3MB");
+    if (avatar.size > maxAvatarBytes) return jsonError(context, "头像不能超过 1MB");
+    const avatarUrl = dataUrlFromBytes(contentType, await avatar.arrayBuffer());
 
     if (context.env.DB) {
-      if (!context.env.FILES) return jsonError(context, "头像上传需要 R2 绑定", 503);
-      const extension = avatarTypes[contentType];
-      const fileName = `${crypto.randomUUID()}.${extension}`;
-      const key = `avatars/${user.id}/${fileName}`;
-      await context.env.FILES.put(key, avatar.stream(), {
-        httpMetadata: { contentType },
-      });
-      const avatarUrl = publicAvatarUrl(context, user.id, fileName);
       await updateUserAvatar(context.env.DB, user.id, avatarUrl);
       return context.json({ user: { ...user, avatarUrl } });
     }
 
     if (context.env.APP_ENV === "test" && store) {
-      const avatarUrl = publicAvatarUrl(context, user.id, `${crypto.randomUUID()}.${avatarTypes[contentType]}`);
       const stored = store.users.find((item) => item.id === user.id);
       if (stored) stored.avatarUrl = avatarUrl;
       return context.json({ user: { ...user, avatarUrl } });
     }
-    return jsonError(context, "头像上传需要 D1 与 R2 运行时", 503);
-  });
-
-  app.get("/auth/avatar/:userId/:fileName", async (context) => {
-    const { userId, fileName } = context.req.param();
-    if (!context.env.FILES) return jsonError(context, "头像文件服务未配置", 503);
-    if (!/^[a-zA-Z0-9_-]+$/.test(userId) || !/^[a-f0-9-]+\.(jpg|png|webp)$/.test(fileName)) {
-      return jsonError(context, "头像地址无效", 400);
-    }
-    const object = await context.env.FILES.get(`avatars/${userId}/${fileName}`);
-    if (!object?.body) return jsonError(context, "头像不存在", 404);
-    return new Response(object.body, {
-      headers: {
-        "Cache-Control": "public, max-age=31536000, immutable",
-        "Content-Type": object.httpMetadata?.contentType ?? "application/octet-stream",
-      },
-    });
+    return jsonError(context, "头像上传需要 D1 运行时", 503);
   });
 
   app.get("/auth/oauth/:provider", async (context) => {

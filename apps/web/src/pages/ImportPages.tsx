@@ -8,28 +8,31 @@ import {
   XCircleIcon,
 } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate, type Location } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
   IconTile,
   IosButton,
   IosCard,
   IosField,
-  IosPage,
   IosSegment,
   IosSheet,
   yuan,
 } from "../components/ios/IosDesign";
+import { createPreviewThumbnail } from "../features/imports/preview-thumbnail";
 import { terminalImportStatuses, watchImportJobs, type ImportJobStatus } from "../features/imports/status";
 import { cancelImportJob, retryImportJob } from "../features/imports/upload";
 import { useActiveBook } from "../hooks/useActiveBook";
 import { useApi } from "../hooks/useApi";
-import { api } from "../lib";
+import { api, apiFetchWithRefresh } from "../lib";
 
 type Job = ImportJobStatus & {
   fileType?: string;
   createdAt?: string;
+  updatedAt?: string;
 };
+type JobIcon = typeof ImageSquareIcon;
+type JobFilter = "all" | "processing" | "success" | "failed";
 type PendingRecord = {
   id: string;
   importJobId: string;
@@ -51,6 +54,20 @@ type PendingEditDraft = {
   occurredAt: string;
   categoryName: string;
 };
+
+const jobFilters: { value: JobFilter; label: string }[] = [
+  { value: "all", label: "全部" },
+  { value: "processing", label: "处理中" },
+  { value: "success", label: "成功" },
+  { value: "failed", label: "失败" },
+];
+const successStatuses = new Set(["completed", "pending_confirmation"]);
+const failedStatuses = new Set(["failed"]);
+const imageExtensions = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".heic", ".heif"];
+const thumbnailBlobCache = new Map<string, Blob>();
+const maxThumbnailCacheSize = 48;
+let activeThumbnailLoads = 0;
+const thumbnailQueue: (() => void)[] = [];
 
 function usePendingRecords() {
   const { book } = useActiveBook();
@@ -81,13 +98,14 @@ function usePendingRecords() {
 }
 
 export function PendingImportsPage() {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { book } = useActiveBook();
+  return <LegacyRecordsRedirect />;
+}
+
+export function PendingImportsSheet({ onClose }: { onClose: () => void }) {
   const { records, error, reload } = usePendingRecords();
   const [busy, setBusy] = useState("");
   const [editing, setEditing] = useState<PendingRecord | undefined>();
-  const close = () => closeImportSheet(navigate, location, book ? `/records?bookId=${book.id}` : "/records");
+  const close = onClose;
   const confirm = async (recordId: string) => {
     setBusy(recordId);
     try {
@@ -151,7 +169,7 @@ export function PendingImportsPage() {
   };
 
   return (
-    <IosPage>
+    <>
       <IosSheet
         title="待确认记录"
         onClose={close}
@@ -192,21 +210,33 @@ export function PendingImportsPage() {
           onSave={(draft) => void updateRecord(editing, draft)}
         />
       )}
-    </IosPage>
+    </>
   );
 }
 
 export function ImportHistoryPage() {
-  const navigate = useNavigate();
-  const location = useLocation();
+  return <LegacyRecordsRedirect />;
+}
+
+export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
   const { book } = useActiveBook();
-  const { data, error, reload } = useApi<{ imports: Job[] }>(book ? `/books/${book.id}/imports` : undefined);
+  const { data, error, reload } = useApi<{ imports: Job[]; retentionDays?: number }>(book ? `/books/${book.id}/imports` : undefined);
+  const [filter, setFilter] = useState<JobFilter>("all");
   const [busyJobId, setBusyJobId] = useState("");
   const stopWatchingRef = useRef<(() => void) | undefined>(undefined);
-  const close = () => closeImportSheet(navigate, location, book ? `/records?bookId=${book.id}` : "/records");
+  const close = onClose;
+  const imports = data?.imports ?? [];
+  const filteredImports = useMemo(() => imports.filter((job) => matchesJobFilter(job, filter)), [filter, imports]);
+  const groupedImports = useMemo(() => groupJobsByDay(filteredImports), [filteredImports]);
+  const counts = useMemo(() => ({
+    all: imports.length,
+    processing: imports.filter((job) => matchesJobFilter(job, "processing")).length,
+    success: imports.filter((job) => matchesJobFilter(job, "success")).length,
+    failed: imports.filter((job) => matchesJobFilter(job, "failed")).length,
+  }), [imports]);
 
   useEffect(() => {
-    const active = (data?.imports ?? []).filter((job) => !terminalImportStatuses.has(job.status)).map((job) => job.id);
+    const active = imports.filter((job) => !terminalImportStatuses.has(job.status)).map((job) => job.id);
     stopWatchingRef.current?.();
     if (!active.length) return undefined;
     stopWatchingRef.current = watchImportJobs(active, () => void reload(), {
@@ -217,7 +247,7 @@ export function ImportHistoryPage() {
       stopWatchingRef.current?.();
       stopWatchingRef.current = undefined;
     };
-  }, [data?.imports?.map((job) => `${job.id}:${job.status}`).join(","), reload]);
+  }, [imports.map((job) => `${job.id}:${job.status}`).join(","), reload]);
 
   const retry = async (jobId: string) => {
     setBusyJobId(jobId);
@@ -245,34 +275,73 @@ export function ImportHistoryPage() {
   };
 
   return (
-    <IosPage>
-      <IosSheet title="识别进度" onClose={close}>
-        <div className="ios-import-sheet">
-          <p className="ios-sheet-note">
-            文件在后台异步处理，你可以离开此页面。识别完成的记录会进入「待确认」，不会直接入账。
+    <IosSheet title="识别进度" onClose={close}>
+      <div className="ios-import-sheet">
+        <section className="ios-import-hero">
+          <p>
+            文件会在后台异步识别，完成后进入「待确认」，不会直接入账。这里只保留最近 {data?.retentionDays ?? 7} 天任务。
           </p>
-          {error && <p className="field-error">{error}</p>}
-          <section className="ios-import-jobs">
-            <h3>最近任务</h3>
-            {(data?.imports ?? []).map((job) => (
-              <ImportJobCard
-                job={job}
-                busy={busyJobId === job.id}
-                onRetry={() => void retry(job.id)}
-                onCancel={() => void cancel(job.id)}
-                key={job.id}
-              />
-            ))}
-            {!data?.imports.length && (
-              <div className="ios-empty">
-                <b>还没有导入记录</b>
-                <p>从底部加号上传图片、PDF、Excel 或 CSV 后会显示识别进度。</p>
-              </div>
-            )}
-          </section>
+          <div className="ios-import-stats" aria-label="识别任务统计">
+            <span>
+              <b>{counts.processing}</b>
+              处理中
+            </span>
+            <span>
+              <b>{counts.success}</b>
+              成功
+            </span>
+            <span>
+              <b>{counts.failed}</b>
+              失败
+            </span>
+          </div>
+        </section>
+        <div className="ios-import-filter" role="tablist" aria-label="识别状态筛选">
+          {jobFilters.map((item) => (
+            <button
+              className={filter === item.value ? "active" : ""}
+              type="button"
+              role="tab"
+              aria-selected={filter === item.value}
+              onClick={() => setFilter(item.value)}
+              key={item.value}
+            >
+              {item.label}
+              <em>{counts[item.value]}</em>
+            </button>
+          ))}
         </div>
-      </IosSheet>
-    </IosPage>
+        {error && <p className="field-error">{error}</p>}
+        <section className="ios-import-jobs">
+          {groupedImports.map((group) => (
+            <div className="ios-import-day" key={group.key}>
+              <h3>{group.label}</h3>
+              {group.jobs.map((job) => (
+                <ImportJobCard
+                  job={job}
+                  busy={busyJobId === job.id}
+                  onRetry={() => void retry(job.id)}
+                  onCancel={() => void cancel(job.id)}
+                  key={job.id}
+                />
+              ))}
+            </div>
+          ))}
+          {!imports.length && (
+            <div className="ios-empty">
+              <b>还没有导入记录</b>
+              <p>从底部加号上传图片、PDF、Excel 或 CSV 后会显示识别进度。</p>
+            </div>
+          )}
+          {imports.length > 0 && !filteredImports.length && (
+            <div className="ios-empty">
+              <b>没有{jobFilters.find((item) => item.value === filter)?.label}任务</b>
+              <p>切换其它状态查看最近 7 天的识别任务。</p>
+            </div>
+          )}
+        </section>
+      </div>
+    </IosSheet>
   );
 }
 
@@ -393,14 +462,15 @@ function ImportJobCard({
 }) {
   const tone = job.status === "failed" ? "failed" : terminalImportStatuses.has(job.status) ? "done" : "processing";
   const Icon = getJobIcon(job);
+  const statusText = formatJobStatus(job);
   return (
     <IosCard className={`ios-import-job ${tone}`}>
-      <IconTile tint={tone === "failed" ? "#fdeceb" : tone === "done" ? "#e8f7ef" : "#eaf1ff"} color={tone === "failed" ? "#d74035" : tone === "done" ? "#1f9d57" : "#4c8dff"}>
-        <Icon size={20} weight="fill" />
-      </IconTile>
+      <ImportJobPreview job={job} tone={tone} fallbackIcon={Icon} />
       <span>
         <b>{job.fileName}</b>
-        <small>{job.errorMessage || formatJobStatus(job)}</small>
+        <small>{statusText}</small>
+        {job.status === "failed" && job.errorStage && <em className="ios-import-error-stage">{job.errorStage}</em>}
+        {job.status === "failed" && job.errorMessage && <p>{job.errorMessage}</p>}
         {!terminalImportStatuses.has(job.status) && (
           <i>
             <em style={{ width: `${job.progress ?? 18}%` }} />
@@ -426,6 +496,115 @@ function ImportJobCard({
   );
 }
 
+function ImportJobPreview({
+  job,
+  tone,
+  fallbackIcon: FallbackIcon,
+}: {
+  job: Job;
+  tone: "done" | "failed" | "processing";
+  fallbackIcon: JobIcon;
+}) {
+  if (!isImageJob(job)) {
+    return (
+      <div className={`ios-import-preview ${tone} file`}>
+        <FallbackIcon size={22} weight="fill" />
+        <small>{fileExtension(job.fileName)}</small>
+      </div>
+    );
+  }
+  return <ImageJobThumbnail job={job} tone={tone} fallbackIcon={FallbackIcon} />;
+}
+
+function ImageJobThumbnail({
+  job,
+  tone,
+  fallbackIcon: FallbackIcon,
+}: {
+  job: Job;
+  tone: "done" | "failed" | "processing";
+  fallbackIcon: JobIcon;
+}) {
+  const holderRef = useRef<HTMLDivElement | null>(null);
+  const [thumbnailUrl, setThumbnailUrl] = useState("");
+  const [failed, setFailed] = useState(false);
+  const cacheKey = `${job.id}:${job.updatedAt ?? job.createdAt ?? ""}`;
+
+  useEffect(() => {
+    const element = holderRef.current;
+    if (!element) return undefined;
+    let cancelled = false;
+    let controller: AbortController | undefined;
+    let objectUrl = "";
+    const setBlobUrl = (blob: Blob) => {
+      if (cancelled) return;
+      objectUrl = URL.createObjectURL(blob);
+      setThumbnailUrl(objectUrl);
+    };
+    const load = () => {
+      if (thumbnailBlobCache.has(cacheKey)) {
+        setBlobUrl(thumbnailBlobCache.get(cacheKey)!);
+        return;
+      }
+      controller = new AbortController();
+      void enqueueThumbnailLoad(async () => {
+        if (cancelled) return;
+        const response = await apiFetchWithRefresh(`/imports/${job.id}/file`, { signal: controller?.signal });
+        if (!response.ok) throw new Error("图片预览读取失败");
+        const source = await response.blob();
+        const thumbnail = await createPreviewThumbnail(source, {
+          maxWidth: 240,
+          maxHeight: 240,
+          signal: controller?.signal,
+        });
+        if (cancelled) return;
+        rememberThumbnail(cacheKey, thumbnail);
+        setBlobUrl(thumbnail);
+      }).catch((cause) => {
+        if (!cancelled && !(cause instanceof DOMException && cause.name === "AbortError")) setFailed(true);
+      });
+    };
+
+    if (typeof IntersectionObserver === "undefined") {
+      load();
+      return () => {
+        cancelled = true;
+        controller?.abort();
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+      };
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          observer.disconnect();
+          load();
+        }
+      },
+      { rootMargin: "160px" },
+    );
+    observer.observe(element);
+    return () => {
+      cancelled = true;
+      controller?.abort();
+      observer.disconnect();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [cacheKey, job.id]);
+
+  return (
+    <div className={`ios-import-preview ${tone}`} ref={holderRef}>
+      {thumbnailUrl && !failed ? (
+        <img src={thumbnailUrl} alt={`${job.fileName} 缩略图`} />
+      ) : (
+        <>
+          <FallbackIcon size={22} weight="fill" />
+          <small>{failed ? "预览失败" : "图片"}</small>
+        </>
+      )}
+    </div>
+  );
+}
+
 function getJobIcon(job: Job) {
   const type = `${job.fileType ?? ""} ${job.fileName ?? ""}`.toLowerCase();
   if (type.includes("pdf")) return FilePdfIcon;
@@ -444,14 +623,72 @@ function formatJobStatus(job: Job) {
   return job.stage || "正在排队…";
 }
 
-function closeImportSheet(navigate: ReturnType<typeof useNavigate>, location: Location, fallback: string) {
-  const state = location.state as { backgroundLocation?: Location } | null;
-  if (state?.backgroundLocation) navigate(-1);
-  else navigate(fallback);
-}
-
 function formatOcrProgress(job: Job) {
   if (typeof job.currentPage === "number" && typeof job.totalPages === "number") return `OCR 第 ${job.currentPage}/${job.totalPages} 页`;
   if (typeof job.progress === "number") return `OCR ${job.progress}%`;
   return "OCR 正在识别…";
+}
+
+function matchesJobFilter(job: Job, filter: JobFilter) {
+  if (filter === "all") return true;
+  if (filter === "success") return successStatuses.has(job.status);
+  if (filter === "failed") return failedStatuses.has(job.status);
+  return !terminalImportStatuses.has(job.status);
+}
+
+function groupJobsByDay(jobs: Job[]) {
+  const formatter = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "short" });
+  const groups = new Map<string, { key: string; label: string; jobs: Job[] }>();
+  jobs.forEach((job) => {
+    const date = new Date(job.createdAt ?? Date.now());
+    const key = Number.isNaN(date.getTime()) ? "unknown" : date.toISOString().slice(0, 10);
+    const label = key === "unknown" ? "未知时间" : formatter.format(date);
+    const group = groups.get(key) ?? { key, label, jobs: [] };
+    group.jobs.push(job);
+    groups.set(key, group);
+  });
+  return [...groups.values()];
+}
+
+function isImageJob(job: Job) {
+  const type = `${job.fileType ?? ""}`.toLowerCase();
+  const name = `${job.fileName ?? ""}`.toLowerCase();
+  return type.startsWith("image/") || imageExtensions.some((extension) => name.endsWith(extension));
+}
+
+function fileExtension(fileName: string) {
+  const extension = fileName.split(".").pop()?.trim().toUpperCase();
+  return extension && extension !== fileName.toUpperCase() ? extension.slice(0, 5) : "FILE";
+}
+
+function rememberThumbnail(key: string, blob: Blob) {
+  thumbnailBlobCache.delete(key);
+  thumbnailBlobCache.set(key, blob);
+  while (thumbnailBlobCache.size > maxThumbnailCacheSize) {
+    const oldest = thumbnailBlobCache.keys().next().value;
+    if (!oldest) break;
+    thumbnailBlobCache.delete(oldest);
+  }
+}
+
+function enqueueThumbnailLoad<T>(task: () => Promise<T>) {
+  return new Promise<T>((resolve, reject) => {
+    const run = () => {
+      activeThumbnailLoads += 1;
+      task()
+        .then(resolve, reject)
+        .finally(() => {
+          activeThumbnailLoads -= 1;
+          thumbnailQueue.shift()?.();
+        });
+    };
+    if (activeThumbnailLoads < 3) run();
+    else thumbnailQueue.push(run);
+  });
+}
+
+function LegacyRecordsRedirect() {
+  const [searchParams] = useSearchParams();
+  const bookId = searchParams.get("bookId");
+  return <Navigate to={`/records${bookId ? `?bookId=${encodeURIComponent(bookId)}` : ""}`} replace />;
 }

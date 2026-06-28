@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import type { Location } from "react-router-dom";
 import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { AccountSettingsPage, LoginPage, RegisterPage, SubscriptionPage } from "../pages/AccountPages";
 import { AiPage } from "../pages/AiPage";
@@ -12,14 +11,11 @@ import { ManagementSettingsPage, SettingsPage } from "../pages/SettingsPages";
 import { ReceivedInvitationsPage, SentInvitationsPage } from "../pages/InvitationPages";
 import { useAuth } from "../features/auth/AuthProvider";
 import { useActiveBook } from "../hooks/useActiveBook";
+import { IosCard, IosListSkeleton, IosPage, IosScroll } from "../components/ios/IosDesign";
 
 export function AppRoutes() {
-  const location = useLocation();
-  const state = location.state as { backgroundLocation?: Location } | null;
-  const backgroundLocation = state?.backgroundLocation;
   return (
-    <>
-      <Routes location={backgroundLocation ?? location}>
+      <Routes>
         <Route path="/" element={<Protected element={<HomeEntry />} />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
@@ -54,23 +50,12 @@ export function AppRoutes() {
         <Route path="/subscription" element={<Protected element={<SubscriptionPage />} />} />
         <Route path="/ai" element={<Protected element={<AiPage />} />} />
       </Routes>
-      {backgroundLocation ? (
-        <Routes>
-          <Route path="/records/pending" element={<Protected element={<PendingImportsPage />} />} />
-          <Route path="/records/imports" element={<Protected element={<ImportHistoryPage />} />} />
-          <Route path="/members" element={<Protected element={<MembersPage />} />} />
-          <Route path="/members/invite" element={<Protected element={<InviteMemberPage />} />} />
-          <Route path="/members/role" element={<Protected element={<MemberRolePage />} />} />
-          <Route path="/settings/export" element={<Protected element={<ManagementSettingsPage />} />} />
-        </Routes>
-      ) : null}
-    </>
   );
 }
 
 function HomeEntry() {
   const { book, loading } = useActiveBook();
-  if (loading) return <p className="muted auth-loading">正在读取账本…</p>;
+  if (loading) return <RouteLoadingSkeleton />;
   if (!book) return <Navigate to="/home" replace />;
   return <Navigate to={`/home?bookId=${book.id}`} replace />;
 }
@@ -87,7 +72,7 @@ function Protected({ element }: { element: ReactNode }) {
 function RequireAuth({ children }: { children: ReactNode }) {
   const { loading, user } = useAuth();
   const location = useLocation();
-  if (loading) return <p className="muted auth-loading">正在确认登录状态…</p>;
+  if (loading) return <RouteLoadingSkeleton />;
   if (!user)
     return (
       <Navigate
@@ -96,4 +81,16 @@ function RequireAuth({ children }: { children: ReactNode }) {
       />
     );
   return children;
+}
+
+function RouteLoadingSkeleton() {
+  return (
+    <IosPage>
+      <IosScroll className="ios-main-tab-scroll">
+        <IosCard>
+          <IosListSkeleton rows={4} />
+        </IosCard>
+      </IosScroll>
+    </IosPage>
+  );
 }

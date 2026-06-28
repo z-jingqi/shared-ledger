@@ -2765,89 +2765,6 @@ a {
   width: 16px;
   min-height: 16px;
 }
-.ai-fab {
-  position: fixed;
-  z-index: 5;
-  right: max(calc((100vw - 430px) / 2 + 18px), 18px);
-  bottom: 84px;
-  border: 0;
-  background: #17243c;
-  color: #fff;
-  width: 49px;
-  height: 49px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  box-shadow: 0 8px 18px #17243c40;
-}
-.ai-drawer-backdrop {
-  position: fixed;
-  z-index: 9;
-  inset: 0;
-  border: 0;
-  background: rgba(17, 24, 39, 0.18);
-}
-.ai-drawer {
-  position: fixed;
-  z-index: 10;
-  width: min(100%, 430px);
-  inset: 8px 50% 0 auto;
-  transform: translateX(50%);
-  height: calc(100dvh - 8px);
-  background: #fff;
-  border-radius: 24px 24px 0 0;
-  box-shadow: 0 -12px 33px #17243c26;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  padding: 16px 14px calc(12px + env(safe-area-inset-bottom));
-  overflow: hidden;
-}
-.ai-standalone-workspace {
-  min-height: calc(100dvh - 56px);
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 0;
-  overflow: hidden;
-}
-.ai-workspace-header {
-  min-height: 44px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(38px, 1fr);
-  align-items: center;
-  gap: 10px;
-  color: #111827;
-}
-.ai-workspace-header h1,
-.ai-workspace-header h2 {
-  margin: 0;
-  color: #111827;
-  font-size: 18px;
-  font-weight: 800;
-  line-height: 1.2;
-}
-.ai-book-pill {
-  min-width: 0;
-  max-width: 148px;
-  padding: 6px 13px;
-  border: 1px solid #e2e7ee;
-  border-radius: 999px;
-  background: #fff;
-  color: #172032;
-  font-size: 13px;
-  font-weight: 650;
-  line-height: 1.2;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ai-workspace-header .ui-button {
-  justify-self: end;
-  width: 38px;
-  min-width: 38px;
-  min-height: 38px;
-  border-radius: 50%;
-  color: #111827;
-}
 .ai-content {
   min-height: 0;
   display: flex;
@@ -3823,18 +3740,6 @@ a {
 .auth-form {
   padding: 18px;
   border-radius: 18px;
-}
-.ai-fab {
-  width: 44px;
-  height: 44px;
-  bottom: 76px;
-}
-.ai-drawer {
-  width: min(100%, 430px);
-  top: 6px;
-  height: calc(100dvh - 6px);
-  border-radius: 22px 22px 0 0;
-  padding: 14px 12px calc(10px + env(safe-area-inset-bottom));
 }
 .ai-content {
   padding-top: 6px;

@@ -2,7 +2,7 @@ import { supportedFileTypes } from "@shared-ledger/import";
 import { aiImportRecordSchema, supportedFileExtensions } from "@shared-ledger/shared";
 import type { Context, Hono } from "hono";
 import { jsonError } from "../lib/http";
-import { D1LedgerRepository } from "../repository";
+import { D1LedgerRepository, importJobRetentionDays, type ImportJobStatusFilter } from "../repository";
 import { requireMember, requireUser } from "../services/access";
 import {
   cancelAlephOcrJob,
@@ -169,7 +169,12 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     const denied = await requireMember(context, store, bookId);
     if (denied) return denied;
     if (!context.env.DB) return jsonError(context, "D1 运行时不可用", 503);
-    return context.json({ imports: await new D1LedgerRepository(context.env.DB).listImportJobs(bookId) });
+    return context.json({
+      retentionDays: importJobRetentionDays,
+      imports: await new D1LedgerRepository(context.env.DB).listImportJobs(bookId, {
+        status: parseImportStatusFilter(context.req.query("status")),
+      }),
+    });
   });
 
   app.post("/imports/aleph-webhook", async (context) => {
@@ -309,6 +314,28 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     });
   });
 
+  app.get("/imports/:id/file", async (context) => {
+    const user = await requireUser(context, store);
+    if (user instanceof Response) return user;
+    if (!context.env.DB || !context.env.FILES) return jsonError(context, "导入预览需要 D1 与 R2 绑定", 503);
+    const repository = new D1LedgerRepository(context.env.DB);
+    await repository.cleanupExpiredImportJobs();
+    const job = await repository.getImportJob(context.req.param("id"));
+    if (!job) return jsonError(context, "导入任务不存在或已过期", 404);
+    const denied = await requireMember(context, store, job.bookId, user);
+    if (denied) return denied;
+    if (!job.fileType.startsWith("image/")) return jsonError(context, "该文件类型没有图片预览", 415);
+    const object = await context.env.FILES.get(job.r2Key);
+    if (!object?.body) return jsonError(context, "导入原文件不存在", 404);
+    return new Response(object.body, {
+      headers: {
+        "Content-Type": object.httpMetadata?.contentType ?? job.fileType,
+        "Cache-Control": "private, max-age=3600",
+        "Content-Disposition": `inline; filename="${encodeURIComponent(job.fileName)}"`,
+      },
+    });
+  });
+
   app.get("/imports/:id", async (context) => {
     if (!context.env.DB) return jsonError(context, "D1 运行时不可用", 503);
     const repository = new D1LedgerRepository(context.env.DB);
@@ -362,7 +389,9 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     const repository = new D1LedgerRepository(context.env.DB);
     const job = await repository.getImportJob(context.req.param("id"));
     if (!job) return jsonError(context, "导入任务不存在", 404);
-    const denied = await requireMember(context, store, job.bookId);
+    const user = await requireUser(context, store);
+    if (user instanceof Response) return user;
+    const denied = await requireMember(context, store, job.bookId, user);
     return denied ?? context.json({ records: await repository.listImportedRecords(job.id) });
   });
 
@@ -373,24 +402,28 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     if (!record) return jsonError(context, "待确认记录不存在", 404);
     const job = await repository.getImportJob(record.importJobId);
     if (!job) return jsonError(context, "导入任务不存在", 404);
-    const denied = await requireMember(context, store, job.bookId);
+    const user = await requireUser(context, store);
+    if (user instanceof Response) return user;
+    const denied = await requireMember(context, store, job.bookId, user);
     if (denied) return denied;
     const candidate = aiImportRecordSchema.safeParse({
       ...record.suggestedTransaction,
       ...(await context.req.json()),
     });
     if (!candidate.success) return jsonError(context, "待确认记录数据不合法");
-    return context.json({ record: await repository.updateImportedRecord(record.id, candidate.data) });
+    return context.json({ record: await repository.updateImportedRecord(record.id, candidate.data, undefined, user.id) });
   });
 
   const confirm = async (context: any, recordId: string) => {
+    const user = await requireUser(context, store);
+    if (user instanceof Response) return { response: user };
     if (!context.env.DB) return { error: "D1 运行时不可用", status: 503 };
     const repository = new D1LedgerRepository(context.env.DB);
     const record = await repository.getImportedRecord(recordId);
     if (!record || record.status !== "pending") return { error: "记录不可确认", status: 400 };
     const job = await repository.getImportJob(record.importJobId);
     if (!job) return { error: "导入任务不存在", status: 404 };
-    const denied = await requireMember(context, store, job.bookId);
+    const denied = await requireMember(context, store, job.bookId, user);
     if (denied) return { response: denied };
     const suggested = aiImportRecordSchema.parse(record.suggestedTransaction);
     const [category, member] = await Promise.all([
@@ -407,11 +440,7 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
       tagIds: [],
       items: [],
     } as any);
-    const updated = await repository.updateImportedRecord(
-      record.id,
-      record.suggestedTransaction,
-      "confirmed",
-    );
+    const updated = await repository.updateImportedRecord(record.id, record.suggestedTransaction, "confirmed", user.id);
     return { record: updated, transaction };
   };
 
@@ -430,18 +459,22 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     if (!record || record.status !== "pending") return jsonError(context, "记录不可忽略", 400);
     const job = await repository.getImportJob(record.importJobId);
     if (!job) return jsonError(context, "导入任务不存在", 404);
-    const denied = await requireMember(context, store, job.bookId);
+    const user = await requireUser(context, store);
+    if (user instanceof Response) return user;
+    const denied = await requireMember(context, store, job.bookId, user);
     if (denied) return denied;
-    const updated = await repository.updateImportedRecord(record.id, record.suggestedTransaction, "ignored");
+    const updated = await repository.updateImportedRecord(record.id, record.suggestedTransaction, "ignored", user.id);
     return context.json({ record: updated });
   });
 
   app.post("/imports/:id/confirm-all", async (context) => {
     if (!context.env.DB) return jsonError(context, "D1 运行时不可用", 503);
+    const user = await requireUser(context, store);
+    if (user instanceof Response) return user;
     const repository = new D1LedgerRepository(context.env.DB);
     const job = await repository.getImportJob(context.req.param("id"));
     if (!job) return jsonError(context, "导入任务不存在", 404);
-    const denied = await requireMember(context, store, job.bookId);
+    const denied = await requireMember(context, store, job.bookId, user);
     if (denied) return denied;
     const records = await repository.listImportedRecords(job.id);
     let confirmed = 0;
@@ -640,7 +673,9 @@ function importJobStatusPayload(job: ImportJob) {
   return {
     id: job.id,
     fileName: job.fileName,
+    fileType: job.fileType,
     status: job.status,
+    createdAt: job.createdAt,
     ...(job.errorMessage ? { errorMessage: job.errorMessage } : {}),
     ...(job.errorCode ? { errorCode: job.errorCode } : {}),
     ...(job.errorRequestId ? { errorRequestId: job.errorRequestId } : {}),
@@ -652,6 +687,10 @@ function importJobStatusPayload(job: ImportJob) {
     ...(typeof job.ocrCurrentPage === "number" ? { currentPage: job.ocrCurrentPage } : {}),
     ...(typeof job.ocrTotalPages === "number" ? { totalPages: job.ocrTotalPages } : {}),
   };
+}
+
+function parseImportStatusFilter(value: string | undefined): ImportJobStatusFilter {
+  return value === "processing" || value === "success" || value === "failed" ? value : "all";
 }
 
 function safeJson(value: string) {

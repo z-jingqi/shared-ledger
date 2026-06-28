@@ -1,11 +1,11 @@
 import {
   ArrowSquareOutIcon,
+  ArrowUpIcon,
   ChartLineIcon,
   CheckCircleIcon,
   CircleNotchIcon,
   FileTextIcon,
   MagnifyingGlassIcon,
-  NavigationArrowIcon,
   PlusIcon,
   ReceiptIcon,
   UserPlusIcon,
@@ -13,15 +13,18 @@ import {
   XIcon,
 } from "@phosphor-icons/react";
 import { Button, Textarea } from "@shared-ledger/ui";
-import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
+import { forwardRef, type FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Streamdown } from "streamdown";
+import { useAppSheetActions } from "../../features/sheets/SheetContext";
 import type {
   AiAnalysisCardPart,
   AiConfirmationPart,
   AiImportJobCardPart,
   AiInviteCardPart,
+  AiMemberCardPart,
   AiNavigationCardPart,
+  AiProfileCardPart,
   AiRecordCardPart,
   AiSearchResultCardPart,
   AiToolStatusPart,
@@ -29,16 +32,40 @@ import type {
 import type { ImportAttachmentView } from "../imports/ImportAttachmentCards";
 import { ImportAttachmentCards } from "../imports/ImportAttachmentCards";
 
-export function AiConversation({ children }: { children: ReactNode }) {
+export const AiConversation = forwardRef<HTMLDivElement, { children: ReactNode; onScroll?: () => void; onUserScrollIntent?: () => void }>(
+  function AiConversation({ children, onScroll, onUserScrollIntent }, ref) {
   return (
-    <div className="ai-messages" aria-live="polite">
+    <div
+      className="ai-messages"
+      aria-live="polite"
+      onPointerDown={onUserScrollIntent}
+      onScroll={onScroll}
+      onTouchMove={onUserScrollIntent}
+      onWheel={onUserScrollIntent}
+      ref={ref}
+    >
       {children}
     </div>
   );
+  },
+);
+
+export function AiMessage({ role, children, messageId }: { role: "user" | "assistant"; children: ReactNode; messageId?: string }) {
+  return (
+    <article className={`ai-message ${role === "user" ? "ai-user" : "ai-assistant"}`} data-ai-message-id={messageId}>
+      {children}
+    </article>
+  );
 }
 
-export function AiMessage({ role, children }: { role: "user" | "assistant"; children: ReactNode }) {
-  return <article className={`ai-message ${role === "user" ? "ai-user" : "ai-assistant"}`}>{children}</article>;
+export function AiThinkingMessage() {
+  return (
+    <AiMessage role="assistant">
+      <div className="ai-thinking" aria-live="polite">
+        <span>思考中...</span>
+      </div>
+    </AiMessage>
+  );
 }
 
 export function AiMarkdownText({ children, streaming = false }: { children: string; streaming?: boolean }) {
@@ -95,9 +122,10 @@ export function AiPromptInput({
   onStop: () => void;
   onSubmit: (event: FormEvent) => void;
 }) {
-  const expanded = input.trim().length > 0 || attachments.length > 0;
+  const hasContent = input.trim().length > 0 || attachments.length > 0;
+  const expanded = attachments.length > 0 || input.includes("\n");
   return (
-    <form className={`ai-composer ${expanded ? "expanded" : ""}`} onSubmit={onSubmit}>
+    <form className={`ai-composer ${hasContent ? "has-content" : ""} ${expanded ? "expanded" : ""}`} onSubmit={onSubmit}>
       <ImportAttachmentCards attachments={attachments} onRemove={onClearAttachment} />
       {attachmentError && <p className="ai-composer-notice">{attachmentError}</p>}
       <input
@@ -129,12 +157,12 @@ export function AiPromptInput({
         rows={1}
       />
       {isStreaming ? (
-        <Button className="ai-composer-send" type="button" size="icon" aria-label="停止" onClick={onStop}>
+        <Button className="ai-composer-send stop" type="button" size="icon" aria-label="停止" onClick={onStop}>
           <XIcon />
         </Button>
       ) : (
         <Button className="ai-composer-send" aria-label="发送" size="icon" disabled={busy || (!input.trim() && attachments.length === 0)}>
-          <NavigationArrowIcon weight="fill" />
+          <ArrowUpIcon weight="bold" />
         </Button>
       )}
     </form>
@@ -327,11 +355,17 @@ export function AiInviteCard({ part }: { part: AiInviteCardPart }) {
 
 export function AiNavigationCard({ part, compact = false }: { part: AiNavigationCardPart; compact?: boolean }) {
   const navigate = useNavigate();
+  const { openSheet } = useAppSheetActions();
   const target = part.href ?? part.to ?? part.path ?? part.url;
   const open = () => {
     if (!target) return;
     if (/^https?:\/\//.test(target)) {
       window.location.assign(target);
+      return;
+    }
+    const sheet = sheetTargetFromHref(target);
+    if (sheet) {
+      openSheet(sheet);
       return;
     }
     navigate(target);
@@ -351,6 +385,51 @@ export function AiNavigationCard({ part, compact = false }: { part: AiNavigation
       <ArrowSquareOutIcon weight="bold" />
     </button>
   );
+}
+
+export function AiProfileCard({ part }: { part: AiProfileCardPart }) {
+  return (
+    <section className="ai-structured-card ai-profile-card">
+      {part.avatarUrl ? <img src={part.avatarUrl} alt="" /> : <UserPlusIcon weight="fill" />}
+      <div>
+        <strong>{part.title ?? "用户资料"}</strong>
+        <p>{[part.name, part.email].filter(Boolean).join(" · ")}</p>
+      </div>
+    </section>
+  );
+}
+
+export function AiMemberCard({ part }: { part: AiMemberCardPart }) {
+  return (
+    <section className="ai-structured-card ai-member-card">
+      <UserPlusIcon weight="fill" />
+      <div>
+        <strong>{part.title ?? "成员"}</strong>
+        <p>{[part.name, part.role, part.status].filter(Boolean).join(" · ")}</p>
+      </div>
+    </section>
+  );
+}
+
+function sheetTargetFromHref(target: string) {
+  const path = target.split("?")[0] ?? target;
+  if (path === "/records/new") return { type: "record-form" as const };
+  if (path === "/records/pending") return { type: "pending-imports" as const };
+  if (path === "/records/imports") return { type: "imports" as const };
+  if (path.startsWith("/records/") && path.endsWith("/edit")) {
+    const recordId = path.split("/")[2];
+    return recordId ? { type: "record-form" as const, recordId } : undefined;
+  }
+  if (path.startsWith("/records/")) {
+    const transactionId = path.split("/")[2];
+    return transactionId ? { type: "record-detail" as const, transactionId } : undefined;
+  }
+  if (path === "/members" || path.startsWith("/members/")) return { type: "members" as const };
+  if (path === "/ai") return { type: "ai" as const };
+  if (path === "/settings/export") return { type: "settings-export" as const };
+  if (path === "/settings/help") return { type: "settings-help" as const };
+  if (path === "/settings/about") return { type: "settings-about" as const };
+  return undefined;
 }
 
 export function AiConfirmation({ part }: { part: AiConfirmationPart }) {

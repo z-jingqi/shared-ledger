@@ -47,6 +47,8 @@ export type ImportJob = {
   ocrEventSequence?: number;
   createdAt: string;
   updatedAt: string;
+  deletedAt?: string;
+  deletedByUserId?: string;
 };
 export type ImportedRecord = {
   id: string;
@@ -86,35 +88,6 @@ export type AiConfirmation = {
   createdAt: string;
   updatedAt: string;
 };
-export type AiActionAuditLog = {
-  id: string;
-  userId: string;
-  bookId?: string;
-  action: string;
-  targetType?: string;
-  targetId?: string;
-  idempotencyKey: string;
-  status: "success" | "error";
-  payload: Record<string, unknown>;
-  result?: Record<string, unknown>;
-  errorMessage?: string;
-  createdAt: string;
-};
-export type AiTask = {
-  id: string;
-  userId: string;
-  bookId?: string;
-  kind: string;
-  status: string;
-  sourceType?: string;
-  sourceId?: string;
-  payload?: Record<string, unknown>;
-  result?: Record<string, unknown>;
-  errorMessage?: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
 export class MemoryLedgerStore {
   users: LedgerUser[] = [{ id: "user_demo", name: "张三", email: "demo@ledger.local", plan: "free" }];
   books: Book[] = [
@@ -169,8 +142,6 @@ export class MemoryLedgerStore {
   imports: ImportJob[] = [];
   records: ImportedRecord[] = [];
   aiConfirmations: AiConfirmation[] = [];
-  aiActionAuditLogs: AiActionAuditLog[] = [];
-  aiTasks: AiTask[] = [];
   categories: SimpleEntity[] = [
     { id: "cat_food", bookId: "book_home", name: "餐饮", type: "expense", icon: "fork-knife", sortOrder: 1 },
     { id: "cat_salary", bookId: "book_home", name: "工资", type: "income", icon: "wallet", sortOrder: 1 },

@@ -1,24 +1,23 @@
-import { useCallback, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useCallback } from "react";
+import { apiQueryKey } from "../features/data/queryClient";
 import { api } from "../lib";
 
 export function useApi<T>(path: string | undefined) {
-  const [data, setData] = useState<T>();
-  const [error, setError] = useState<string>();
-  const [loading, setLoading] = useState(Boolean(path));
+  const shouldCacheBooks = path === "/books" && import.meta.env.MODE !== "test";
+  const query = useQuery({
+    queryKey: apiQueryKey(path),
+    queryFn: () => api<T>(path ?? ""),
+    enabled: Boolean(path),
+    gcTime: shouldCacheBooks ? 10 * 60 * 1000 : undefined,
+    staleTime: shouldCacheBooks ? 5 * 60 * 1000 : undefined,
+    refetchOnMount: shouldCacheBooks ? false : undefined,
+  });
+  const { data, error: queryError, isFetching, isLoading, refetch } = query;
   const reload = useCallback(async () => {
     if (!path) return;
-    setLoading(true);
-    try {
-      setData(await api<T>(path));
-      setError(undefined);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "请求失败");
-    } finally {
-      setLoading(false);
-    }
-  }, [path]);
-  useEffect(() => {
-    void reload();
-  }, [reload]);
-  return { data, error, loading, reload };
+    await refetch();
+  }, [path, refetch]);
+  const error = queryError ? (queryError instanceof Error ? queryError.message : "请求失败") : undefined;
+  return { data, error, loading: isLoading, fetching: isFetching, reload };
 }

@@ -62,13 +62,20 @@ export async function verifyPassword(password: string, encoded: string) {
 }
 
 function toLedgerUser(row: UserRow): LedgerUser {
+  const avatarUrl = normalizeStoredAvatarUrl(row.avatarUrl);
   return {
     id: row.id,
     name: row.name,
     email: row.email ?? "",
+    ...(row.phone ? { phone: row.phone } : {}),
     plan: row.plan ?? "free",
-    ...(row.avatarUrl ? { avatarUrl: row.avatarUrl } : {}),
+    ...(avatarUrl ? { avatarUrl } : {}),
   };
+}
+
+function normalizeStoredAvatarUrl(value: string | null) {
+  if (!value || value.includes("/auth/avatar/")) return undefined;
+  return value;
 }
 
 async function findUser(db: D1Database, where: string, value: string) {
@@ -78,7 +85,7 @@ async function findUser(db: D1Database, where: string, value: string) {
        FROM users u
        LEFT JOIN subscriptions s ON s.user_id = u.id AND s.status = 'active'
        LEFT JOIN auth_identities i ON i.user_id = u.id
-       WHERE ${where}
+       WHERE u.deleted_at IS NULL AND (${where})
        ORDER BY s.created_at DESC
        LIMIT 1`,
     )
@@ -103,19 +110,19 @@ export async function createPasswordAccount(
   await db.batch([
     db
       .prepare(
-        "INSERT INTO users (id,name,email,phone,password_hash,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
+        "INSERT INTO users (id,name,email,phone,password_hash,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
       )
-      .bind(userId, username, null, null, passwordHash, now, now),
+      .bind(userId, username, null, null, passwordHash, userId, userId, now, now),
     db
       .prepare(
-        "INSERT INTO auth_identities (id,user_id,provider,provider_account_id,password_hash,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
+        "INSERT INTO auth_identities (id,user_id,provider,provider_account_id,password_hash,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
       )
-      .bind(`identity_${crypto.randomUUID()}`, userId, "password", username, passwordHash, now, now),
+      .bind(`identity_${crypto.randomUUID()}`, userId, "password", username, passwordHash, userId, userId, now, now),
     db
       .prepare(
-        "INSERT INTO subscriptions (id,user_id,plan,status,started_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
+        "INSERT INTO subscriptions (id,user_id,plan,status,started_at,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
       )
-      .bind(`subscription_${crypto.randomUUID()}`, userId, "free", "active", now, now, now),
+      .bind(`subscription_${crypto.randomUUID()}`, userId, "free", "active", now, userId, userId, now, now),
   ]);
   return { id: userId, name: username, email: "", plan: "free" as const };
 }
@@ -249,20 +256,88 @@ export async function upgradeSubscription(
   await db.batch([
     db
       .prepare(
-        "UPDATE users SET email = COALESCE(?, email), phone = COALESCE(?, phone), updated_at = ? WHERE id = ?",
+        "UPDATE users SET email = COALESCE(?, email), phone = COALESCE(?, phone), updated_at = ?, updated_by_user_id = ? WHERE id = ?",
       )
-      .bind(contact.email ?? null, contact.phone ?? null, now, userId),
+      .bind(contact.email ?? null, contact.phone ?? null, now, userId, userId),
     db
       .prepare(
-        "UPDATE subscriptions SET status = 'expired', updated_at = ? WHERE user_id = ? AND status = 'active'",
+        "UPDATE subscriptions SET status = 'expired', updated_at = ?, updated_by_user_id = ? WHERE user_id = ? AND status = 'active' AND deleted_at IS NULL",
       )
-      .bind(now, userId),
+      .bind(now, userId, userId),
     db
       .prepare(
-        "INSERT INTO subscriptions (id,user_id,plan,status,started_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
+        "INSERT INTO subscriptions (id,user_id,plan,status,started_at,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
       )
-      .bind(`subscription_${crypto.randomUUID()}`, userId, "pro", "active", now, now, now),
+      .bind(`subscription_${crypto.randomUUID()}`, userId, "pro", "active", now, userId, userId, now, now),
   ]);
+}
+
+export async function updateUserProfile(
+  db: D1Database,
+  userId: string,
+  input: { name: string; email?: string },
+) {
+  const name = input.name.trim();
+  const email = input.email?.trim() || null;
+  const current = await findUser(db, "u.id = ?", userId);
+  if (!current) throw new Error("用户不存在");
+
+  const sameName = await findUser(db, "u.name = ?", name);
+  if (sameName && sameName.id !== userId) throw new Error("用户名已被使用");
+  if (email) {
+    const sameEmail = await findUser(db, "u.email = ?", email);
+    if (sameEmail && sameEmail.id !== userId) throw new Error("邮箱已被其他用户使用");
+  }
+
+  await db
+    .prepare("UPDATE users SET name = ?, email = ?, updated_at = ?, updated_by_user_id = ? WHERE id = ?")
+    .bind(name, email, new Date().toISOString(), userId, userId)
+    .run();
+  const updated = await findUser(db, "u.id = ?", userId);
+  if (!updated) throw new Error("用户不存在");
+  return toLedgerUser(updated);
+}
+
+export async function changeUserPassword(
+  db: D1Database,
+  userId: string,
+  input: { currentPassword: string; newPassword: string },
+) {
+  const identity = await db
+    .prepare("SELECT id,password_hash AS passwordHash FROM auth_identities WHERE user_id = ? AND provider = 'password'")
+    .bind(userId)
+    .first<{ id: string; passwordHash: string }>();
+  if (!identity) throw new Error("当前账号不支持密码修改");
+  if (!(await verifyPassword(input.currentPassword, identity.passwordHash))) throw new Error("当前密码不正确");
+  const passwordHash = await hashPassword(input.newPassword);
+  const now = new Date().toISOString();
+  await db.batch([
+    db
+      .prepare("UPDATE auth_identities SET password_hash = ?, updated_at = ?, updated_by_user_id = ? WHERE id = ?")
+      .bind(passwordHash, now, userId, identity.id),
+    db
+      .prepare("UPDATE users SET password_hash = ?, updated_at = ?, updated_by_user_id = ? WHERE id = ?")
+      .bind(passwordHash, now, userId, userId),
+  ]);
+}
+
+export async function findUserForInvitation(db: D1Database, target: string) {
+  const value = target.trim();
+  if (!value) return null;
+  const row = await db
+    .prepare(
+      `SELECT u.id, u.name, u.email, u.avatar_url AS avatarUrl, u.phone, s.plan, i.provider
+       FROM users u
+       LEFT JOIN subscriptions s ON s.user_id = u.id AND s.status = 'active'
+       LEFT JOIN auth_identities i ON i.user_id = u.id
+       WHERE u.deleted_at IS NULL AND (u.id = ? OR u.name = ? OR u.email = ? OR u.phone = ?)
+       ORDER BY s.created_at DESC
+       LIMIT 1`,
+    )
+    .bind(value, value, value, value)
+    .first<UserRow>();
+  if (!row) return null;
+  return { ...toLedgerUser(row), phone: row.phone ?? undefined };
 }
 
 export async function createOAuthState(db: D1Database, provider: "google" | "wechat", redirectTo?: string) {
@@ -308,13 +383,15 @@ export async function createOrFindOAuthUser(
       const timestamp = new Date().toISOString();
       await db
         .prepare(
-          "INSERT INTO auth_identities (id,user_id,provider,provider_account_id,created_at,updated_at) VALUES (?,?,?,?,?,?)",
+          "INSERT INTO auth_identities (id,user_id,provider,provider_account_id,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
         )
         .bind(
           id("identity"),
           emailOwner.id,
           profile.provider,
           profile.providerAccountId,
+          emailOwner.id,
+          emailOwner.id,
           timestamp,
           timestamp,
         )
@@ -326,25 +403,27 @@ export async function createOrFindOAuthUser(
   const userId = id("user");
   await db.batch([
     db
-      .prepare("INSERT INTO users (id,name,email,password_hash,created_at,updated_at) VALUES (?,?,?,?,?,?)")
+      .prepare("INSERT INTO users (id,name,email,password_hash,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)")
       .bind(
         userId,
         profile.name.slice(0, 60) || "账本用户",
         profile.email ?? null,
         await hashPassword(randomToken()),
+        userId,
+        userId,
         timestamp,
         timestamp,
       ),
     db
       .prepare(
-        "INSERT INTO auth_identities (id,user_id,provider,provider_account_id,created_at,updated_at) VALUES (?,?,?,?,?,?)",
+        "INSERT INTO auth_identities (id,user_id,provider,provider_account_id,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
       )
-      .bind(id("identity"), userId, profile.provider, profile.providerAccountId, timestamp, timestamp),
+      .bind(id("identity"), userId, profile.provider, profile.providerAccountId, userId, userId, timestamp, timestamp),
     db
       .prepare(
-        "INSERT INTO subscriptions (id,user_id,plan,status,started_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
+        "INSERT INTO subscriptions (id,user_id,plan,status,started_at,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
       )
-      .bind(id("subscription"), userId, "free", "active", timestamp, timestamp, timestamp),
+      .bind(id("subscription"), userId, "free", "active", timestamp, userId, userId, timestamp, timestamp),
   ]);
   return {
     id: userId,
@@ -357,7 +436,7 @@ export async function createOrFindOAuthUser(
 export async function updateUserAvatar(db: D1Database, userId: string, avatarUrl: string) {
   const timestamp = new Date().toISOString();
   await db
-    .prepare("UPDATE users SET avatar_url = ?, updated_at = ? WHERE id = ?")
-    .bind(avatarUrl, timestamp, userId)
+    .prepare("UPDATE users SET avatar_url = ?, updated_at = ?, updated_by_user_id = ? WHERE id = ?")
+    .bind(avatarUrl, timestamp, userId, userId)
     .run();
 }

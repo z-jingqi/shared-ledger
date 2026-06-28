@@ -21,6 +21,24 @@ export function useActiveBook() {
     writeLastActiveBookId(book.id);
   }, [book]);
 
+  useEffect(() => {
+    if (state.loading || state.error) return;
+    const requestedMissing = requested && !books.some((item) => item.id === requested);
+    if (!requestedMissing && (book || !stored)) return;
+    if (!book) {
+      clearLastActiveBookId();
+      if (requested) {
+        const next = new URLSearchParams(search);
+        next.delete("bookId");
+        setSearch(next, { replace: true });
+      }
+      return;
+    }
+    const next = new URLSearchParams(search);
+    next.set("bookId", book.id);
+    setSearch(next, { replace: true });
+  }, [book, books, requested, search, setSearch, state.error, state.loading, stored]);
+
   const setActiveBook = (bookId: string) => {
     writeLastActiveBookId(bookId);
     const next = new URLSearchParams(search);
@@ -42,6 +60,14 @@ export function readLastActiveBookId() {
 export function writeLastActiveBookId(bookId: string) {
   try {
     window.localStorage.setItem(LAST_ACTIVE_BOOK_STORAGE_KEY, bookId);
+  } catch {
+    // localStorage may be unavailable in private browsing or SSR-like tests.
+  }
+}
+
+export function clearLastActiveBookId() {
+  try {
+    window.localStorage.removeItem(LAST_ACTIVE_BOOK_STORAGE_KEY);
   } catch {
     // localStorage may be unavailable in private browsing or SSR-like tests.
   }

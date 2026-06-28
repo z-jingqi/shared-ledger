@@ -5,6 +5,7 @@
 }
 
 .ios-top-actions > button {
+  position: relative;
   width: 40px;
   height: 40px;
   border: 0;
@@ -15,6 +16,22 @@
   align-items: center;
   justify-content: center;
   box-shadow: 0 4px 16px rgba(29, 42, 71, 0.08);
+}
+
+.ios-filter-trigger.active {
+  color: var(--ios-accent);
+}
+
+.ios-filter-trigger.active::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--ios-accent);
+  box-shadow: 0 0 0 2px #fff;
 }
 
 .ios-record-scroll {
@@ -50,16 +67,29 @@
 }
 
 .ios-record-search button {
-  width: 34px;
-  min-width: 34px;
   height: 30px;
   border: 0;
   border-radius: 999px;
-  background: #fff0e8;
+  background: transparent;
   color: var(--ios-accent);
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.ios-record-search .ios-record-ai-search-button {
+  width: auto;
+  min-width: 78px;
+  gap: 4px;
+  padding: 0 10px;
+  background: #fff0e8;
+  color: var(--ios-accent);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.ios-record-search .ios-record-ai-search-button:disabled {
+  opacity: .56;
 }
 
 .ios-filter-chips {
@@ -90,6 +120,73 @@
   border-color: var(--ios-accent);
   background: var(--ios-accent);
   color: #fff;
+}
+
+.ios-active-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 4px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 104, 28, 0.18);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 8px 24px rgba(29, 42, 71, 0.06);
+}
+
+.ios-active-filter-bar > span {
+  flex-shrink: 0;
+  color: var(--ios-accent);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.ios-active-filter-bar > div {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.ios-active-filter-bar > div::-webkit-scrollbar {
+  display: none;
+}
+
+.ios-active-filter-bar em {
+  flex-shrink: 0;
+  max-width: 132px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #f4f6f9;
+  color: #5b6473;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ios-active-filter-bar.ai {
+  border-color: rgba(124, 77, 255, 0.2);
+}
+
+.ios-active-filter-bar.ai > span {
+  color: #7c4dff;
+}
+
+.ios-active-filter-bar button {
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: var(--ios-accent);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
 }
 
 .ios-record-groups {
@@ -128,69 +225,109 @@
 }
 
 .ios-transaction-row {
+  width: 100%;
+  border: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: 56px;
-  padding: 10px 14px;
+  gap: 12px;
+  min-height: 64px;
+  padding: 12px 14px;
   border-bottom: 1px solid #f2f4f7;
+  background: transparent;
   color: inherit;
+  font: inherit;
   text-decoration: none;
+  text-align: left;
+  cursor: pointer;
 }
 
 .ios-transaction-row:last-child {
   border-bottom: 0;
 }
 
-.ios-transaction-dot {
-  width: 9px;
-  height: 9px;
+.ios-transaction-category-name {
+  flex: 0 0 58px;
+  max-width: 58px;
   border-radius: 999px;
-  flex: 0 0 auto;
-  box-shadow: 0 0 0 4px rgba(137, 147, 163, 0.1);
-}
-
-.ios-transaction-dot.income {
-  background: var(--ios-income);
-}
-
-.ios-transaction-dot.expense {
-  background: var(--ios-danger);
-}
-
-.ios-transaction-meta {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-}
-
-.ios-transaction-category-tag {
-  max-width: 100%;
-  border-radius: 999px;
-  padding: 4px 9px;
+  padding: 6px 8px;
   background: #f4f6f9;
   color: #5b6473;
   font-size: 12px;
   font-weight: 800;
-  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+}
+
+.ios-transaction-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.ios-transaction-copy b,
+.ios-transaction-copy small {
+  display: block;
+}
+
+.ios-transaction-copy b {
+  color: var(--ios-text);
+  font-size: 14px;
+  font-weight: 850;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+.ios-transaction-copy small {
+  margin-top: 3px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.ios-transaction-copy small.expense {
+  color: #e38a84;
+}
+
+.ios-transaction-copy small.income {
+  color: #75bf93;
+}
+
 .ios-transaction-row strong {
-  font-size: 14.5px;
+  font-size: 15px;
   font-weight: 900;
   white-space: nowrap;
 }
 
 .ios-transaction-row strong.expense {
-  color: var(--ios-text);
+  color: #d96b64;
 }
 
 .ios-transaction-row strong.income {
-  color: var(--ios-income);
+  color: #1f9d57;
+}
+
+.ios-record-empty-state {
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.ios-record-empty-state p {
+  max-width: 260px;
+  margin: 8px auto 0;
+  line-height: 1.55;
+}
+
+.ios-record-empty-state button {
+  margin-top: 16px;
+  border: 0;
+  border-radius: 999px;
+  padding: 9px 16px;
+  background: var(--ios-accent);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 850;
 }
 
 .ios-filter-sheet,
@@ -502,27 +639,46 @@
 
 .ios-line-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 92px 36px;
+  grid-template-columns: minmax(0, 1fr) minmax(92px, 120px) 44px;
   gap: 8px;
-  align-items: center;
+  align-items: start;
+}
+
+.ios-line-row label {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
 }
 
 .ios-line-row input {
+  width: 100%;
   min-height: 44px;
   border: 1px solid #e3e7ed;
   border-radius: 13px;
   padding: 0 12px;
   outline: 0;
   background: #fff;
+  box-sizing: border-box;
+}
+
+.ios-line-row em {
+  color: var(--ios-danger);
+  font-size: 11.5px;
+  font-style: normal;
+  font-weight: 750;
+  line-height: 1.35;
 }
 
 .ios-line-row button {
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   border: 0;
   border-radius: 12px;
   background: #fdeceb;
   color: var(--ios-danger);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .ios-record-detail {
@@ -533,28 +689,23 @@
 
 .ios-record-detail-hero {
   text-align: center;
-  padding: 8px 0 8px;
-}
-
-.ios-record-detail-hero .ios-icon-tile {
-  width: 56px;
-  height: 56px;
-  margin: 0 auto;
-  border-radius: 17px;
-  font-size: 22px;
-  font-weight: 900;
+  padding: 10px 0 8px;
 }
 
 .ios-record-detail-hero strong,
-.ios-record-detail-hero span {
+.ios-record-detail-hero span,
+.ios-record-detail-hero small {
   display: block;
 }
 
 .ios-record-detail-hero strong {
-  margin-top: 12px;
   font-size: 32px;
   font-weight: 900;
   letter-spacing: -0.8px;
+}
+
+.ios-record-detail-hero strong.expense {
+  color: #d96b64;
 }
 
 .ios-record-detail-hero strong.income {
@@ -565,6 +716,17 @@
   margin-top: 4px;
   color: #5b6473;
   font-size: 14px;
+}
+
+.ios-record-detail-hero small {
+  width: fit-content;
+  margin: 10px auto 0;
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: #fff;
+  color: #7b8494;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .ios-detail-rows {
@@ -616,6 +778,83 @@
   gap: 14px;
 }
 
+.ios-import-hero {
+  border-radius: 22px;
+  padding: 16px;
+  background: #fff;
+  box-shadow: 0 18px 42px rgba(38, 48, 68, 0.06);
+}
+
+.ios-import-hero p {
+  margin: 0;
+  color: var(--ios-muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.ios-import-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.ios-import-stats span {
+  border-radius: 16px;
+  padding: 10px;
+  background: #f6f7fa;
+  color: #7f8a9c;
+  font-size: 11.5px;
+  font-weight: 800;
+}
+
+.ios-import-stats b {
+  display: block;
+  margin-bottom: 2px;
+  color: #111827;
+  font-size: 18px;
+}
+
+.ios-import-filter {
+  display: flex;
+  gap: 8px;
+  padding: 4px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: inset 0 0 0 1px rgba(214, 221, 230, 0.7);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.ios-import-filter::-webkit-scrollbar {
+  display: none;
+}
+
+.ios-import-filter button {
+  min-width: max-content;
+  height: 38px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 12px;
+  background: transparent;
+  color: #6f7a8d;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 900;
+}
+
+.ios-import-filter button.active {
+  background: var(--ios-accent);
+  color: #fff;
+  box-shadow: 0 10px 20px rgba(255, 104, 28, 0.18);
+}
+
+.ios-import-filter em {
+  margin-left: 5px;
+  font-style: normal;
+  opacity: 0.78;
+}
+
 .ios-sheet-note {
   margin: 0;
   border-radius: 12px;
@@ -626,7 +865,11 @@
   line-height: 1.55;
 }
 
-.ios-import-jobs h3 {
+.ios-import-day + .ios-import-day {
+  margin-top: 16px;
+}
+
+.ios-import-day h3 {
   margin: 4px 4px 9px;
   color: #5b6473;
   font-size: 12.5px;
@@ -637,8 +880,55 @@
   display: flex;
   align-items: center;
   gap: 11px;
-  padding: 13px 14px;
+  padding: 12px;
   margin-bottom: 10px;
+}
+
+.ios-import-preview {
+  position: relative;
+  width: 118px;
+  height: 66px;
+  flex: 0 0 118px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 16px;
+  background: #eef3fb;
+  color: #5d8df7;
+}
+
+.ios-import-preview.done {
+  background: #e9f8ef;
+  color: #1f9d57;
+}
+
+.ios-import-preview.failed {
+  background: #fdeceb;
+  color: #d74035;
+}
+
+.ios-import-preview img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.ios-import-preview svg {
+  margin-top: -8px;
+}
+
+.ios-import-preview small {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 7px;
+  display: block;
+  text-align: center;
+  color: currentColor;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.03em;
 }
 
 .ios-import-job > span {
@@ -647,7 +937,9 @@
 }
 
 .ios-import-job b,
-.ios-import-job small {
+.ios-import-job small,
+.ios-import-job > span p,
+.ios-import-error-stage {
   display: block;
 }
 
@@ -662,6 +954,29 @@
   margin-top: 2px;
   color: var(--ios-muted);
   font-size: 12px;
+}
+
+.ios-import-error-stage {
+  width: fit-content;
+  margin-top: 7px;
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: #fff2ef;
+  color: #c74235;
+  font-size: 10.5px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.ios-import-job > span p {
+  display: -webkit-box;
+  margin: 7px 0 0;
+  color: #c74235;
+  font-size: 11.5px;
+  line-height: 1.35;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .ios-import-job i {

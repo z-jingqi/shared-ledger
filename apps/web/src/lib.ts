@@ -27,15 +27,18 @@ async function refreshSession() {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await apiFetch(path, init);
+  if (!response.ok) throw new ApiError(await parseError(response), response.status);
+  if (response.status === 204) return undefined as T;
+  return response.json();
+}
+export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   const isFormData = init?.body instanceof FormData;
-  const response = await fetch(`${API}${path}`, {
+  return fetch(`${API}${path}`, {
     credentials: "include",
     headers: { ...(isFormData ? {} : { "Content-Type": "application/json" }), ...init?.headers },
     ...init,
   });
-  if (!response.ok) throw new ApiError(await parseError(response), response.status);
-  if (response.status === 204) return undefined as T;
-  return response.json();
 }
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   try {
@@ -47,6 +50,13 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw error;
   }
+}
+export async function apiFetchWithRefresh(path: string, init?: RequestInit): Promise<Response> {
+  const response = await apiFetch(path, init);
+  if (response.status !== 401 || path === "/auth/refresh") return response;
+  if (await refreshSession()) return apiFetch(path, init);
+  window.dispatchEvent(new Event("ledger:unauthorized"));
+  return response;
 }
 export const money = (value: number) =>
   new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY" }).format(value);

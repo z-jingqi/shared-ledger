@@ -34,7 +34,16 @@ pnpm dev
 
 ```bash
 pnpm db:migrate:local
+pnpm db:seed:local
 ```
+
+也可以一次执行：
+
+```bash
+pnpm db:setup:local
+```
+
+`db:seed:local` 会可重复地创建本地测试账号 `SoundOnly / 123456`、默认账本 `SoundOnly` 和 creator 成员关系。执行 destructive migration 后旧数据会被清空，如果浏览器还带着旧 `bookId`，前端会自动落到有效账本或空账本状态。
 
 `pnpm --filter @shared-ledger/api dev` 使用本地 D1、R2、Queue 模拟，认证、账本与 CSV/Excel 导入均可本地验证。Workers AI 不能本地模拟，登录 Cloudflare 后可使用远程 AI 绑定；图片和 PDF 的 OCR 需要可访问的 Aleph-OCR 服务。本地默认指向 `http://127.0.0.1:8787`，API key 写入 `apps/api/.dev.vars`：
 

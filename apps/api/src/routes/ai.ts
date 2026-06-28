@@ -1,389 +1,149 @@
-import { type UIMessage } from "ai";
-import { canUseAi, type AiActionName, type AiIntent as ProviderAiIntent } from "@shared-ledger/shared";
 import type { Hono } from "hono";
+import type { ModelMessage } from "ai";
 import { z } from "zod";
 import { jsonError } from "../lib/http";
 import { D1LedgerRepository } from "../repository";
 import { requireMember, requireUser } from "../services/access";
-import {
-  cancelAiConfirmation,
-  confirmAiConfirmation,
-  executeAiActionChat,
-  importJobToTask,
-  listAiTasks,
-  searchAiTransactions,
-} from "../services/ai-actions";
-import { ingestAiTransaction } from "../services/ai-ingestion";
-import { parseHeuristicIntent, type AiActionIntent, type TransactionSearchFilters } from "../services/ai-normalizer";
-import { aiTaskStatusStreamTiming, createAiTaskStatusStream } from "../services/ai-tasks";
 import { runtimeAiProvider } from "../services/ai";
-import { cancelImportJob, retryImportJob } from "../services/imports";
+import {
+  cancelAiToolConfirmation,
+  confirmAiTool,
+  executeAiTool,
+  toolDefinitionsForModel,
+  type AiToolRepository,
+} from "../services/ai-tools";
 import type { MemoryLedgerStore } from "../store";
-import type { Env } from "../types";
+import type { Env, LedgerUser } from "../types";
 
-const messageText = (message?: UIMessage) =>
-  message?.parts
-    .filter((part) => part.type === "text")
-    .map((part) => part.text)
-    .join("\n") ?? "";
+type AiRequestBody = {
+  message: string;
+  bookId?: string;
+  page?: string;
+  timeZone?: string;
+  attachments: File[];
+};
 
-const availableActions: AiActionName[] = [
-  "create-record",
-  "search-records",
-  "analyze-records",
-  "invite-member",
-  "save-attachments",
-  "confirm-import-batch",
-  "cancel-task",
-  "retry-task",
-];
-
-const transactionSearchFiltersSchema = z.object({
-  type: z.enum(["income", "expense"]).optional(),
-  minAmount: z.coerce.number().positive().optional(),
-  maxAmount: z.coerce.number().positive().optional(),
-  from: z.string().trim().min(1).max(40).optional(),
-  to: z.string().trim().min(1).max(40).optional(),
-  categoryId: z.string().trim().min(1).max(64).optional(),
-  categoryName: z.string().trim().min(1).max(80).optional(),
-  q: z.string().trim().min(1).max(80).optional(),
-  sort: z.enum(["date_desc", "date_asc", "amount_desc", "amount_asc"]).optional(),
+const sessionPatchSchema = z.object({
+  title: z.string().trim().min(1).max(80).optional(),
+  bookId: z.string().trim().min(1).nullable().optional(),
 });
-
-const transactionSearchRouteSchema = z.object({
-  bookId: z.string().trim().min(1),
-  query: z.string().trim().min(1).max(500),
-  pageContext: z.string().trim().max(120).optional(),
-  timeZone: z.string().trim().min(1).max(80).optional(),
-  baseFilters: transactionSearchFiltersSchema.optional(),
-  type: z.enum(["income", "expense"]).optional(),
-  from: z.string().trim().min(1).max(40).optional(),
-  to: z.string().trim().min(1).max(40).optional(),
-  minAmount: z.coerce.number().positive().optional(),
-  maxAmount: z.coerce.number().positive().optional(),
-  categoryIds: z.array(z.string().trim().min(1).max(64)).optional(),
-  categoryNames: z.array(z.string().trim().min(1).max(80)).optional(),
-  q: z.string().trim().min(1).max(80).optional(),
-  sort: z.enum(["occurredAt_desc", "occurredAt_asc", "amount_desc", "amount_asc", "date_desc", "date_asc"]).optional(),
-});
-type TransactionSearchRouteInput = z.infer<typeof transactionSearchRouteSchema>;
 
 function testMemoryEnabled(context: any, store?: MemoryLedgerStore) {
   return Boolean(store && context.env?.APP_ENV === "test" && context.req.header("x-ai-test-memory") === "true");
 }
 
-function aiRepository(context: any, store?: MemoryLedgerStore) {
+function aiRepository(context: any, store?: MemoryLedgerStore): AiToolRepository | undefined {
   if (context.env.DB) return new D1LedgerRepository(context.env.DB);
   return testMemoryEnabled(context, store) ? store : undefined;
 }
 
 function requireAiRepository(context: any, store?: MemoryLedgerStore) {
   const repository = aiRepository(context, store);
-  return repository ?? jsonError(context, "AI 对话需要 D1 运行时", 503);
-}
-
-async function resolveAiIntent(
-  context: any,
-  store: MemoryLedgerStore | undefined,
-  repository: D1LedgerRepository | MemoryLedgerStore,
-  input: {
-    text: string;
-    bookId?: string;
-    page?: string;
-    today: string;
-    timeZone: string;
-    hasAttachments?: boolean;
-  },
-): Promise<AiActionIntent> {
-  if (testMemoryEnabled(context, store)) return parseHeuristicIntent(input.text, input.hasAttachments);
-  const categories = input.bookId
-    ? repository instanceof D1LedgerRepository
-      ? await repository.listSimple("categories", input.bookId)
-      : repository.categories.filter((category) => category.bookId === input.bookId)
-    : [];
-  const tags = input.bookId
-    ? repository instanceof D1LedgerRepository
-      ? await repository.listSimple("tags", input.bookId)
-      : repository.tags.filter((tag) => tag.bookId === input.bookId)
-    : [];
-  try {
-    const intent = await runtimeAiProvider(context.env).parseUserIntent({
-      text: input.text,
-      bookId: input.bookId ?? "",
-      page: input.page ?? "records",
-      today: input.today,
-      timeZone: input.timeZone,
-      categories: categories.map((category) => ({ id: category.id, name: category.name, type: category.type })),
-      tags: tags.map((tag) => ({ id: tag.id, name: tag.name })),
-      hasAttachments: input.hasAttachments,
-      availableActions,
-    });
-    return toActionIntent(intent);
-  } catch {
-    const fallback = parseHeuristicIntent(input.text, input.hasAttachments);
-    if (fallback.action === "search-records" || fallback.action === "analyze-records") return fallback;
-    return {
-      action: "search-records",
-      confidence: 0.3,
-      missingFields: [],
-      followUpQuestion: "AI 服务暂时不可用，暂时不能执行写操作。",
-      requiresConfirmation: false,
-    };
-  }
-}
-
-function toActionIntent(intent: ProviderAiIntent): AiActionIntent {
-  return {
-    action: intent.action,
-    confidence: intent.confidence,
-    transaction: intent.transaction,
-    search: intent.search,
-    normalizedSearchFilters: intent.normalizedSearchFilters as AiActionIntent["normalizedSearchFilters"],
-    invite: intent.invite,
-    missingFields: intent.missingFields,
-    requiresConfirmation: intent.requiresConfirmation,
-    followUpQuestion: intent.followUpQuestion,
-    ingestion: intent.ingestion,
-  };
-}
-
-function routeSearchFilters(input: TransactionSearchRouteInput): TransactionSearchFilters {
-  const filters: TransactionSearchFilters = { ...(input.baseFilters ?? {}) };
-  if (input.type) filters.type = input.type;
-  if (typeof input.minAmount === "number") filters.minAmount = input.minAmount;
-  if (typeof input.maxAmount === "number") filters.maxAmount = input.maxAmount;
-  if (input.from) filters.from = input.from;
-  if (input.to) filters.to = input.to.includes("T") ? input.to : `${input.to}T23:59:59.999Z`;
-  if (input.categoryIds?.[0]) filters.categoryId = input.categoryIds[0];
-  if (input.categoryNames?.[0]) filters.categoryName = input.categoryNames[0];
-  if (input.q) filters.q = input.q;
-  if (input.sort === "amount_desc") filters.sort = "amount_desc";
-  else if (input.sort === "amount_asc") filters.sort = "amount_asc";
-  else if (input.sort === "occurredAt_asc" || input.sort === "date_asc") filters.sort = "date_asc";
-  else if (input.sort === "occurredAt_desc" || input.sort === "date_desc") filters.sort = "date_desc";
-  if (filters.to && !filters.to.includes("T")) filters.to = `${filters.to}T23:59:59.999Z`;
-  return filters;
+  return repository ?? jsonError(context, "AI 需要 D1 运行时或测试内存运行时", 503);
 }
 
 export function registerAiRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryLedgerStore) {
-  app.post("/ai/chat", async (context) => {
+  app.post("/ai/sessions", async (context) => {
     const user = await requireUser(context, store);
     if (user instanceof Response) return user;
-    if (!canUseAi(user.plan)) return jsonError(context, "AI 助手仅对订阅用户开放", 403);
     const repository = requireAiRepository(context, store);
     if (repository instanceof Response) return repository;
-    const body = await context.req.json<{
-      messages?: UIMessage[];
-      message?: string;
-      bookId?: string;
-      page?: string;
-      conversationId?: string;
-      idempotencyKey?: string;
-      timeZone?: string;
-      hasAttachments?: boolean;
-    }>();
-    const messages =
-      body.messages ??
-      (body.message
-        ? [
-            {
-              id: crypto.randomUUID(),
-              role: "user" as const,
-              parts: [{ type: "text" as const, text: body.message }],
-            },
-          ]
-        : []);
-    const prompt = messageText(messages.at(-1));
-    if (!prompt.trim()) return jsonError(context, "请输入问题");
+    const body = (await context.req.json().catch(() => ({}))) as { bookId?: string; title?: string };
     if (body.bookId) {
       const denied = await requireMember(context, store, body.bookId, user);
       if (denied) return denied;
     }
-
-    const conversationId =
+    const session =
       repository instanceof D1LedgerRepository
-        ? body.conversationId
-          ? (await repository.getConversation(user.id, body.conversationId))?.id
-          : (await repository.createConversation(user.id, body.bookId, prompt.slice(0, 60))).id
-        : body.conversationId ?? `conversation_${crypto.randomUUID()}`;
-    if (!conversationId) return jsonError(context, "对话不存在", 404);
-
-    try {
-      if (repository instanceof D1LedgerRepository) await repository.appendMessage(conversationId, "user", prompt);
-      const today = new Date().toISOString().slice(0, 10);
-      const timeZone = body.timeZone ?? "Asia/Shanghai";
-      const intent = await resolveAiIntent(context, store, repository, {
-        text: prompt,
-        bookId: body.bookId,
-        page: body.page,
-        today,
-        timeZone,
-        hasAttachments: body.hasAttachments,
-      });
-      const parts = await executeAiActionChat({
-        user,
-        repository,
-        bookId: body.bookId,
-        prompt,
-        conversationId,
-        idempotencyKey: body.idempotencyKey ?? context.req.header("idempotency-key"),
-        intent,
-        today,
-        timeZone,
-        page: body.page,
-      });
-      const text = parts
-        .filter((part) => part.type === "text" || part.type === "tool-status")
-        .map((part) => ("text" in part ? part.text : part.message))
-        .join("\n");
-      if (repository instanceof D1LedgerRepository) {
-        await repository.appendMessage(conversationId, "assistant", text || JSON.stringify(parts));
-      }
-      return context.json({
-        conversationId,
-        message: { id: crypto.randomUUID(), role: "assistant", parts },
-        parts,
-      });
-    } catch (error) {
-      return jsonError(context, error instanceof Error ? error.message : "AI 服务暂时不可用", 503);
-    }
+        ? await repository.createAiSession(user.id, body.bookId, body.title?.trim() || "新会话")
+        : createMemorySession(repository, user.id, body.bookId, body.title?.trim() || "新会话");
+    return context.json({ session }, 201);
   });
 
-  app.post("/ai/search/transactions", async (context) => {
+  app.get("/ai/sessions", async (context) => {
     const user = await requireUser(context, store);
     if (user instanceof Response) return user;
-    if (!canUseAi(user.plan)) return jsonError(context, "AI 助手仅对订阅用户开放", 403);
     const repository = requireAiRepository(context, store);
     if (repository instanceof Response) return repository;
-    const body = transactionSearchRouteSchema.safeParse(await context.req.json());
-    if (!body.success) return jsonError(context, "搜索条件不合法");
-    const query = body.data.query;
-    const denied = await requireMember(context, store, body.data.bookId, user);
-    if (denied) return denied;
-    try {
-      const today = new Date().toISOString().slice(0, 10);
-      const timeZone = body.data.timeZone ?? "Asia/Shanghai";
-      const intent = await resolveAiIntent(context, store, repository, {
-        text: query,
-        bookId: body.data.bookId,
-        page: body.data.pageContext ?? "records",
-        today,
-        timeZone,
-      });
-      const result = await searchAiTransactions({
-        repository,
-        bookId: body.data.bookId,
-        query,
-        intent,
-        today,
-        timeZone,
-        baseFilters: routeSearchFilters(body.data),
-      });
-      return context.json({
-        query,
-        filters: result.filters,
-        chips: result.chips,
-        results: result.results,
-        summary: result.summary,
-        href: result.href,
-      });
-    } catch (error) {
-      return jsonError(context, error instanceof Error ? error.message : "AI 搜索失败", 503);
-    }
+    const sessions =
+      repository instanceof D1LedgerRepository
+        ? await repository.listAiSessions(user.id)
+        : memorySessions(repository, user.id);
+    return context.json({ sessions });
   });
 
-  app.post("/ai/transactions/ingest", async (context) => {
+  app.get("/ai/sessions/:id", async (context) => {
     const user = await requireUser(context, store);
     if (user instanceof Response) return user;
-    if (!canUseAi(user.plan)) return jsonError(context, "AI 助手仅对订阅用户开放", 403);
     const repository = requireAiRepository(context, store);
     if (repository instanceof Response) return repository;
-    const body = await context.req.json<{
-      bookId?: string;
-      text?: string;
-      message?: string;
-      prompt?: string;
-      candidate?: Record<string, unknown>;
-      conversationId?: string;
-      idempotencyKey?: string;
-    }>();
-    if (!body.bookId) return jsonError(context, "请先选择一个账本");
-    const denied = await requireMember(context, store, body.bookId, user);
-    if (denied) return denied;
-    const candidate =
-      body.candidate && typeof body.candidate === "object" && !Array.isArray(body.candidate)
-        ? body.candidate
-        : undefined;
-    const text = body.text ?? body.message ?? body.prompt;
-    if (!text?.trim() && !candidate) return jsonError(context, "请输入记账文本或候选记录");
-    try {
-      const result = await ingestAiTransaction({
-        user,
-        repository,
-        bookId: body.bookId,
-        text,
-        candidate,
-        conversationId: body.conversationId,
-        idempotencyKey: body.idempotencyKey ?? context.req.header("idempotency-key"),
-      });
-      return context.json(result.body, result.status as 200);
-    } catch (error) {
-      return jsonError(context, error instanceof Error ? error.message : "AI 记账失败", 400);
-    }
+    const session =
+      repository instanceof D1LedgerRepository
+        ? await repository.getAiSession(user.id, context.req.param("id"))
+        : memorySession(repository, user.id, context.req.param("id"));
+    return session ? context.json({ session }) : jsonError(context, "会话不存在", 404);
   });
 
-  app.post("/ai/confirmations/:id/confirm", async (context) => {
+  app.patch("/ai/sessions/:id", async (context) => {
     const user = await requireUser(context, store);
     if (user instanceof Response) return user;
-    if (!canUseAi(user.plan)) return jsonError(context, "AI 助手仅对订阅用户开放", 403);
     const repository = requireAiRepository(context, store);
     if (repository instanceof Response) return repository;
-    const result = await confirmAiConfirmation({
-      user,
-      repository,
-      confirmationId: context.req.param("id"),
-    });
-    return "error" in result.body
-      ? jsonError(context, result.body.error ?? "确认失败", result.status)
-      : context.json(result.body, result.status as 200);
+    const parsed = sessionPatchSchema.safeParse(await context.req.json().catch(() => ({})));
+    if (!parsed.success) return jsonError(context, "会话数据不合法");
+    const session =
+      repository instanceof D1LedgerRepository
+        ? await repository.updateAiSession(user.id, context.req.param("id"), parsed.data)
+        : updateMemorySession(repository, user.id, context.req.param("id"), parsed.data);
+    return session ? context.json({ session }) : jsonError(context, "会话不存在", 404);
   });
 
-  app.post("/ai/confirmations/:id/cancel", async (context) => {
+  app.delete("/ai/sessions/:id", async (context) => {
     const user = await requireUser(context, store);
     if (user instanceof Response) return user;
-    if (!canUseAi(user.plan)) return jsonError(context, "AI 助手仅对订阅用户开放", 403);
     const repository = requireAiRepository(context, store);
     if (repository instanceof Response) return repository;
-    const result = await cancelAiConfirmation({
-      user,
-      repository,
-      confirmationId: context.req.param("id"),
-    });
-    return "error" in result.body
-      ? jsonError(context, result.body.error ?? "取消确认失败", result.status)
-      : context.json(result.body, result.status as 200);
+    if (repository instanceof D1LedgerRepository) await repository.deleteAiSession(user.id, context.req.param("id"));
+    else deleteMemorySession(repository, user.id, context.req.param("id"));
+    return context.body(null, 204);
   });
 
-  app.get("/ai/tasks", async (context) => {
+  app.post("/ai/sessions/:id/messages", async (context) => {
     const user = await requireUser(context, store);
     if (user instanceof Response) return user;
-    if (!canUseAi(user.plan)) return jsonError(context, "AI 助手仅对订阅用户开放", 403);
     const repository = requireAiRepository(context, store);
     if (repository instanceof Response) return repository;
-    return context.json({ tasks: await listAiTasks(repository, user.id) });
+    const body = await readAiRequest(context);
+    const result = await runAiMessage(context, store, repository, user, context.req.param("id"), body);
+    if (result instanceof Response) return result;
+    return context.json(result);
   });
 
-  app.get("/ai/tasks/status-stream", async (context) => {
+  app.post("/ai/sessions/:id/messages/stream", async (context) => {
     const user = await requireUser(context, store);
     if (user instanceof Response) return user;
-    if (!canUseAi(user.plan)) return jsonError(context, "AI 助手仅对订阅用户开放", 403);
     const repository = requireAiRepository(context, store);
     if (repository instanceof Response) return repository;
-    const stream = createAiTaskStatusStream({
-      repository,
-      userId: user.id,
-      signal: context.req.raw.signal,
-      ...aiTaskStatusStreamTiming(context.env.APP_ENV),
+    const body = await readAiRequest(context);
+    const encoder = new TextEncoder();
+    const signal = context.req.raw.signal;
+    const sendEvent = (controller: ReadableStreamDefaultController<Uint8Array>, event: string, data: unknown) => {
+      if (!signal.aborted) controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+    };
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        try {
+          const result = await runAiMessage(context, store, repository, user, context.req.param("id"), body, {
+            onEvent: (event, data) => sendEvent(controller, event, data),
+            signal,
+          });
+          if (!(result instanceof Response)) sendEvent(controller, "done", result);
+        } catch (error) {
+          sendEvent(controller, "error", { message: error instanceof Error ? error.message : "AI 服务不可用" });
+        } finally {
+          controller.close();
+        }
+      },
     });
     return new Response(stream, {
       headers: {
@@ -394,91 +154,377 @@ export function registerAiRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryLed
     });
   });
 
-  app.post("/ai/tasks/:id/cancel", async (context) => {
+  app.post("/ai/confirmations/:id/confirm", async (context) => {
     const user = await requireUser(context, store);
     if (user instanceof Response) return user;
-    if (!canUseAi(user.plan)) return jsonError(context, "AI 助手仅对订阅用户开放", 403);
-    const taskId = context.req.param("id").replace(/^import:/, "");
-    if (context.env.DB) {
-      const repository = new D1LedgerRepository(context.env.DB);
-      const job = await repository.getImportJob(taskId);
-      if (!job) return jsonError(context, "任务不存在", 404);
-      const denied = await requireMember(context, store, job.bookId, user);
-      if (denied) return denied;
-      try {
-        const cancelled = await cancelImportJob(context.env, repository, job);
-        return context.json({ task: cancelled ? importJobToTask(cancelled) : null });
-      } catch (error) {
-        return jsonError(context, error instanceof Error ? error.message : "取消任务失败", 502);
-      }
-    }
-    if (!testMemoryEnabled(context, store) || !store) return jsonError(context, "AI 对话需要 D1 运行时", 503);
-    const job = store.imports.find((item) => item.id === taskId);
-    if (!job) return jsonError(context, "任务不存在", 404);
-    const denied = await requireMember(context, store, job.bookId, user);
-    if (denied) return denied;
-    job.status = "cancelled";
-    job.cancelable = false;
-    job.retryable = false;
-    job.errorRetryable = false;
-    job.updatedAt = new Date().toISOString();
-    return context.json({ task: importJobToTask(job) });
+    const repository = requireAiRepository(context, store);
+    if (repository instanceof Response) return repository;
+    const runtime = {
+      env: context.env,
+      repository,
+      store,
+      user,
+      sessionId: "confirmation",
+      prompt: "",
+      today: today(),
+      timeZone: "Asia/Shanghai",
+      origin: new URL(context.req.url).origin,
+      attachments: [],
+    };
+    const result = await confirmAiTool(runtime, context.req.param("id"));
+    return "error" in result.body
+      ? jsonError(context, result.body.error ?? "确认失败", result.status)
+      : context.json(result.body, result.status as 200);
   });
 
-  app.post("/ai/tasks/:id/retry", async (context) => {
+  app.post("/ai/confirmations/:id/cancel", async (context) => {
     const user = await requireUser(context, store);
     if (user instanceof Response) return user;
-    if (!canUseAi(user.plan)) return jsonError(context, "AI 助手仅对订阅用户开放", 403);
-    const taskId = context.req.param("id").replace(/^import:/, "");
-    if (context.env.DB) {
-      const repository = new D1LedgerRepository(context.env.DB);
-      const job = await repository.getImportJob(taskId);
-      if (!job) return jsonError(context, "任务不存在", 404);
-      const denied = await requireMember(context, store, job.bookId, user);
-      if (denied) return denied;
-      if (job.status !== "failed" || !job.errorRetryable) return jsonError(context, "该任务当前不可重试", 409);
-      try {
-        const retried = await retryImportJob(context.env, repository, job, new URL(context.req.url).origin);
-        const nextJob = Array.isArray(retried) ? await repository.getImportJob(job.id) : retried;
-        return context.json({ task: nextJob ? importJobToTask(nextJob) : null });
-      } catch (error) {
-        return jsonError(context, error instanceof Error ? error.message : "重试任务失败", 502);
-      }
-    }
-    if (!testMemoryEnabled(context, store) || !store) return jsonError(context, "AI 对话需要 D1 运行时", 503);
-    const job = store.imports.find((item) => item.id === taskId);
-    if (!job) return jsonError(context, "任务不存在", 404);
-    const denied = await requireMember(context, store, job.bookId, user);
-    if (denied) return denied;
-    if (job.status !== "failed" || !job.errorRetryable) return jsonError(context, "该任务当前不可重试", 409);
-    job.status = "uploaded";
-    job.retryCount = (job.retryCount ?? 0) + 1;
-    job.cancelable = false;
-    job.retryable = false;
-    job.errorRetryable = false;
-    job.errorMessage = undefined;
-    job.updatedAt = new Date().toISOString();
-    return context.json({ task: importJobToTask(job) });
+    const repository = requireAiRepository(context, store);
+    if (repository instanceof Response) return repository;
+    const result = await cancelAiToolConfirmation(repository, user.id, context.req.param("id"));
+    return "error" in result.body
+      ? jsonError(context, result.body.error ?? "取消确认失败", result.status)
+      : context.json(result.body, result.status as 200);
   });
 
-  app.get("/ai/conversations", async (context) => {
+  app.post("/ai/search/transactions", async (context) => {
     const user = await requireUser(context, store);
     if (user instanceof Response) return user;
-    if (!canUseAi(user.plan)) return jsonError(context, "AI 助手仅对订阅用户开放", 403);
-    if (!context.env.DB) return jsonError(context, "AI 对话需要 D1 运行时", 503);
+    const repository = requireAiRepository(context, store);
+    if (repository instanceof Response) return repository;
+    const body = await context.req.json<{ bookId: string; query: string; timeZone?: string; baseFilters?: Record<string, unknown> }>();
+    if (!body.bookId || !body.query?.trim()) return jsonError(context, "搜索条件不合法");
+    const denied = await requireMember(context, store, body.bookId, user);
+    if (denied) return denied;
+    const provider = runtimeAiProvider(context.env);
+    const contextSnapshot = await buildModelContext(repository, user, body.bookId);
+    const plan = await provider.planToolCall({
+      text: body.query,
+      userId: user.id,
+      bookId: body.bookId,
+      page: "records",
+      today: today(),
+      timeZone: body.timeZone ?? "Asia/Shanghai",
+      tools: toolDefinitionsForModel().filter((tool) => tool.name === "search-records" || tool.name === "analyze-records" || tool.name === "chat"),
+      context: { ...contextSnapshot, baseFilters: body.baseFilters ?? {} },
+      attachments: [],
+    });
+    const result = await executeAiTool(
+      {
+        env: context.env,
+        repository,
+        store,
+        user,
+        sessionId: "records-search",
+        bookId: body.bookId,
+        prompt: body.query,
+        today: today(),
+        timeZone: body.timeZone ?? "Asia/Shanghai",
+        origin: new URL(context.req.url).origin,
+        attachments: [],
+      },
+      plan.toolName === "chat" ? { ...plan, toolName: "search-records" } : plan,
+      { confirmed: true },
+    );
+    const searchCard = result.parts.find((part) => part.type === "search-result-card") as any;
     return context.json({
-      conversations: await new D1LedgerRepository(context.env.DB).listConversations(user.id),
+      query: body.query,
+      filters: plan.args,
+      chips: chipsFromFilters(plan.args),
+      results: searchCard?.results ?? [],
+      summary: searchCard?.summary,
+      href: searchCard?.href,
     });
   });
-  app.get("/ai/conversations/:id", async (context) => {
-    const user = await requireUser(context, store);
-    if (user instanceof Response) return user;
-    if (!canUseAi(user.plan)) return jsonError(context, "AI 助手仅对订阅用户开放", 403);
-    if (!context.env.DB) return jsonError(context, "AI 对话需要 D1 运行时", 503);
-    const conversation = await new D1LedgerRepository(context.env.DB).getConversation(
-      user.id,
-      context.req.param("id"),
-    );
-    return conversation ? context.json({ conversation }) : jsonError(context, "对话不存在", 404);
+}
+
+async function runAiMessage(
+  context: any,
+  store: MemoryLedgerStore | undefined,
+  repository: AiToolRepository,
+  user: LedgerUser,
+  sessionId: string,
+  body: AiRequestBody,
+  stream?: { onEvent: (event: string, data: unknown) => void; signal: AbortSignal },
+) {
+  const session =
+    repository instanceof D1LedgerRepository
+      ? await repository.getAiSession(user.id, sessionId)
+      : memorySession(repository, user.id, sessionId);
+  if (!session) return jsonError(context, "会话不存在", 404);
+  const bookId = body.bookId ?? session.bookId;
+  if (bookId) {
+    const denied = await requireMember(context, store, bookId, user);
+    if (denied) return denied;
+  }
+  const prompt = body.message.trim();
+  if (!prompt && !body.attachments.length) return jsonError(context, "请输入消息或上传附件");
+  await appendMessage(repository, sessionId, user.id, "user", prompt || "上传附件", undefined, attachmentMetadata(body.attachments));
+  const provider = runtimeAiProvider(context.env);
+  const contextSnapshot = await buildModelContext(repository, user, bookId);
+  const plan = await provider.planToolCall({
+    text: prompt || "用户上传了附件",
+    userId: user.id,
+    bookId,
+    page: body.page ?? "AI 助手",
+    today: today(),
+    timeZone: body.timeZone ?? "Asia/Shanghai",
+    tools: toolDefinitionsForModel(),
+    context: contextSnapshot,
+    attachments: attachmentMetadata(body.attachments),
   });
+  stream?.onEvent("tool_call", { toolName: plan.toolName, args: plan.args, requiresConfirmation: plan.requiresConfirmation });
+  const runtime = {
+    env: context.env,
+    repository,
+    store,
+    user,
+    sessionId,
+    bookId,
+    prompt,
+    today: today(),
+    timeZone: body.timeZone ?? "Asia/Shanghai",
+    origin: new URL(context.req.url).origin,
+    attachments: body.attachments,
+  };
+  let parts;
+  if (plan.toolName === "chat") {
+    let text = "";
+    if (stream) {
+      const chatStream = provider.streamChat(chatHistoryMessages(session, prompt, body.attachments), {
+        bookId: bookId ?? "",
+        page: body.page,
+      });
+      for await (const delta of chatStream.textStream) {
+        if (stream.signal.aborted) return { sessionId, message: { id: `ai_cancelled_${crypto.randomUUID()}`, role: "assistant" as const, parts: [] }, parts: [] };
+        text += delta;
+        stream.onEvent("message_delta", { text: delta });
+      }
+    } else {
+      text = await provider.chat({ bookId: bookId ?? "", userId: user.id, page: body.page, text: prompt || attachmentChatPrompt(body.attachments) });
+    }
+    parts = [{ type: "text" as const, text }];
+  } else {
+    const result = await executeAiTool(runtime, plan);
+    parts = result.parts;
+    stream?.onEvent("tool_result", { toolName: plan.toolName, parts, result: result.result, changed: result.changed });
+    const confirmation = parts.find((part) => part.type === "confirmation-card");
+    if (confirmation) stream?.onEvent("confirmation", confirmation);
+    const text = parts
+      .filter((part) => part.type === "text" || part.type === "tool-status")
+      .map((part) => ("text" in part ? part.text : part.message))
+      .filter(Boolean)
+      .join("\n");
+    if (text) await streamText(text, stream);
+  }
+  const message = { id: `ai_assistant_${crypto.randomUUID()}`, role: "assistant" as const, parts };
+  await appendMessage(repository, sessionId, user.id, "assistant", partsToText(parts), parts);
+  if (repository instanceof D1LedgerRepository && session.title === "新会话" && prompt) {
+    await repository.updateAiSession(user.id, sessionId, { title: prompt.slice(0, 40), bookId });
+  } else if (!(repository instanceof D1LedgerRepository) && session.title === "新会话" && prompt) {
+    updateMemorySession(repository, user.id, sessionId, { title: prompt.slice(0, 40), bookId });
+  }
+  return { sessionId, message, parts };
+}
+
+function chatHistoryMessages(session: { messages?: Array<Record<string, unknown>> }, prompt: string, attachments: File[]): ModelMessage[] {
+  const history = (session.messages ?? [])
+    .filter((message) => (message.role === "user" || message.role === "assistant") && typeof message.content === "string")
+    .slice(-20)
+    .map((message) => ({
+      role: message.role as "user" | "assistant",
+      content: String(message.content),
+    }));
+  return [
+    ...history,
+    {
+      role: "user",
+      content: prompt || attachmentChatPrompt(attachments),
+    },
+  ];
+}
+
+function attachmentChatPrompt(attachments: File[]) {
+  if (!attachments.length) return "你好";
+  const names = attachments.map((file) => `${file.name || "未命名文件"} (${file.type || "未知类型"}, ${file.size} bytes)`).join("、");
+  return `用户上传了附件：${names}。如果需要读取文件内容或执行应用操作，请根据可用工具处理；如果只是普通聊天，请说明你能基于当前可见信息回答。`;
+}
+
+async function readAiRequest(context: any): Promise<AiRequestBody> {
+  const contentType = context.req.header("content-type") ?? "";
+  if (contentType.includes("multipart/form-data")) {
+    const form = await context.req.formData();
+    const attachments = [...form.getAll("files"), ...form.getAll("file"), ...form.getAll("attachments")].filter(
+      (value): value is File => value instanceof File && Boolean(value.name),
+    );
+    return {
+      message: String(form.get("message") ?? ""),
+      bookId: stringOrUndefined(form.get("bookId")),
+      page: stringOrUndefined(form.get("page")),
+      timeZone: stringOrUndefined(form.get("timeZone")),
+      attachments,
+    };
+  }
+  const json = (await context.req.json().catch(() => ({}))) as Record<string, unknown>;
+  return {
+    message: typeof json.message === "string" ? json.message : "",
+    bookId: typeof json.bookId === "string" ? json.bookId : undefined,
+    page: typeof json.page === "string" ? json.page : undefined,
+    timeZone: typeof json.timeZone === "string" ? json.timeZone : undefined,
+    attachments: [],
+  };
+}
+
+async function buildModelContext(repository: AiToolRepository, user: LedgerUser, bookId?: string) {
+  const books = repository instanceof D1LedgerRepository ? await repository.listBooks(user.id) : repository.books.filter((book) => repository.role(book.id, user.id));
+  const resolvedBookId = bookId ?? books[0]?.id;
+  if (!resolvedBookId) return { user: publicUser(user), books };
+  const [book, transactions, categories, tags, members, imports] =
+    repository instanceof D1LedgerRepository
+      ? await Promise.all([
+          repository.getBook(resolvedBookId),
+          repository.listTransactions(resolvedBookId),
+          repository.listSimple("categories", resolvedBookId),
+          repository.listSimple("tags", resolvedBookId),
+          repository.listMembers(resolvedBookId),
+          repository.listImportJobs(resolvedBookId),
+        ])
+      : [
+          repository.books.find((item) => item.id === resolvedBookId),
+          repository.transactions.filter((item) => item.bookId === resolvedBookId),
+          repository.categories.filter((item) => item.bookId === resolvedBookId),
+          repository.tags.filter((item) => item.bookId === resolvedBookId),
+          repository.members.filter((item) => item.bookId === resolvedBookId),
+          repository.imports.filter((item) => item.bookId === resolvedBookId),
+        ];
+  return {
+    user: publicUser(user),
+    books,
+    currentBook: book,
+    categories,
+    tags,
+    members,
+    recentTransactions: transactions.slice(0, 20),
+    recentImportJobs: imports.slice(0, 10),
+  };
+}
+
+async function appendMessage(
+  repository: AiToolRepository,
+  sessionId: string,
+  actorId: string,
+  role: "user" | "assistant" | "system" | "tool",
+  content: string,
+  parts?: unknown[],
+  attachments?: unknown[],
+) {
+  if (repository instanceof D1LedgerRepository) return repository.appendAiMessage(sessionId, actorId, role, content, { parts, attachments });
+  const memory = ensureMemoryAi(repository);
+  const session = memory.aiSessions!.find((item) => item.id === sessionId);
+  if (!session) return;
+  memory.aiMessages!.push({
+    id: `ai_message_${crypto.randomUUID()}`,
+    sessionId,
+    role,
+    content,
+    parts,
+    attachments,
+    createdAt: new Date().toISOString(),
+  });
+  session.updatedAt = new Date().toISOString();
+}
+
+async function streamText(text: string, stream?: { onEvent: (event: string, data: unknown) => void; signal: AbortSignal }) {
+  if (!stream) return;
+  for (const chunk of splitGraphemes(text)) {
+    if (stream.signal.aborted) return;
+    stream.onEvent("message_delta", { text: chunk });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+function splitGraphemes(text: string) {
+  const chunks: string[] = [];
+  let cursor = 0;
+  while (cursor < text.length) {
+    const char = text.codePointAt(cursor);
+    const width = char && char > 0xffff ? 2 : 1;
+    chunks.push(text.slice(cursor, cursor + width));
+    cursor += width;
+  }
+  return chunks;
+}
+
+function partsToText(parts: Array<Record<string, any>>) {
+  return parts
+    .map((part) => (part.type === "text" ? part.text : part.type === "tool-status" ? part.message : ""))
+    .filter(Boolean)
+    .join("\n");
+}
+
+function today() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function publicUser(user: LedgerUser) {
+  return { id: user.id, name: user.name, email: user.email, plan: user.plan };
+}
+
+function attachmentMetadata(files: File[]) {
+  return files.map((file) => ({ name: file.name, type: file.type, size: file.size, lastModified: file.lastModified }));
+}
+
+function stringOrUndefined(value: FormDataEntryValue | null) {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function chipsFromFilters(filters: Record<string, unknown>) {
+  return Object.entries(filters)
+    .filter(([, value]) => value !== undefined && value !== "" && !(Array.isArray(value) && value.length === 0))
+    .map(([key, value]) => ({ key, label: key, value: String(value) }));
+}
+
+type MemoryAiSession = { id: string; userId: string; bookId?: string; title: string; createdAt: string; updatedAt: string };
+type MemoryAiMessage = { id: string; sessionId: string; role: string; content: string; parts?: unknown[]; attachments?: unknown[]; createdAt: string };
+
+function ensureMemoryAi(store: MemoryLedgerStore) {
+  const value = store as MemoryLedgerStore & { aiSessions?: MemoryAiSession[]; aiMessages?: MemoryAiMessage[] };
+  value.aiSessions ??= [];
+  value.aiMessages ??= [];
+  return value;
+}
+
+function createMemorySession(store: MemoryLedgerStore, userId: string, bookId: string | undefined, title: string) {
+  const value = ensureMemoryAi(store);
+  const timestamp = new Date().toISOString();
+  const session = { id: `ai_session_${crypto.randomUUID()}`, userId, bookId, title, createdAt: timestamp, updatedAt: timestamp };
+  value.aiSessions!.unshift(session);
+  return session;
+}
+
+function memorySessions(store: MemoryLedgerStore, userId: string) {
+  return ensureMemoryAi(store).aiSessions!.filter((session) => session.userId === userId).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+function memorySession(store: MemoryLedgerStore, userId: string, sessionId: string) {
+  const value = ensureMemoryAi(store);
+  const session = value.aiSessions!.find((item) => item.id === sessionId && item.userId === userId);
+  if (!session) return null;
+  return { ...session, messages: value.aiMessages!.filter((message) => message.sessionId === sessionId) };
+}
+
+function updateMemorySession(store: MemoryLedgerStore, userId: string, sessionId: string, input: { title?: string; bookId?: string | null }) {
+  const session = ensureMemoryAi(store).aiSessions!.find((item) => item.id === sessionId && item.userId === userId);
+  if (!session) return null;
+  if (input.title) session.title = input.title;
+  if (input.bookId !== undefined) session.bookId = input.bookId ?? undefined;
+  session.updatedAt = new Date().toISOString();
+  return memorySession(store, userId, sessionId);
+}
+
+function deleteMemorySession(store: MemoryLedgerStore, userId: string, sessionId: string) {
+  const value = ensureMemoryAi(store);
+  value.aiSessions = value.aiSessions!.filter((item) => !(item.id === sessionId && item.userId === userId));
+  value.aiMessages = value.aiMessages!.filter((item) => item.sessionId !== sessionId);
 }

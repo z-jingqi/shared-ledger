@@ -1,12 +1,10 @@
 import {
-  CaretRightIcon,
   CheckIcon,
-  CreditCardIcon,
   EyeIcon,
   EyeSlashIcon,
   LockKeyIcon,
   NotebookIcon,
-  SignOutIcon,
+  ShieldCheckIcon,
   UserCircleIcon,
 } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
@@ -18,7 +16,6 @@ import {
   IconTile,
   IosButton,
   IosCard,
-  IosDialog,
   IosField,
   IosPage,
   IosScroll,
@@ -33,55 +30,80 @@ type SubscriptionForm = { email: string; phone: string };
 
 export function AccountSettingsPage() {
   const navigate = useNavigate();
-  const { setUser, user } = useAuth();
-  const [confirmLogout, setConfirmLogout] = useState(false);
-  const logout = async () => {
-    await api("/auth/logout", { method: "POST" });
-    setUser(undefined);
-    navigate("/login");
+  const { user } = useAuth();
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [passwordSaved, setPasswordSaved] = useState(false);
+  const [savingPassword, setSavingPassword] = useState(false);
+  const changePassword = async () => {
+    setPasswordSaved(false);
+    setPasswordError("");
+    if (newPassword !== confirmPassword) {
+      setPasswordError("两次输入的新密码不一致");
+      return;
+    }
+    setSavingPassword(true);
+    try {
+      await api("/auth/me/password", {
+        method: "PUT",
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setPasswordSaved(true);
+    } catch (cause) {
+      setPasswordError(cause instanceof Error ? cause.message : "修改密码失败");
+    } finally {
+      setSavingPassword(false);
+    }
   };
   return (
     <IosPage>
-      <IosTopBar title="账户信息" />
+      <IosTopBar title="账户与安全" back onBack={() => navigate(-1)} />
       <IosScroll className="ios-account-scroll">
-        <IosCard className="ios-profile-card">
-          <span>{user?.name?.slice(0, 1) ?? "?"}</span>
+        <IosCard className="ios-security-summary">
+          <IconTile tint="#e9fbef" color="#24b05a">
+            <ShieldCheckIcon size={24} weight="fill" />
+          </IconTile>
           <div>
-            <b>{user?.name ?? "未登录"}</b>
-            <small>{user?.email || "未绑定邮箱"} · {user?.plan === "pro" ? "Pro" : "Free"}</small>
+            <b>账号安全</b>
+            <small>{user?.email || user?.name || "当前账号"} · {user?.plan === "pro" ? "Pro" : "Free"}</small>
           </div>
         </IosCard>
         <section className="ios-settings-section">
-          <h2>账户</h2>
+          <h2>修改密码</h2>
+          <IosCard className="ios-form-card ios-password-card">
+            <IosField label="当前密码">
+              <input autoComplete="current-password" type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.currentTarget.value)} />
+            </IosField>
+            <IosField label="新密码">
+              <input autoComplete="new-password" type="password" value={newPassword} onChange={(event) => setNewPassword(event.currentTarget.value)} placeholder="至少 6 位" />
+            </IosField>
+            <IosField label="确认新密码" error={passwordError}>
+              <input autoComplete="new-password" type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.currentTarget.value)} />
+            </IosField>
+            {passwordSaved ? <p className="ios-success-note">密码已更新，下次登录请使用新密码。</p> : null}
+            <IosButton disabled={savingPassword || !currentPassword || !newPassword || !confirmPassword} onClick={() => void changePassword()}>
+              {savingPassword ? "保存中…" : "修改密码"}
+            </IosButton>
+          </IosCard>
+        </section>
+        <section className="ios-settings-section">
+          <h2>账号信息</h2>
           <IosCard>
-            <Link className="ios-settings-row" to="/subscription">
-              <IconTile tint="#fff0e8" color="#ff681c">
-                <CreditCardIcon size={20} weight="bold" />
+            <div className="ios-settings-info ios-user-id-row">
+              <IconTile tint="#f0f2f5" color="#5b6473">
+                <UserCircleIcon size={20} weight="bold" />
               </IconTile>
-              <span>订阅与套餐</span>
-              <small>{user?.plan === "pro" ? "Pro" : "Free"}</small>
-              <CaretRightIcon size={18} />
-            </Link>
-            <button className="ios-settings-row" type="button" onClick={() => setConfirmLogout(true)}>
-              <IconTile tint="#fdeceb" color="#d74035">
-                <SignOutIcon size={20} weight="bold" />
-              </IconTile>
-              <span style={{ color: "#d74035" }}>退出登录</span>
-              <CaretRightIcon size={18} />
-            </button>
+              <span>用户 ID</span>
+              <code>{user?.id ?? "未登录"}</code>
+            </div>
           </IosCard>
         </section>
       </IosScroll>
-      {confirmLogout && (
-        <IosDialog
-          danger
-          title="退出登录"
-          message="确定退出当前账号吗？"
-          confirmText="退出登录"
-          onCancel={() => setConfirmLogout(false)}
-          onConfirm={() => void logout()}
-        />
-      )}
     </IosPage>
   );
 }

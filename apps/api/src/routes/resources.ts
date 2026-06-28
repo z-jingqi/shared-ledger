@@ -37,7 +37,7 @@ function registerResource(
     const body = await parseJson(context, schema);
     if (!body) return jsonError(context, "数据不合法");
     const value = context.env.DB
-      ? await new D1LedgerRepository(context.env.DB).createSimple(path, bookId, body)
+      ? await new D1LedgerRepository(context.env.DB).createSimple(path, bookId, body, user.id)
       : store?.createSimple(path, bookId, body);
     return value
       ? context.json({ [path.slice(0, -1)]: value }, 201)
@@ -49,12 +49,14 @@ function registerResource(
       ? await repository.getSimple(path, context.req.param("id"))
       : store?.[path].find((item) => item.id === context.req.param("id"));
     if (!entity) return jsonError(context, "资源不存在", 404);
-    const denied = await requireMember(context, store, entity.bookId);
+    const user = await requireUser(context, store);
+    if (user instanceof Response) return user;
+    const denied = await requireMember(context, store, entity.bookId, user);
     if (denied) return denied;
     const body = await parseJson(context, schema);
     if (!body) return jsonError(context, "数据不合法");
     const updated = repository
-      ? await repository.updateSimple(path, entity.id, body)
+      ? await repository.updateSimple(path, entity.id, body, user.id)
       : Object.assign(entity, body);
     return context.json({ [path.slice(0, -1)]: updated });
   });
@@ -64,9 +66,11 @@ function registerResource(
       ? await repository.getSimple(path, context.req.param("id"))
       : store?.[path].find((item) => item.id === context.req.param("id"));
     if (!entity) return jsonError(context, "资源不存在", 404);
-    const denied = await requireMember(context, store, entity.bookId);
+    const user = await requireUser(context, store);
+    if (user instanceof Response) return user;
+    const denied = await requireMember(context, store, entity.bookId, user);
     if (denied) return denied;
-    if (repository) await repository.deleteSimple(path, entity.id);
+    if (repository) await repository.deleteSimple(path, entity.id, user.id);
     else if (store) store[path] = store[path].filter((item) => item.id !== entity.id) as never;
     return context.body(null, 204);
   });
