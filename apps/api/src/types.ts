@@ -1,24 +1,19 @@
+import type { AlephAIClient } from "@shared-ledger/ai";
+
 export type Env = {
   DB?: D1Database;
   FILES?: R2Bucket;
   IMPORT_QUEUE?: Queue;
-  AI?: { run(model: string, input: unknown): Promise<unknown> };
-  AI_PROVIDER?: string;
-  AI_MODEL?: string;
-  AI_BASE_URL?: string;
-  AI_PROVIDER_KEYS?: string;
-  OPENROUTER_API_KEY?: string;
-  OPENROUTER_MODEL?: string;
-  ALEPH_OCR_BASE_URL?: string;
-  ALEPH_OCR_API_KEY?: string;
-  ALEPH_OCR_WEBHOOK_SECRET?: string;
+  ALEPH_AI_BASE_URL?: string;
+  ALEPH_AI_SERVICE_TOKEN?: string;
+  ALEPH_AI_ENV?: string;
+  ALEPH_AI_TEST_CLIENT?: AlephAIClient;
+  ALEPH_TOOLS_BASE_URL?: string;
+  ALEPH_TOOLS_API_KEY?: string;
+  ALEPH_TOOLS_WEBHOOK_SECRET?: string;
   API_PUBLIC_ORIGIN?: string;
   APP_ENV?: string;
   WEB_ORIGIN?: string;
-  GOOGLE_CLIENT_ID?: string;
-  GOOGLE_CLIENT_SECRET?: string;
-  WECHAT_APP_ID?: string;
-  WECHAT_APP_SECRET?: string;
   AUTH_COOKIE_SECRET?: string;
 };
 export type LedgerUser = {

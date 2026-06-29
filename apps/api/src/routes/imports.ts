@@ -178,19 +178,19 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
 
   app.post("/imports/aleph-webhook", async (context) => {
     if (!context.env.DB) return jsonError(context, "D1 运行时不可用", 503);
-    const secret = context.env.ALEPH_OCR_WEBHOOK_SECRET;
-    if (!secret) return jsonError(context, "ALEPH_OCR_WEBHOOK_SECRET 未配置", 503);
+    const secret = context.env.ALEPH_TOOLS_WEBHOOK_SECRET;
+    if (!secret) return jsonError(context, "ALEPH_TOOLS_WEBHOOK_SECRET 未配置", 503);
 
     const rawBody = await context.req.text();
-    const timestamp = context.req.header("X-Aleph-Tools-Timestamp") ?? context.req.header("X-Aleph-OCR-Timestamp");
-    const signature = context.req.header("X-Aleph-Tools-Signature") ?? context.req.header("X-Aleph-OCR-Signature");
+    const timestamp = context.req.header("X-Aleph-Tools-Timestamp");
+    const signature = context.req.header("X-Aleph-Tools-Signature");
     if (!(await verifyAlephWebhookSignature(secret, timestamp, signature, rawBody))) {
-      return jsonError(context, "Aleph-OCR webhook 签名无效", 401);
+      return jsonError(context, "Aleph Tools webhook 签名无效", 401);
     }
 
     const payload = safeJson(rawBody) as AlephWebhookPayload | null;
     const importJobId = payload?.metadata?.importJobId;
-    if (!payload?.jobId || !importJobId) return jsonError(context, "Aleph-OCR webhook metadata 缺失", 400);
+    if (!payload?.jobId || !importJobId) return jsonError(context, "Aleph Tools webhook metadata 缺失", 400);
 
     const repository = new D1LedgerRepository(context.env.DB);
     const job = await repository.getImportJob(importJobId);
@@ -535,18 +535,18 @@ async function proxyAlephEvents(
   const phase: "pipeline" | "ocr" = job.alephTool === "image.pipeline" ? "pipeline" : "ocr";
   const externalJobId = job.ocrJobId;
   if (!externalJobId) return;
-  if (!env.ALEPH_OCR_BASE_URL) throw new Error("ALEPH_OCR_BASE_URL 未配置，无法订阅 OCR 进度");
-  if (!env.ALEPH_OCR_API_KEY) throw new Error("ALEPH_OCR_API_KEY 未配置，无法订阅 OCR 进度");
+  if (!env.ALEPH_TOOLS_BASE_URL) throw new Error("ALEPH_TOOLS_BASE_URL 未配置，无法订阅 OCR 进度");
+  if (!env.ALEPH_TOOLS_API_KEY) throw new Error("ALEPH_TOOLS_API_KEY 未配置，无法订阅 OCR 进度");
 
-  const url = `${env.ALEPH_OCR_BASE_URL.replace(/\/+$/, "")}/v1/jobs/${encodeURIComponent(externalJobId)}/events`;
+  const url = `${env.ALEPH_TOOLS_BASE_URL.replace(/\/+$/, "")}/v1/jobs/${encodeURIComponent(externalJobId)}/events`;
   const headers: Record<string, string> = {
     accept: "text/event-stream",
-    authorization: `Bearer ${env.ALEPH_OCR_API_KEY}`,
+    authorization: `Bearer ${env.ALEPH_TOOLS_API_KEY}`,
   };
   const lastEventId = job.ocrEventSequence;
   if (lastEventId && lastEventId > 0) headers["Last-Event-ID"] = String(lastEventId);
   const response = await fetch(url, { headers });
-  if (!response.ok || !response.body) throw new Error(`Aleph-OCR 进度订阅失败 (${response.status})`);
+  if (!response.ok || !response.body) throw new Error(`Aleph Tools 进度订阅失败 (${response.status})`);
 
   for await (const message of parseSseStream(response.body)) {
     if (message.event === "ping" || !message.data) continue;

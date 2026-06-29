@@ -8,6 +8,11 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "verbatimModuleSyntax": true
+    "verbatimModuleSyntax": true,
+    "baseUrl": ".",
+    "paths": {
+      "@aleph-ai-platform/ai-client": ["../aleph-ai-platform/packages/ai-client/src/index.ts"],
+      "@aleph-ai-platform/shared": ["../aleph-ai-platform/packages/shared/src/index.ts"]
+    }
   }
 }

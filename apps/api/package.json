@@ -5,7 +5,6 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --config wrangler.local.jsonc --port 8789",
-    "dev:ai": "wrangler dev --config wrangler.ai.local.jsonc --port 8789",
     "build": "wrangler deploy --dry-run --config wrangler.local.jsonc",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
@@ -18,7 +17,6 @@
     "@shared-ledger/ai": "workspace:*",
     "@shared-ledger/import": "workspace:*",
     "@shared-ledger/shared": "workspace:*",
-    "ai": "^6.0.208",
     "hono": "^4.7.7",
     "zod": "^3.24.3"
   },

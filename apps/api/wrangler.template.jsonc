@@ -9,9 +9,10 @@
     "APP_ENV": "__ENV__",
     "WEB_ORIGIN": "__WEB_ORIGIN__",
     "API_PUBLIC_ORIGIN": "https://__API_DOMAIN__",
-    "ALEPH_OCR_BASE_URL": "__ALEPH_OCR_BASE_URL__",
+    "ALEPH_AI_BASE_URL": "__ALEPH_AI_BASE_URL__",
+    "ALEPH_AI_ENV": "__ALEPH_AI_ENV__",
+    "ALEPH_TOOLS_BASE_URL": "__ALEPH_TOOLS_BASE_URL__",
   },
-  "ai": { "binding": "AI" },
   "d1_databases": [
     {
       "binding": "DB",

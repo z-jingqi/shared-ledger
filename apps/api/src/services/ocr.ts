@@ -72,7 +72,7 @@ export class AlephToolsError extends Error {
   }
 }
 
-export class AlephOcrClient {
+export class AlephToolsClient {
   constructor(
     private readonly baseUrl: string,
     private readonly apiKey: string,
@@ -207,10 +207,10 @@ export class AlephOcrClient {
   }
 }
 
-export function runtimeOcrClient(env: Env): AlephOcrClient {
-  if (!env.ALEPH_OCR_BASE_URL) throw new Error("ALEPH_OCR_BASE_URL 未配置，无法识别图片或 PDF");
-  if (!env.ALEPH_OCR_API_KEY) throw new Error("ALEPH_OCR_API_KEY 未配置，无法识别图片或 PDF");
-  return new AlephOcrClient(env.ALEPH_OCR_BASE_URL, env.ALEPH_OCR_API_KEY);
+export function runtimeOcrClient(env: Env): AlephToolsClient {
+  if (!env.ALEPH_TOOLS_BASE_URL) throw new Error("ALEPH_TOOLS_BASE_URL 未配置，无法识别图片或 PDF");
+  if (!env.ALEPH_TOOLS_API_KEY) throw new Error("ALEPH_TOOLS_API_KEY 未配置，无法识别图片或 PDF");
+  return new AlephToolsClient(env.ALEPH_TOOLS_BASE_URL, env.ALEPH_TOOLS_API_KEY);
 }
 
 export function ocrConfidence(result: AlephOcrResult): number {

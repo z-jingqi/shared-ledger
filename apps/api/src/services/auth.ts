@@ -12,7 +12,6 @@ type UserRow = {
   avatarUrl: string | null;
   phone: string | null;
   plan: "free" | "pro" | null;
-  provider: "password" | "google" | "wechat" | null;
 };
 
 function base64(bytes: Uint8Array) {
@@ -81,10 +80,10 @@ function normalizeStoredAvatarUrl(value: string | null) {
 async function findUser(db: D1Database, where: string, value: string) {
   return db
     .prepare(
-      `SELECT u.id, u.name, u.email, u.avatar_url AS avatarUrl, u.phone, s.plan, i.provider
+      `SELECT u.id, u.name, u.email, u.avatar_url AS avatarUrl, u.phone, s.plan
        FROM users u
        LEFT JOIN subscriptions s ON s.user_id = u.id AND s.status = 'active'
-       LEFT JOIN auth_identities i ON i.user_id = u.id
+       LEFT JOIN auth_identities i ON i.user_id = u.id AND i.provider = 'password'
        WHERE u.deleted_at IS NULL AND (${where})
        ORDER BY s.created_at DESC
        LIMIT 1`,
@@ -185,11 +184,10 @@ export async function findSessionUser(db: D1Database, token?: string) {
   if (!token) return null;
   const row = await db
     .prepare(
-      `SELECT u.id, u.name, u.email, u.avatar_url AS avatarUrl, u.phone, s.plan, i.provider
+      `SELECT u.id, u.name, u.email, u.avatar_url AS avatarUrl, u.phone, s.plan
        FROM auth_sessions session
        JOIN users u ON u.id = session.user_id
        LEFT JOIN subscriptions s ON s.user_id = u.id AND s.status = 'active'
-       LEFT JOIN auth_identities i ON i.user_id = u.id
        WHERE session.token_hash = ? AND session.expires_at > ?
        LIMIT 1`,
     )
@@ -235,13 +233,7 @@ export async function upgradeSubscription(
   userId: string,
   contact: { email?: string; phone?: string },
 ) {
-  const identity = await db
-    .prepare(
-      "SELECT provider FROM auth_identities WHERE user_id = ? AND provider IN ('google','wechat') LIMIT 1",
-    )
-    .bind(userId)
-    .first<{ provider: string }>();
-  if (!identity && !contact.email && !contact.phone) throw new Error("订阅前请补充邮箱或手机号");
+  if (!contact.email && !contact.phone) throw new Error("订阅前请补充邮箱或手机号");
 
   if (contact.email) {
     const owner = await findUser(db, "u.email = ?", contact.email);
@@ -326,10 +318,9 @@ export async function findUserForInvitation(db: D1Database, target: string) {
   if (!value) return null;
   const row = await db
     .prepare(
-      `SELECT u.id, u.name, u.email, u.avatar_url AS avatarUrl, u.phone, s.plan, i.provider
+      `SELECT u.id, u.name, u.email, u.avatar_url AS avatarUrl, u.phone, s.plan
        FROM users u
        LEFT JOIN subscriptions s ON s.user_id = u.id AND s.status = 'active'
-       LEFT JOIN auth_identities i ON i.user_id = u.id
        WHERE u.deleted_at IS NULL AND (u.id = ? OR u.name = ? OR u.email = ? OR u.phone = ?)
        ORDER BY s.created_at DESC
        LIMIT 1`,
@@ -338,99 +329,6 @@ export async function findUserForInvitation(db: D1Database, target: string) {
     .first<UserRow>();
   if (!row) return null;
   return { ...toLedgerUser(row), phone: row.phone ?? undefined };
-}
-
-export async function createOAuthState(db: D1Database, provider: "google" | "wechat", redirectTo?: string) {
-  const state = randomToken(24);
-  const timestamp = new Date().toISOString();
-  await db
-    .prepare("INSERT INTO oauth_states (state,provider,redirect_to,expires_at,created_at) VALUES (?,?,?,?,?)")
-    .bind(state, provider, redirectTo ?? null, new Date(Date.now() + 10 * 60 * 1000).toISOString(), timestamp)
-    .run();
-  return state;
-}
-
-export async function consumeOAuthState(db: D1Database, provider: "google" | "wechat", state: string) {
-  const value = await db
-    .prepare(
-      "SELECT redirect_to AS redirectTo, expires_at AS expiresAt FROM oauth_states WHERE state = ? AND provider = ?",
-    )
-    .bind(state, provider)
-    .first<{ redirectTo: string | null; expiresAt: string }>();
-  await db.prepare("DELETE FROM oauth_states WHERE state = ?").bind(state).run();
-  if (!value || new Date(value.expiresAt) <= new Date()) return null;
-  return value.redirectTo ?? undefined;
-}
-
-export async function createOrFindOAuthUser(
-  db: D1Database,
-  profile: { provider: "google" | "wechat"; providerAccountId: string; name: string; email?: string },
-) {
-  const existing = await db
-    .prepare(
-      `SELECT u.id,u.name,u.email,u.avatar_url AS avatarUrl,u.phone,s.plan,i.provider
-       FROM auth_identities i JOIN users u ON u.id = i.user_id
-       LEFT JOIN subscriptions s ON s.user_id = u.id AND s.status = 'active'
-       WHERE i.provider = ? AND i.provider_account_id = ? LIMIT 1`,
-    )
-    .bind(profile.provider, profile.providerAccountId)
-    .first<UserRow>();
-  if (existing) return toLedgerUser(existing);
-
-  if (profile.email) {
-    const emailOwner = await findUser(db, "u.email = ?", profile.email);
-    if (emailOwner) {
-      const timestamp = new Date().toISOString();
-      await db
-        .prepare(
-          "INSERT INTO auth_identities (id,user_id,provider,provider_account_id,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
-        )
-        .bind(
-          id("identity"),
-          emailOwner.id,
-          profile.provider,
-          profile.providerAccountId,
-          emailOwner.id,
-          emailOwner.id,
-          timestamp,
-          timestamp,
-        )
-        .run();
-      return toLedgerUser(emailOwner);
-    }
-  }
-  const timestamp = new Date().toISOString();
-  const userId = id("user");
-  await db.batch([
-    db
-      .prepare("INSERT INTO users (id,name,email,password_hash,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)")
-      .bind(
-        userId,
-        profile.name.slice(0, 60) || "账本用户",
-        profile.email ?? null,
-        await hashPassword(randomToken()),
-        userId,
-        userId,
-        timestamp,
-        timestamp,
-      ),
-    db
-      .prepare(
-        "INSERT INTO auth_identities (id,user_id,provider,provider_account_id,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
-      )
-      .bind(id("identity"), userId, profile.provider, profile.providerAccountId, userId, userId, timestamp, timestamp),
-    db
-      .prepare(
-        "INSERT INTO subscriptions (id,user_id,plan,status,started_at,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
-      )
-      .bind(id("subscription"), userId, "free", "active", timestamp, userId, userId, timestamp, timestamp),
-  ]);
-  return {
-    id: userId,
-    name: profile.name.slice(0, 60) || "账本用户",
-    email: profile.email ?? "",
-    plan: "free" as const,
-  };
 }
 
 export async function updateUserAvatar(db: D1Database, userId: string, avatarUrl: string) {

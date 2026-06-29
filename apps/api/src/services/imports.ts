@@ -1,3 +1,4 @@
+import { AlephAIError } from "@shared-ledger/ai";
 import { normalizeFile, structureForConfirmation } from "@shared-ledger/import";
 import type { NormalizedImport, OcrAdapter } from "@shared-ledger/import";
 import { D1LedgerRepository } from "../repository";
@@ -12,7 +13,7 @@ export type ImportQueueMessage = { jobId: string };
 const terminalImportStatuses = new Set(["completed", "pending_confirmation", "failed", "cancelled"]);
 const unusedOcrAdapter: OcrAdapter = {
   async recognize() {
-    throw new Error("图片和 PDF 必须通过 Aleph-OCR 处理");
+    throw new Error("图片和 PDF 必须通过 Aleph Tools 处理");
   },
 };
 
@@ -131,14 +132,14 @@ export async function finalizeAlephOcrJob(env: Env, repository: D1LedgerReposito
   const rawText = ocr.plainText?.trim() || ocr.markdown?.trim();
   if (!rawText) {
     await repository.markImportJobFailed(job.id, {
-      message: "Aleph-OCR 未返回可识别文本",
+      message: "Aleph Tools 未返回可识别文本",
       code: "EMPTY_OCR_RESULT",
       stage: "ocr",
       retryable: false,
       terminal: true,
       externalJobId: job.ocrJobId,
     });
-    throw new Error("Aleph-OCR 未返回可识别文本");
+    throw new Error("Aleph Tools 未返回可识别文本");
   }
   await repository.updateOcrProgress(job.id, {
     progress: 100,
@@ -266,12 +267,14 @@ export async function markFailed(
       externalJobId: error.jobId,
     });
   }
+  const alephError = error instanceof AlephAIError ? error : undefined;
   return repository.markImportJobFailed(importJobId, {
     message: error instanceof Error ? error.message : "导入处理失败",
-    code: stage === "ai" ? "AI_PROCESSING_FAILED" : "INTERNAL_ERROR",
+    code: alephError?.code ?? (stage === "ai" ? "AI_PROCESSING_FAILED" : "INTERNAL_ERROR"),
     stage,
-    retryable: stage === "ai",
-    terminal: stage !== "ai",
+    requestId: alephError?.requestId,
+    retryable: stage === "ai" && alephError?.code !== "quota_exceeded",
+    terminal: stage !== "ai" || alephError?.code === "quota_exceeded",
   });
 }
 
@@ -298,7 +301,7 @@ async function finalizeImportJob(
       bookId: latest.bookId,
       userId: latest.userId,
       normalized,
-      ai: runtimeAiProvider(env, (await repository.ensureAiProviderConfig(latest.userId)) ?? undefined),
+      ai: runtimeAiProvider(env, { id: latest.userId, plan: await repository.getUserPlan(latest.userId) }),
     });
   } catch (error) {
     await markFailed(repository, job.id, error, "ai");

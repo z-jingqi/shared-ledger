@@ -5,8 +5,6 @@ export type Role = (typeof roles)[number];
 export const transactionTypes = ["income", "expense"] as const;
 export type TransactionType = (typeof transactionTypes)[number];
 export const subscriptionPlans = ["free", "pro"] as const;
-export const aiProviders = ["workers-ai", "openai", "anthropic", "openrouter"] as const;
-export type AiProviderName = (typeof aiProviders)[number];
 export type SubscriptionPlan = (typeof subscriptionPlans)[number];
 export const invitationStatuses = ["pending", "accepted", "declined", "expired", "revoked"] as const;
 export const importStatuses = [
@@ -77,12 +75,6 @@ export const changePasswordSchema = z.object({
 export const subscriptionContactSchema = z
   .object({ email: z.string().email().optional(), phone: z.string().trim().min(6).max(30).optional() })
   .refine((value) => value.email || value.phone, "订阅前请补充邮箱或手机号");
-export const aiProviderConfigSchema = z.object({
-  provider: z.enum(aiProviders),
-  model: z.string().trim().min(1).max(160),
-  apiKeyRef: z.string().trim().min(1).max(60).optional(),
-  baseUrl: z.string().url().max(500).optional(),
-});
 export const createTransactionSchema = z
   .object({
     type: z.enum(transactionTypes),

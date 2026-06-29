@@ -5,6 +5,7 @@ import { registerAuthRoutes } from "./routes/auth";
 import { registerBookRoutes } from "./routes/books";
 import { registerImportRoutes } from "./routes/imports";
 import { registerInvitationRoutes } from "./routes/invitations";
+import { registerMeRoutes } from "./routes/me";
 import { registerMemberRoutes } from "./routes/members";
 import { registerResourceRoutes } from "./routes/resources";
 import { registerTransactionRoutes } from "./routes/transactions";
@@ -29,6 +30,7 @@ export function createApp(store?: MemoryLedgerStore) {
   registerBookRoutes(app, store);
   registerMemberRoutes(app, store);
   registerInvitationRoutes(app, store);
+  registerMeRoutes(app, store);
   registerTransactionRoutes(app, store);
   registerResourceRoutes(app, store);
   registerImportRoutes(app, store);

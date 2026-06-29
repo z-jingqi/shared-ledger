@@ -5,28 +5,6 @@ import type { LedgerTransaction } from "../components/ledger/Transactions";
 
 type MockAiPart = { type: string; text?: string; [key: string]: unknown };
 
-const aiMocks = vi.hoisted(() => ({
-  messages: [] as Array<{ id: string; role: "user" | "assistant"; parts: MockAiPart[] }>,
-  sendMessage: vi.fn(),
-  stop: vi.fn(),
-  status: "ready",
-  error: undefined as Error | undefined,
-}));
-
-vi.mock("@ai-sdk/react", () => ({
-  useChat: () => ({
-    messages: aiMocks.messages,
-    sendMessage: aiMocks.sendMessage,
-    status: aiMocks.status,
-    error: aiMocks.error,
-    stop: aiMocks.stop,
-  }),
-}));
-
-vi.mock("ai", () => ({
-  DefaultChatTransport: vi.fn().mockImplementation((options) => ({ options })),
-}));
-
 import { App } from "../App";
 
 let plan: "free" | "pro" = "free";
@@ -236,11 +214,6 @@ describe("shared ledger mobile UI", () => {
     aiConfirmationRequests = [];
     aiSessions = [];
     aiSessionMessages = {};
-    aiMocks.messages = [];
-    aiMocks.sendMessage.mockReset();
-    aiMocks.stop.mockReset();
-    aiMocks.status = "ready";
-    aiMocks.error = undefined;
     window.history.pushState({}, "", "/");
     window.localStorage.clear();
     Object.defineProperty(URL, "createObjectURL", {

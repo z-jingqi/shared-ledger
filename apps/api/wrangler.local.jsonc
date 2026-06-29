@@ -9,8 +9,10 @@
     "APP_ENV": "local",
     "WEB_ORIGIN": "http://localhost:5175",
     "API_PUBLIC_ORIGIN": "http://127.0.0.1:8789",
-    "ALEPH_OCR_BASE_URL": "http://127.0.0.1:8787",
-    "ALEPH_OCR_WEBHOOK_SECRET": "aleph-ocr-local-webhook-secret",
+    "ALEPH_AI_BASE_URL": "https://ai-platform-preview.aleph-cat.com",
+    "ALEPH_AI_ENV": "prod",
+    "ALEPH_TOOLS_BASE_URL": "http://127.0.0.1:8787",
+    "ALEPH_TOOLS_WEBHOOK_SECRET": "aleph-tools-local-webhook-secret",
   },
   "d1_databases": [
     {

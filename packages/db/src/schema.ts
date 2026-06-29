@@ -198,14 +198,6 @@ export const aiMessages = sqliteTable(
   },
   (t) => [index("ai_messages_session_created").on(t.sessionId, t.createdAt)],
 );
-export const aiProviderConfigs = sqliteTable("ai_provider_configs", {
-  userId: text("user_id").primaryKey(),
-  provider: text("provider").notNull(),
-  model: text("model").notNull(),
-  apiKeyRef: text("api_key_ref"),
-  baseUrl: text("base_url"),
-  ...fullAudit,
-});
 export const aiConfirmations = sqliteTable(
   "ai_confirmations",
   {

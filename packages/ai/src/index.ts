@@ -1,8 +1,5 @@
-import { createAnthropic } from "@ai-sdk/anthropic";
-import { createOpenAI } from "@ai-sdk/openai";
-import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { generateText, Output, streamText, type LanguageModel, type ModelMessage } from "ai";
-import { createWorkersAI } from "workers-ai-provider";
+import { createAlephAIClient, type AlephAIClient } from "@aleph-ai-platform/ai-client";
+import { AlephAIError, type ChatMessage, type ErrorCode, type InvokeRequest, type JsonObject, type StreamEvent, type UserUsageResponse } from "@aleph-ai-platform/shared";
 import {
   aiActionNames,
   aiImportRecordSchema,
@@ -12,31 +9,33 @@ import {
 } from "@shared-ledger/shared";
 import { z } from "zod";
 
+export { AlephAIError, createAlephAIClient };
+export type { AlephAIClient, ErrorCode, InvokeRequest, JsonObject, StreamEvent, UserUsageResponse };
+
 export type AiContext = { bookId: string; userId: string; page?: string; text: string };
-export type WorkersAiBinding = { run(model: string, input: unknown): Promise<unknown> };
-export type LedgerAiConfig = {
-  provider: "workers-ai" | "openai" | "anthropic" | "openrouter";
-  model: string;
-  apiKeyRef?: string;
-  baseUrl?: string;
+export type AiChatMessage = { role: "system" | "user" | "assistant" | "tool"; content?: string };
+export type AiTextStream = { textStream: AsyncIterable<string> };
+export type LedgerAiUser = { id: string; plan: string };
+export type LedgerAiRuntime = {
+  client: AlephAIClient;
+  env: string;
+  user: LedgerAiUser;
+  project?: string;
 };
-export type LedgerAiEnvironment = {
-  ai?: WorkersAiBinding;
-  providerKeys?: Record<string, string | undefined>;
-};
+
 export interface AiProvider {
   structureImport(input: AiContext): Promise<z.infer<typeof aiImportRecordSchema>[]>;
-  streamChat(messages: ModelMessage[], context: Pick<AiContext, "bookId" | "page">): ReturnType<typeof streamText>;
+  streamChat(messages: AiChatMessage[], context: Pick<AiContext, "bookId" | "page">): AiTextStream;
   planToolCall(input: AiToolPlanInput): Promise<AiToolCallPlan>;
   chat(input: AiContext): Promise<string>;
 }
-export const defaultAiConfig: LedgerAiConfig = {
-  provider: "workers-ai",
-  model: "@cf/meta/llama-3.1-8b-instruct",
-};
+
+const projectId = "shared-ledger";
+const chatTask = "ledger.chat";
+const toolPlanTask = "ledger.tool_plan";
 
 const importSystemPrompt =
-  "You extract bookkeeping entries. Return only records supported by the supplied text.";
+  "You extract bookkeeping entries. Return only JSON matching the supplied schema. Do not invent records unsupported by the supplied text.";
 const chatSystemPrompt = [
   "你是一个正常、友好、可靠的通用聊天机器人，同时也是一起记应用的智能助手。",
   "用户可以聊任何话题；和账本无关的问题也要自然回答，不要强行转回记账。",
@@ -70,106 +69,211 @@ export type AiToolPlanInput = {
   context?: Record<string, unknown>;
   attachments?: Array<Record<string, unknown>>;
 };
-export type PlanToolCallInput = AiToolPlanInput & { model: LanguageModel };
 
 const supportedAiActions = new Set<AiActionName>(aiActionNames);
 
-function keyFor(config: LedgerAiConfig, keys: Record<string, string | undefined>) {
-  const key = keys[config.apiKeyRef ?? config.provider];
-  if (!key) throw new Error(`${config.provider} 尚未配置密钥引用 ${config.apiKeyRef ?? config.provider}`);
-  return key;
-}
+export function createAlephAiProvider(runtime: LedgerAiRuntime): AiProvider {
+  const project = runtime.project ?? projectId;
 
-export function resolveModel(config: LedgerAiConfig, environment: LedgerAiEnvironment): LanguageModel {
-  switch (config.provider) {
-    case "workers-ai":
-      if (!environment.ai) throw new Error("Workers AI binding 未配置");
-      return createWorkersAI({ binding: environment.ai as any })(config.model);
-    case "openai":
-      return createOpenAI({
-        apiKey: keyFor(config, environment.providerKeys ?? {}),
-        baseURL: config.baseUrl,
-      })(config.model);
-    case "anthropic":
-      return createAnthropic({
-        apiKey: keyFor(config, environment.providerKeys ?? {}),
-        baseURL: config.baseUrl,
-      })(config.model);
-    case "openrouter":
-      return createOpenRouter({
-        apiKey: keyFor(config, environment.providerKeys ?? {}),
-        baseURL: config.baseUrl,
-      })(config.model);
-  }
-}
-
-export async function planToolCall(input: PlanToolCallInput): Promise<AiToolCallPlan> {
-  if (!input.model) throw new Error("AI tool planner requires a configured language model");
-  const availableActions = normalizeAvailableActions(input.tools.map((tool) => tool.name));
-  const result = await generateText({
-    model: input.model,
-    system: toolPlanSystemPrompt,
-    prompt: JSON.stringify(
-      {
-        text: input.text,
-        userId: input.userId,
-        bookId: input.bookId,
-        page: input.page,
-        today: input.today,
-        timeZone: input.timeZone,
-        tools: input.tools,
-        context: input.context ?? {},
-        attachments: input.attachments ?? [],
+  function invokeRequest(input: {
+    task: string;
+    mode: "object" | "stream";
+    messages: ChatMessage[];
+    responseFormat?: JsonObject;
+    temperature?: number;
+    maxTokens?: number;
+  }) {
+    return {
+      project,
+      env: runtime.env,
+      task: input.task,
+      user: runtime.user,
+      mode: input.mode,
+      input: {
+        messages: input.messages,
+        ...(input.responseFormat ? { response_format: input.responseFormat } : {}),
+        ...(input.temperature === undefined ? {} : { temperature: input.temperature }),
+        ...(input.maxTokens === undefined ? {} : { max_tokens: input.maxTokens }),
       },
-      null,
-      2,
-    ),
-    output: Output.object({ schema: aiToolCallPlanSchema }),
-  });
-  const plan = aiToolCallPlanSchema.parse(result.output);
-  if (!availableActions.includes(plan.toolName)) {
-    throw new Error(`AI tool planner returned unavailable tool: ${plan.toolName}`);
+    };
   }
-  return plan;
-}
 
-export function createAiProvider(config: LedgerAiConfig, environment: LedgerAiEnvironment) {
-  const model = resolveModel(config, environment);
   return {
-    config,
-    streamChat(messages: ModelMessage[], context: Pick<AiContext, "bookId" | "page">) {
-      return streamText({
-        model,
-        system: `${chatSystemPrompt}\n页面：${context.page ?? "账本"}\n账本：${context.bookId}`,
-        messages,
-      });
+    streamChat(messages: AiChatMessage[], context: Pick<AiContext, "bookId" | "page">) {
+      const alephMessages: ChatMessage[] = [
+        {
+          role: "system",
+          content: `${chatSystemPrompt}\n页面：${context.page ?? "账本"}\n账本：${context.bookId}`,
+        },
+        ...messages.map(toAlephMessage),
+      ];
+      return {
+        textStream: streamDeltas(
+          runtime.client.stream(
+            invokeRequest({
+              task: chatTask,
+              mode: "stream",
+              messages: alephMessages,
+              temperature: 0.4,
+              maxTokens: 1400,
+            }),
+          ),
+        ),
+      };
     },
     async chat(input: AiContext) {
-      const result = await generateText({
-        model,
-        system: `${chatSystemPrompt}\n页面：${input.page ?? "账本"}\n账本：${input.bookId}`,
-        prompt: input.text,
-      });
-      return result.text;
+      let text = "";
+      for await (const delta of this.streamChat([{ role: "user", content: input.text }], input).textStream) {
+        text += delta;
+      }
+      return text;
     },
     async planToolCall(input: AiToolPlanInput): Promise<AiToolCallPlan> {
-      return planToolCall({ ...input, model });
+      const availableActions = normalizeAvailableActions(input.tools.map((tool) => tool.name));
+      const response = await runtime.client.invoke<unknown>(
+        invokeRequest({
+          task: toolPlanTask,
+          mode: "object",
+          messages: [
+            { role: "system", content: toolPlanSystemPrompt },
+            { role: "user", content: JSON.stringify(toolPlanPayload(input), null, 2) },
+          ],
+          responseFormat: responseFormat("ledger_tool_plan", toolPlanJsonSchema),
+          temperature: 0.1,
+          maxTokens: 1600,
+        }),
+      );
+      const plan = aiToolCallPlanSchema.parse(response.output);
+      if (!availableActions.includes(plan.toolName)) {
+        throw new AlephAIError("validation_failed", `AI tool planner returned unavailable tool: ${plan.toolName}`);
+      }
+      return plan;
     },
     async structureImport(input: AiContext): Promise<z.infer<typeof aiImportRecordSchema>[]> {
-      const result = await generateText({
-        model,
-        system: importSystemPrompt,
-        prompt: input.text,
-        output: Output.array({ element: aiImportRecordSchema }),
-      });
-      return result.output.map((record) => aiImportRecordSchema.parse(record));
+      const response = await runtime.client.invoke<unknown>(
+        invokeRequest({
+          task: toolPlanTask,
+          mode: "object",
+          messages: [
+            { role: "system", content: importSystemPrompt },
+            {
+              role: "user",
+              content: JSON.stringify(
+                {
+                  bookId: input.bookId,
+                  userId: input.userId,
+                  page: input.page ?? "导入",
+                  text: input.text,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+          responseFormat: responseFormat("ledger_import_records", importRecordsJsonSchema),
+          temperature: 0,
+          maxTokens: 2400,
+        }),
+      );
+      return importRecordsOutputSchema.parse(response.output).records.map((record) => aiImportRecordSchema.parse(record));
     },
   };
 }
 
+function toAlephMessage(message: AiChatMessage): ChatMessage {
+  return {
+    role: message.role,
+    content: message.content ?? "",
+  };
+}
+
+async function* streamDeltas(events: AsyncIterable<StreamEvent>) {
+  for await (const event of events) {
+    if (event.type === "delta") yield event.delta;
+    if (event.type === "error") throw new AlephAIError(event.error.code, event.error.message, { requestId: event.requestId, details: event.error.details });
+  }
+}
+
+function toolPlanPayload(input: AiToolPlanInput) {
+  return {
+    text: input.text,
+    userId: input.userId,
+    bookId: input.bookId,
+    page: input.page,
+    today: input.today,
+    timeZone: input.timeZone,
+    tools: input.tools,
+    context: input.context ?? {},
+    attachments: input.attachments ?? [],
+  };
+}
+
 function normalizeAvailableActions(actions: AiActionName[]) {
-  if (!actions.length) throw new Error("AI tool planner requires at least one available tool");
+  if (!actions.length) throw new AlephAIError("validation_failed", "AI tool planner requires at least one available tool");
   const invalidActions = actions.filter((action) => !supportedAiActions.has(action));
-  if (invalidActions.length) throw new Error(`AI tool planner received unsupported tools: ${invalidActions.join(", ")}`);
+  if (invalidActions.length) {
+    throw new AlephAIError("validation_failed", `AI tool planner received unsupported tools: ${invalidActions.join(", ")}`);
+  }
   return Array.from(new Set(actions));
 }
+
+function responseFormat(name: string, schema: JsonObject): JsonObject {
+  return {
+    type: "json_schema",
+    json_schema: {
+      name,
+      strict: false,
+      schema,
+    },
+  };
+}
+
+const moneyJsonSchema = {
+  type: "number",
+  exclusiveMinimum: 0,
+  multipleOf: 0.01,
+} as unknown as JsonObject;
+
+const importRecordJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["type", "amount", "occurredAt", "confidence", "warnings"],
+  properties: {
+    type: { type: "string", enum: ["income", "expense"] },
+    amount: moneyJsonSchema,
+    occurredAt: { type: "string" },
+    note: { type: "string", maxLength: 500 },
+    categoryName: { type: "string", maxLength: 30 },
+    confidence: { type: "number", minimum: 0, maximum: 1 },
+    warnings: { type: "array", items: { type: "string" } },
+  },
+} as unknown as JsonObject;
+
+const importRecordsJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["records"],
+  properties: {
+    records: {
+      type: "array",
+      items: importRecordJsonSchema,
+    },
+  },
+} as unknown as JsonObject;
+
+const toolPlanJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["toolName", "args", "requiresConfirmation", "confidence"],
+  properties: {
+    toolName: { type: "string", enum: aiActionNames },
+    args: { type: "object" },
+    userMessage: { type: "string", maxLength: 2000 },
+    requiresConfirmation: { type: "boolean" },
+    confidence: { type: "number", minimum: 0, maximum: 1 },
+  },
+} as unknown as JsonObject;
+
+const importRecordsOutputSchema = z.object({
+  records: z.array(aiImportRecordSchema),
+});

@@ -5,9 +5,6 @@ import { jsonError, parseJson } from "../lib/http";
 import {
   authenticatePassword,
   changeUserPassword,
-  consumeOAuthState,
-  createOAuthState,
-  createOrFindOAuthUser,
   createPasswordAccount,
   createSessionPair,
   findSessionUser,
@@ -36,10 +33,6 @@ const refreshCookieOptions = (environment?: string) => ({
   secure: environment !== "local" && environment !== "test",
   maxAge: 60 * 60 * 24 * 30,
 });
-const providers = ["google", "wechat"] as const;
-type Provider = (typeof providers)[number];
-const isProvider = (provider: string): provider is Provider =>
-  (providers as readonly string[]).includes(provider);
 const avatarTypes: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/png": "png",
@@ -47,18 +40,6 @@ const avatarTypes: Record<string, string> = {
 };
 const maxAvatarBytes = 1024 * 1024;
 
-function callbackUrl(context: any, provider: Provider) {
-  return new URL(`/auth/oauth/${provider}/callback`, context.req.url).toString();
-}
-function safeRedirect(context: any, value?: string) {
-  const origin = context.env.WEB_ORIGIN;
-  if (!value || !origin) return origin ?? "/";
-  try {
-    return new URL(value).origin === new URL(origin).origin ? value : origin;
-  } catch {
-    return origin;
-  }
-}
 function setAuthCookies(context: any, tokens: { accessToken: string; refreshToken: string }) {
   setCookie(context, "ledger_session", tokens.accessToken, accessCookieOptions(context.env.APP_ENV));
   setCookie(context, "ledger_refresh", tokens.refreshToken, refreshCookieOptions(context.env.APP_ENV));
@@ -203,125 +184,6 @@ export function registerAuthRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryL
       return context.json({ user: { ...user, avatarUrl } });
     }
     return jsonError(context, "头像上传需要 D1 运行时", 503);
-  });
-
-  app.get("/auth/oauth/:provider", async (context) => {
-    const provider = context.req.param("provider");
-    if (!isProvider(provider)) return jsonError(context, "不支持的授权登录方式", 404);
-    if (!context.env.DB) return jsonError(context, "授权登录需要 D1 运行时", 503);
-    const state = await createOAuthState(
-      context.env.DB,
-      provider,
-      safeRedirect(context, context.req.query("redirectTo")),
-    );
-    const redirectUri = callbackUrl(context, provider);
-    if (provider === "google") {
-      if (!context.env.GOOGLE_CLIENT_ID || !context.env.GOOGLE_CLIENT_SECRET)
-        return jsonError(context, "Google OAuth 尚未配置", 503);
-      const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-      url.search = new URLSearchParams({
-        client_id: context.env.GOOGLE_CLIENT_ID,
-        redirect_uri: redirectUri,
-        response_type: "code",
-        scope: "openid email profile",
-        state,
-        access_type: "offline",
-        prompt: "select_account",
-      }).toString();
-      return context.redirect(url.toString(), 302);
-    }
-    if (!context.env.WECHAT_APP_ID || !context.env.WECHAT_APP_SECRET)
-      return jsonError(context, "微信 OAuth 尚未配置", 503);
-    const url = new URL("https://open.weixin.qq.com/connect/oauth2/authorize");
-    url.search = new URLSearchParams({
-      appid: context.env.WECHAT_APP_ID,
-      redirect_uri: redirectUri,
-      response_type: "code",
-      scope: "snsapi_userinfo",
-      state,
-    }).toString();
-    return context.redirect(`${url.toString()}#wechat_redirect`, 302);
-  });
-
-  app.get("/auth/oauth/:provider/callback", async (context) => {
-    const provider = context.req.param("provider");
-    if (!isProvider(provider)) return jsonError(context, "不支持的授权登录方式", 404);
-    if (!context.env.DB) return jsonError(context, "授权登录需要 D1 运行时", 503);
-    const code = context.req.query("code"),
-      state = context.req.query("state");
-    if (!code || !state) return jsonError(context, "授权回调缺少 code 或 state");
-    const redirectTo = await consumeOAuthState(context.env.DB, provider, state);
-    if (redirectTo === null) return jsonError(context, "授权状态无效或已过期", 400);
-    try {
-      const redirectUri = callbackUrl(context, provider);
-      let profile: { provider: Provider; providerAccountId: string; name: string; email?: string };
-      if (provider === "google") {
-        if (!context.env.GOOGLE_CLIENT_ID || !context.env.GOOGLE_CLIENT_SECRET)
-          return jsonError(context, "Google OAuth 尚未配置", 503);
-        const token = await fetch("https://oauth2.googleapis.com/token", {
-          method: "POST",
-          headers: { "content-type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({
-            code,
-            client_id: context.env.GOOGLE_CLIENT_ID,
-            client_secret: context.env.GOOGLE_CLIENT_SECRET,
-            redirect_uri: redirectUri,
-            grant_type: "authorization_code",
-          }),
-        }).then((response) =>
-          response.ok
-            ? response.json<{ access_token: string }>()
-            : Promise.reject(new Error("Google 授权码兑换失败")),
-        );
-        const info = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
-          headers: { authorization: `Bearer ${token.access_token}` },
-        }).then((response) =>
-          response.ok
-            ? response.json<{ sub: string; name?: string; email?: string }>()
-            : Promise.reject(new Error("读取 Google 用户信息失败")),
-        );
-        profile = {
-          provider,
-          providerAccountId: info.sub,
-          name: info.name ?? info.email ?? "Google 用户",
-          email: info.email,
-        };
-      } else {
-        if (!context.env.WECHAT_APP_ID || !context.env.WECHAT_APP_SECRET)
-          return jsonError(context, "微信 OAuth 尚未配置", 503);
-        const tokenUrl = new URL("https://api.weixin.qq.com/sns/oauth2/access_token");
-        tokenUrl.search = new URLSearchParams({
-          appid: context.env.WECHAT_APP_ID,
-          secret: context.env.WECHAT_APP_SECRET,
-          code,
-          grant_type: "authorization_code",
-        }).toString();
-        const token = await fetch(tokenUrl).then((response) =>
-          response.ok
-            ? response.json<{ access_token?: string; openid?: string }>()
-            : Promise.reject(new Error("微信授权码兑换失败")),
-        );
-        if (!token.access_token || !token.openid) throw new Error("微信授权码无效");
-        const infoUrl = new URL("https://api.weixin.qq.com/sns/userinfo");
-        infoUrl.search = new URLSearchParams({
-          access_token: token.access_token,
-          openid: token.openid,
-          lang: "zh_CN",
-        }).toString();
-        const info = await fetch(infoUrl).then((response) =>
-          response.ok
-            ? response.json<{ openid?: string; nickname?: string }>()
-            : Promise.reject(new Error("读取微信用户信息失败")),
-        );
-        if (!info.openid) throw new Error("微信未返回用户标识");
-        profile = { provider, providerAccountId: info.openid, name: info.nickname ?? "微信用户" };
-      }
-      const user = await createOrFindOAuthUser(context.env.DB, profile);
-      setAuthCookies(context, await createSessionPair(context.env.DB, user.id));
-      return context.redirect(safeRedirect(context, redirectTo), 302);
-    } catch (error) {
-      return jsonError(context, error instanceof Error ? error.message : "第三方授权失败", 502);
-    }
   });
 
   app.post("/subscriptions/pro", async (context) => {

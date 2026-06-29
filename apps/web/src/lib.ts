@@ -1,8 +1,17 @@
 export const API = import.meta.env.VITE_API_URL || "/api";
+type ApiErrorPayload = {
+  error?: string;
+  code?: string;
+  requestId?: string;
+  details?: unknown;
+};
 export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly code?: string,
+    readonly requestId?: string,
+    readonly details?: unknown,
   ) {
     super(message);
   }
@@ -10,8 +19,9 @@ export class ApiError extends Error {
 
 let refreshPromise: Promise<boolean> | undefined;
 
-async function parseError(response: Response) {
-  return (await response.json().catch(() => ({ error: "请求失败" }))).error ?? "请求失败";
+async function parseError(response: Response): Promise<ApiErrorPayload> {
+  const payload = (await response.json().catch(() => ({ error: "请求失败" }))) as ApiErrorPayload;
+  return { ...payload, error: payload.error ?? "请求失败" };
 }
 
 async function refreshSession() {
@@ -28,7 +38,10 @@ async function refreshSession() {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await apiFetch(path, init);
-  if (!response.ok) throw new ApiError(await parseError(response), response.status);
+  if (!response.ok) {
+    const error = await parseError(response);
+    throw new ApiError(error.error ?? "请求失败", response.status, error.code, error.requestId, error.details);
+  }
   if (response.status === 204) return undefined as T;
   return response.json();
 }

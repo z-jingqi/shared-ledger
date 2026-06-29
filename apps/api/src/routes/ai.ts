@@ -1,10 +1,10 @@
 import type { Hono } from "hono";
-import type { ModelMessage } from "ai";
+import type { AiChatMessage } from "@shared-ledger/ai";
 import { z } from "zod";
 import { jsonError } from "../lib/http";
 import { D1LedgerRepository } from "../repository";
 import { requireMember, requireUser } from "../services/access";
-import { runtimeAiProvider } from "../services/ai";
+import { aiErrorBody, aiErrorStatus, runtimeAiProvider } from "../services/ai";
 import {
   cancelAiToolConfirmation,
   confirmAiTool,
@@ -114,9 +114,13 @@ export function registerAiRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryLed
     const repository = requireAiRepository(context, store);
     if (repository instanceof Response) return repository;
     const body = await readAiRequest(context);
-    const result = await runAiMessage(context, store, repository, user, context.req.param("id"), body);
-    if (result instanceof Response) return result;
-    return context.json(result);
+    try {
+      const result = await runAiMessage(context, store, repository, user, context.req.param("id"), body);
+      if (result instanceof Response) return result;
+      return context.json(result);
+    } catch (error) {
+      return context.json(aiErrorBody(error), aiErrorStatus(error));
+    }
   });
 
   app.post("/ai/sessions/:id/messages/stream", async (context) => {
@@ -139,7 +143,8 @@ export function registerAiRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryLed
           });
           if (!(result instanceof Response)) sendEvent(controller, "done", result);
         } catch (error) {
-          sendEvent(controller, "error", { message: error instanceof Error ? error.message : "AI 服务不可用" });
+          const body = aiErrorBody(error);
+          sendEvent(controller, "error", { message: body.error, code: body.code, requestId: body.requestId, details: body.details });
         } finally {
           controller.close();
         }
@@ -197,19 +202,24 @@ export function registerAiRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryLed
     if (!body.bookId || !body.query?.trim()) return jsonError(context, "搜索条件不合法");
     const denied = await requireMember(context, store, body.bookId, user);
     if (denied) return denied;
-    const provider = runtimeAiProvider(context.env);
+    const provider = runtimeAiProvider(context.env, user);
     const contextSnapshot = await buildModelContext(repository, user, body.bookId);
-    const plan = await provider.planToolCall({
-      text: body.query,
-      userId: user.id,
-      bookId: body.bookId,
-      page: "records",
-      today: today(),
-      timeZone: body.timeZone ?? "Asia/Shanghai",
-      tools: toolDefinitionsForModel().filter((tool) => tool.name === "search-records" || tool.name === "analyze-records" || tool.name === "chat"),
-      context: { ...contextSnapshot, baseFilters: body.baseFilters ?? {} },
-      attachments: [],
-    });
+    let plan;
+    try {
+      plan = await provider.planToolCall({
+        text: body.query,
+        userId: user.id,
+        bookId: body.bookId,
+        page: "records",
+        today: today(),
+        timeZone: body.timeZone ?? "Asia/Shanghai",
+        tools: toolDefinitionsForModel().filter((tool) => tool.name === "search-records" || tool.name === "analyze-records" || tool.name === "chat"),
+        context: { ...contextSnapshot, baseFilters: body.baseFilters ?? {} },
+        attachments: [],
+      });
+    } catch (error) {
+      return context.json(aiErrorBody(error), aiErrorStatus(error));
+    }
     const result = await executeAiTool(
       {
         env: context.env,
@@ -261,7 +271,7 @@ async function runAiMessage(
   const prompt = body.message.trim();
   if (!prompt && !body.attachments.length) return jsonError(context, "请输入消息或上传附件");
   await appendMessage(repository, sessionId, user.id, "user", prompt || "上传附件", undefined, attachmentMetadata(body.attachments));
-  const provider = runtimeAiProvider(context.env);
+  const provider = runtimeAiProvider(context.env, user);
   const contextSnapshot = await buildModelContext(repository, user, bookId);
   const plan = await provider.planToolCall({
     text: prompt || "用户上传了附件",
@@ -328,7 +338,7 @@ async function runAiMessage(
   return { sessionId, message, parts };
 }
 
-function chatHistoryMessages(session: { messages?: Array<Record<string, unknown>> }, prompt: string, attachments: File[]): ModelMessage[] {
+function chatHistoryMessages(session: { messages?: Array<Record<string, unknown>> }, prompt: string, attachments: File[]): AiChatMessage[] {
   const history = (session.messages ?? [])
     .filter((message) => (message.role === "user" || message.role === "assistant") && typeof message.content === "string")
     .slice(-20)
