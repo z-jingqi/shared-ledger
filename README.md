@@ -84,7 +84,7 @@ pnpm --filter @shared-ledger/api exec wrangler d1 migrations apply shared-ledger
 
 ## 文件导入、OCR 与 AI
 
-原文件先进入 R2，再通过 Queue 处理；CSV 和 Excel 在 Worker 中解析，图片或 PDF 会提交到公共 Aleph-OCR 服务，保存 Aleph job id 后延迟轮询，OCR ready 后再交给 AI 结构化。AI 输出会经过 Zod 校验，只生成待确认记录，确认后才创建 Transaction。测试用 mock 仅位于测试目录，运行时代码不会回退到 mock 或本地 OCR。
+原文件先进入 R2，再通过 Queue 处理；CSV 和 Excel 在 Worker 中解析。图片或 PDF 通过公共 Aleph-OCR v6 工具接口处理：图片先按需调用 `image.convert`，随后统一调用 `image.compress`，最后将压缩后的图片提交给 `ocr`；PDF 直接提交给 `ocr`。OCR ready 后再交给 AI 结构化。AI 输出会经过 Zod 校验，只生成待确认记录，确认后才创建 Transaction。测试用 mock 仅位于测试目录，运行时代码不会回退到 mock 或本地 OCR。
 
 生产环境需要为 API Worker 配置：
 

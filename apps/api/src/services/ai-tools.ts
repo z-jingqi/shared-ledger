@@ -23,10 +23,10 @@ import type { Env } from "../types";
 import { updateUserAvatar, updateUserProfile } from "./auth";
 import {
   isOcrImportFileType,
+  isImageImportFileType,
   markFailed,
-  requiresImageConversion,
-  submitAlephConvertJob,
   submitAlephOcrJob,
+  submitAlephPipelineJob,
   type ImportQueueMessage,
 } from "./imports";
 
@@ -1047,15 +1047,22 @@ async function createImportJobFromFile(runtime: AiToolRuntime, bookId: string, f
       customMetadata: { importJobId: job.id, bookId, uploadedBy: runtime.user.id },
     });
     if (needsOcr) {
-      if (requiresImageConversion(resolvedFileType)) {
-        return await submitAlephConvertJob(runtime.env, runtime.repository, job, bytes, runtime.origin);
+      if (isImageImportFileType(resolvedFileType)) {
+        return await submitAlephPipelineJob(runtime.env, runtime.repository, job, bytes, runtime.origin);
       }
       return await submitAlephOcrJob(runtime.env, runtime.repository, job, bytes, runtime.origin);
     }
     await runtime.env.IMPORT_QUEUE?.send({ jobId: job.id } satisfies ImportQueueMessage);
     return (await runtime.repository.getImportJob(job.id)) ?? job;
   } catch (error) {
-    if (needsOcr) await markFailed(runtime.repository, job.id, error, requiresImageConversion(resolvedFileType) ? "convert" : "ocr");
+    if (needsOcr) {
+      await markFailed(
+        runtime.repository,
+        job.id,
+        error,
+        isImageImportFileType(resolvedFileType) ? "pipeline" : "ocr",
+      );
+    }
     else {
       await runtime.env.FILES.delete(job.r2Key);
       await runtime.repository.updateImportJob(job.id, "failed", error instanceof Error ? error.message : "上传失败");

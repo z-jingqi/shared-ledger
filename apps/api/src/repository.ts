@@ -97,11 +97,8 @@ const mapImportJob = (row: Row): ImportJob => ({
   cancelable: Boolean(row.cancelable),
   retryable: Boolean(row.retryable),
   retryCount: row.retryCount ?? 0,
-  ...(row.convertJobId ? { convertJobId: row.convertJobId } : {}),
-  convertEventSequence: row.convertEventSequence ?? 0,
-  ...(row.convertedR2Key ? { convertedR2Key: row.convertedR2Key } : {}),
-  ...(row.convertedFileType ? { convertedFileType: row.convertedFileType } : {}),
   ...(row.ocrJobId ? { ocrJobId: row.ocrJobId } : {}),
+  ...(row.alephTool ? { alephTool: row.alephTool } : {}),
   ...(row.ocrSubmittedAt ? { ocrSubmittedAt: row.ocrSubmittedAt } : {}),
   ocrProgress: row.ocrProgress ?? 0,
   ...(row.ocrStage ? { ocrStage: row.ocrStage } : {}),
@@ -111,6 +108,8 @@ const mapImportJob = (row: Row): ImportJob => ({
   ...(row.ocrTotalPages !== null && row.ocrTotalPages !== undefined ? { ocrTotalPages: row.ocrTotalPages } : {}),
   ...(row.ocrCompletedAt ? { ocrCompletedAt: row.ocrCompletedAt } : {}),
   ocrEventSequence: row.ocrEventSequence ?? 0,
+  ...(row.processedR2Key ? { processedR2Key: row.processedR2Key } : {}),
+  ...(row.processedFileType ? { processedFileType: row.processedFileType } : {}),
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
   ...(row.deletedAt ? { deletedAt: row.deletedAt } : {}),
@@ -118,7 +117,7 @@ const mapImportJob = (row: Row): ImportJob => ({
 });
 
 const importJobColumns =
-  "id,book_id AS bookId,user_id AS userId,file_name AS fileName,file_type AS fileType,r2_key AS r2Key,status,auto_confirm AS autoConfirm,error_message AS errorMessage,error_code AS errorCode,error_stage AS errorStage,error_request_id AS errorRequestId,error_retryable AS errorRetryable,error_terminal AS errorTerminal,failed_external_job_id AS failedExternalJobId,cancelable,retryable,retry_count AS retryCount,convert_job_id AS convertJobId,convert_event_sequence AS convertEventSequence,converted_r2_key AS convertedR2Key,converted_file_type AS convertedFileType,ocr_job_id AS ocrJobId,ocr_submitted_at AS ocrSubmittedAt,ocr_progress AS ocrProgress,ocr_stage AS ocrStage,ocr_current_page AS ocrCurrentPage,ocr_total_pages AS ocrTotalPages,ocr_completed_at AS ocrCompletedAt,ocr_event_sequence AS ocrEventSequence,created_at AS createdAt,updated_at AS updatedAt,deleted_at AS deletedAt,deleted_by_user_id AS deletedByUserId";
+  "id,book_id AS bookId,user_id AS userId,file_name AS fileName,file_type AS fileType,r2_key AS r2Key,status,auto_confirm AS autoConfirm,error_message AS errorMessage,error_code AS errorCode,error_stage AS errorStage,error_request_id AS errorRequestId,error_retryable AS errorRetryable,error_terminal AS errorTerminal,failed_external_job_id AS failedExternalJobId,cancelable,retryable,retry_count AS retryCount,ocr_job_id AS ocrJobId,aleph_tool AS alephTool,ocr_submitted_at AS ocrSubmittedAt,ocr_progress AS ocrProgress,ocr_stage AS ocrStage,ocr_current_page AS ocrCurrentPage,ocr_total_pages AS ocrTotalPages,ocr_completed_at AS ocrCompletedAt,ocr_event_sequence AS ocrEventSequence,processed_r2_key AS processedR2Key,processed_file_type AS processedFileType,created_at AS createdAt,updated_at AS updatedAt,deleted_at AS deletedAt,deleted_by_user_id AS deletedByUserId";
 const aiConfirmationColumns =
   "id,user_id AS userId,book_id AS bookId,action,status,payload,result,expires_at AS expiresAt,confirmed_at AS confirmedAt,cancelled_at AS cancelledAt,created_at AS createdAt,updated_at AS updatedAt";
 const aiSessionColumns =
@@ -840,7 +839,6 @@ export class D1LedgerRepository {
       cancelable: false,
       retryable: false,
       retryCount: 0,
-      convertEventSequence: 0,
       ocrProgress: 0,
       ocrEventSequence: 0,
       createdAt: timestamp,
@@ -914,27 +912,18 @@ export class D1LedgerRepository {
       .run();
     return this.getImportJob(jobId);
   }
-  async attachOcrJob(jobId: string, ocrJobId: string) {
+  async attachOcrJob(jobId: string, ocrJobId: string, alephTool = "ocr") {
     await this.db
       .prepare(
-        "UPDATE import_jobs SET status=?,ocr_job_id=?,ocr_submitted_at=?,ocr_progress=0,ocr_stage=?,ocr_event_sequence=0,error_message=NULL,error_code=NULL,error_stage=NULL,error_request_id=NULL,error_retryable=0,error_terminal=0,failed_external_job_id=NULL,cancelable=1,retryable=1,updated_at=? WHERE id=?",
+        "UPDATE import_jobs SET status=?,ocr_job_id=?,aleph_tool=?,ocr_submitted_at=?,ocr_progress=0,ocr_stage=?,ocr_event_sequence=0,error_message=NULL,error_code=NULL,error_stage=NULL,error_request_id=NULL,error_retryable=0,error_terminal=0,failed_external_job_id=NULL,cancelable=1,retryable=1,updated_at=? WHERE id=?",
       )
-      .bind("ocr_processing", ocrJobId, now(), "queued", now(), jobId)
+      .bind("ocr_processing", ocrJobId, alephTool, now(), "queued", now(), jobId)
       .run();
     return this.getImportJob(jobId);
   }
-  async attachConvertJob(jobId: string, convertJobId: string) {
+  async attachProcessedFile(jobId: string, input: { r2Key: string; fileType: string }) {
     await this.db
-      .prepare(
-        "UPDATE import_jobs SET status=?,convert_job_id=?,convert_event_sequence=0,ocr_progress=0,ocr_stage=?,error_message=NULL,error_code=NULL,error_stage=NULL,error_request_id=NULL,error_retryable=0,error_terminal=0,failed_external_job_id=NULL,cancelable=1,retryable=1,updated_at=? WHERE id=?",
-      )
-      .bind("converting", convertJobId, "queued", now(), jobId)
-      .run();
-    return this.getImportJob(jobId);
-  }
-  async attachConvertedFile(jobId: string, input: { r2Key: string; fileType: string }) {
-    await this.db
-      .prepare("UPDATE import_jobs SET converted_r2_key=?,converted_file_type=?,updated_at=? WHERE id=?")
+      .prepare("UPDATE import_jobs SET processed_r2_key=?,processed_file_type=?,updated_at=? WHERE id=?")
       .bind(input.r2Key, input.fileType, now(), jobId)
       .run();
     return this.getImportJob(jobId);
@@ -986,7 +975,6 @@ export class D1LedgerRepository {
   async updateAlephState(
     jobId: string,
     input: {
-      phase: "convert" | "ocr";
       progress?: number;
       stage?: string;
       currentPage?: number | null;
@@ -1029,11 +1017,7 @@ export class D1LedgerRepository {
       values.unshift(input.retryable ? 1 : 0);
     }
     if (input.eventSequence !== undefined) {
-      updates.unshift(
-        input.phase === "convert"
-          ? "convert_event_sequence=MAX(convert_event_sequence, ?)"
-          : "ocr_event_sequence=MAX(ocr_event_sequence, ?)",
-      );
+      updates.unshift("ocr_event_sequence=MAX(ocr_event_sequence, ?)");
       values.unshift(input.eventSequence);
     }
     await this.db
@@ -1076,7 +1060,7 @@ export class D1LedgerRepository {
   async prepareImportJobRetry(jobId: string) {
     await this.db
       .prepare(
-        "UPDATE import_jobs SET retry_count=retry_count+1,status='uploaded',convert_job_id=NULL,convert_event_sequence=0,ocr_job_id=NULL,ocr_submitted_at=NULL,ocr_progress=0,ocr_stage=NULL,ocr_current_page=NULL,ocr_total_pages=NULL,ocr_completed_at=NULL,ocr_event_sequence=0,error_message=NULL,error_code=NULL,error_stage=NULL,error_request_id=NULL,error_retryable=0,error_terminal=0,failed_external_job_id=NULL,cancelable=0,retryable=0,updated_at=? WHERE id=?",
+        "UPDATE import_jobs SET retry_count=retry_count+1,status='uploaded',ocr_job_id=NULL,aleph_tool=NULL,ocr_submitted_at=NULL,ocr_progress=0,ocr_stage=NULL,ocr_current_page=NULL,ocr_total_pages=NULL,ocr_completed_at=NULL,ocr_event_sequence=0,processed_r2_key=NULL,processed_file_type=NULL,error_message=NULL,error_code=NULL,error_stage=NULL,error_request_id=NULL,error_retryable=0,error_terminal=0,failed_external_job_id=NULL,cancelable=0,retryable=0,updated_at=? WHERE id=?",
       )
       .bind(now(), jobId)
       .run();

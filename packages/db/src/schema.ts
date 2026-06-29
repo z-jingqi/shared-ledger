@@ -142,11 +142,8 @@ export const importJobs = sqliteTable("import_jobs", {
   cancelable: integer("cancelable").notNull().default(0),
   retryable: integer("retryable").notNull().default(0),
   retryCount: integer("retry_count").notNull().default(0),
-  convertJobId: text("convert_job_id"),
-  convertEventSequence: integer("convert_event_sequence").notNull().default(0),
-  convertedR2Key: text("converted_r2_key"),
-  convertedFileType: text("converted_file_type"),
   ocrJobId: text("ocr_job_id"),
+  alephTool: text("aleph_tool"),
   ocrSubmittedAt: text("ocr_submitted_at"),
   ocrProgress: integer("ocr_progress").notNull().default(0),
   ocrStage: text("ocr_stage"),
@@ -154,6 +151,8 @@ export const importJobs = sqliteTable("import_jobs", {
   ocrTotalPages: integer("ocr_total_pages"),
   ocrCompletedAt: text("ocr_completed_at"),
   ocrEventSequence: integer("ocr_event_sequence").notNull().default(0),
+  processedR2Key: text("processed_r2_key"),
+  processedFileType: text("processed_file_type"),
   ...fullAudit,
 });
 export const importedRecords = sqliteTable("imported_records", {

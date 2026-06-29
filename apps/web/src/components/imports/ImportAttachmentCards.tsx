@@ -152,6 +152,8 @@ export function ImportAttachmentCards({
 
 function importProgressLabel(attachment: ImportAttachmentView) {
   if (attachment.status === "uploading") return "上传中";
+  if (attachment.stage === "converting") return "正在转换图片";
+  if (attachment.stage === "compressing") return "正在压缩图片";
   if (attachment.stage === "ai_processing" || attachment.stage === "ready") return "AI 分析中";
   if (typeof attachment.currentPage === "number" && typeof attachment.totalPages === "number") {
     return `第 ${attachment.currentPage}/${attachment.totalPages} 页`;

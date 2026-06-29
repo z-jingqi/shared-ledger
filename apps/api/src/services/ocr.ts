@@ -30,11 +30,23 @@ export type AlephOcrJob = {
   outputAvailable?: boolean;
   error?: string | AlephErrorPayload;
 };
-export type AlephOcrResult = {
+export type AlephPlainOcrResult = {
   plainText: string;
   markdown: string;
   pages: Array<{ text: string; confidence?: number | null }>;
 };
+export type AlephImagePipelineResult = {
+  tool?: "image.pipeline";
+  ocr: AlephPlainOcrResult;
+  compressed?: {
+    filename: string;
+    mimeType: string;
+    sizeBytes: number;
+    width: number;
+    height: number;
+  };
+};
+export type AlephOcrResult = AlephPlainOcrResult | AlephImagePipelineResult;
 
 export class AlephToolsError extends Error {
   code: string;
@@ -66,32 +78,46 @@ export class AlephOcrClient {
     private readonly apiKey: string,
   ) {}
 
-  async createJob(
+  async createOcrJob(
     file: { bytes: ArrayBuffer; filename: string; mimeType: string },
     options: { callbackUrl?: string; metadata?: Record<string, unknown>; idempotencyKey?: string } = {},
   ): Promise<AlephOcrJob> {
     const form = new FormData();
     form.append("file", new File([file.bytes], file.filename, { type: file.mimeType }));
+    form.append("ocrMode", "small");
     if (options.callbackUrl) form.append("callbackUrl", options.callbackUrl);
     if (options.metadata) form.append("metadata", JSON.stringify(options.metadata));
-    return this.request<AlephOcrJob>("/v1/jobs", {
+    return this.request<AlephOcrJob>("/v1/tools/ocr", {
       method: "POST",
       body: form,
       headers: options.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : undefined,
     });
   }
 
-  async createImageConversionJob(
+  async createImagePipelineJob(
     file: { bytes: ArrayBuffer; filename: string; mimeType: string },
     options: { callbackUrl?: string; metadata?: Record<string, unknown>; idempotencyKey?: string } = {},
   ): Promise<AlephOcrJob> {
     const form = new FormData();
     form.append("file", new File([file.bytes], file.filename, { type: file.mimeType }));
-    form.append("targetFormat", "jpeg");
-    form.append("quality", "92");
+    form.append(
+      "pipeline",
+      JSON.stringify({
+        convert: { targetFormat: "webp", width: 1600, fit: "inside" },
+        compress: {
+          outputFormat: "jpeg",
+          targetSizeBytes: 900000,
+          maxWidth: 1600,
+          maxHeight: 1600,
+          minQuality: 45,
+          maxQuality: 85,
+        },
+        ocr: { ocrMode: "small" },
+      }),
+    );
     if (options.callbackUrl) form.append("callbackUrl", options.callbackUrl);
     if (options.metadata) form.append("metadata", JSON.stringify(options.metadata));
-    return this.request<AlephOcrJob>("/v1/tools/image/convert", {
+    return this.request<AlephOcrJob>("/v1/tools/image/pipeline", {
       method: "POST",
       body: form,
       headers: options.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : undefined,
@@ -188,9 +214,14 @@ export function runtimeOcrClient(env: Env): AlephOcrClient {
 }
 
 export function ocrConfidence(result: AlephOcrResult): number {
-  const values = result.pages
+  const ocr = plainOcrResult(result);
+  const values = ocr.pages
     .map((page) => page.confidence)
     .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   if (!values.length) return 1;
   return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+export function plainOcrResult(result: AlephOcrResult): AlephPlainOcrResult {
+  return "ocr" in result ? result.ocr : result;
 }

@@ -33,11 +33,8 @@ export type ImportJob = {
   cancelable?: boolean;
   retryable?: boolean;
   retryCount?: number;
-  convertJobId?: string;
-  convertEventSequence?: number;
-  convertedR2Key?: string;
-  convertedFileType?: string;
   ocrJobId?: string;
+  alephTool?: string;
   ocrSubmittedAt?: string;
   ocrProgress?: number;
   ocrStage?: string;
@@ -45,6 +42,8 @@ export type ImportJob = {
   ocrTotalPages?: number;
   ocrCompletedAt?: string;
   ocrEventSequence?: number;
+  processedR2Key?: string;
+  processedFileType?: string;
   createdAt: string;
   updatedAt: string;
   deletedAt?: string;

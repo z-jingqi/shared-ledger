@@ -8,14 +8,13 @@ import {
   cancelAlephOcrJob,
   cancelImportJob,
   failAlephOcrJob,
-  finalizeAlephConvertJob,
   finalizeAlephOcrJob,
+  isImageImportFileType,
   isOcrImportFileType,
   markFailed,
-  requiresImageConversion,
   retryImportJob,
-  submitAlephConvertJob,
   submitAlephOcrJob,
+  submitAlephPipelineJob,
   updateAlephSnapshot,
 } from "../services/imports";
 import type { ImportQueueMessage } from "../services/imports";
@@ -75,8 +74,8 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
         customMetadata: { importJobId: job.id, bookId: input.bookId, uploadedBy: input.userId },
       });
       if (needsOcr) {
-        if (requiresImageConversion(resolvedFileType)) {
-          return await submitAlephConvertJob(
+        if (isImageImportFileType(resolvedFileType)) {
+          return await submitAlephPipelineJob(
             context.env,
             input.repository,
             job,
@@ -96,7 +95,7 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
       return (await input.repository.getImportJob(job.id)) ?? job;
     } catch (error) {
       if (needsOcr) {
-        await markFailed(input.repository, job.id, error, requiresImageConversion(resolvedFileType) ? "convert" : "ocr");
+        await markFailed(input.repository, job.id, error, isImageImportFileType(resolvedFileType) ? "pipeline" : "ocr");
       } else {
         await files.delete(job.r2Key);
         await input.repository.updateImportJob(job.id, "failed", error instanceof Error ? error.message : "上传失败");
@@ -200,7 +199,7 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     if (!phase) return jsonError(context, "Aleph Tools jobId 与导入任务不匹配", 400);
 
     const sequence = sequenceFromEventId(payload.eventId);
-    if (payload.job) await updateAlephSnapshot(repository, job.id, phase, payload.job, sequence);
+    if (payload.job) await updateAlephSnapshot(repository, job.id, payload.job, sequence);
     if (payload.event?.endsWith(".cancelled") || payload.job?.status === "cancelled") {
       await cancelAlephOcrJob(repository, job.id, sequence);
       return context.json({ ok: true });
@@ -213,10 +212,7 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
       return context.json({ ok: true });
     }
 
-    const finalize = (phase === "convert"
-      ? finalizeAlephConvertJob(context.env, repository, job.id)
-      : finalizeAlephOcrJob(context.env, repository, job.id)
-    ).catch(async (error) => {
+    const finalize = finalizeAlephOcrJob(context.env, repository, job.id).catch(async (error) => {
       await repository.markImportJobFailed(job.id, {
         message: error instanceof Error ? error.message : "导入处理失败",
         code: "INTERNAL_ERROR",
@@ -276,8 +272,8 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
             const activeAlephJobs = jobs.filter((job): job is ImportJob => {
               if (!job) return false;
               return (
-                ((Boolean(job.convertJobId) && job.status === "converting") ||
-                  (Boolean(job.ocrJobId) && job.status === "ocr_processing")) &&
+                Boolean(job.ocrJobId) &&
+                job.status === "ocr_processing" &&
                 !terminalImportStatuses.has(job.status)
               );
             });
@@ -498,7 +494,7 @@ type AlephWebhookPayload = {
   resultUrl?: string;
   outputUrl?: string;
   error?: string | AlephErrorPayload;
-  metadata?: { importJobId?: string; phase?: "convert" | "ocr" };
+  metadata?: { importJobId?: string; phase?: "pipeline" | "ocr" };
   createdAt?: string;
 };
 
@@ -508,11 +504,10 @@ type AlephSseMessage = {
   data?: string;
 };
 
-function resolveAlephPhase(job: ImportJob, payload: AlephWebhookPayload): "convert" | "ocr" | undefined {
-  if (payload.metadata?.phase === "convert" && job.convertJobId === payload.jobId) return "convert";
+function resolveAlephPhase(job: ImportJob, payload: AlephWebhookPayload): "pipeline" | "ocr" | undefined {
+  if (payload.metadata?.phase === "pipeline" && job.ocrJobId === payload.jobId) return "pipeline";
   if (payload.metadata?.phase === "ocr" && job.ocrJobId === payload.jobId) return "ocr";
-  if (job.convertJobId === payload.jobId) return "convert";
-  if (job.ocrJobId === payload.jobId) return "ocr";
+  if (job.ocrJobId === payload.jobId) return job.alephTool === "image.pipeline" ? "pipeline" : "ocr";
   return undefined;
 }
 
@@ -537,8 +532,8 @@ async function proxyAlephEvents(
   job: ImportJob,
   onJob: (job: ImportJob) => Promise<void> | void,
 ) {
-  const phase: "convert" | "ocr" = job.status === "converting" ? "convert" : "ocr";
-  const externalJobId = phase === "convert" ? job.convertJobId : job.ocrJobId;
+  const phase: "pipeline" | "ocr" = job.alephTool === "image.pipeline" ? "pipeline" : "ocr";
+  const externalJobId = job.ocrJobId;
   if (!externalJobId) return;
   if (!env.ALEPH_OCR_BASE_URL) throw new Error("ALEPH_OCR_BASE_URL 未配置，无法订阅 OCR 进度");
   if (!env.ALEPH_OCR_API_KEY) throw new Error("ALEPH_OCR_API_KEY 未配置，无法订阅 OCR 进度");
@@ -548,7 +543,7 @@ async function proxyAlephEvents(
     accept: "text/event-stream",
     authorization: `Bearer ${env.ALEPH_OCR_API_KEY}`,
   };
-  const lastEventId = phase === "convert" ? job.convertEventSequence : job.ocrEventSequence;
+  const lastEventId = job.ocrEventSequence;
   if (lastEventId && lastEventId > 0) headers["Last-Event-ID"] = String(lastEventId);
   const response = await fetch(url, { headers });
   if (!response.ok || !response.body) throw new Error(`Aleph-OCR 进度订阅失败 (${response.status})`);
@@ -568,7 +563,7 @@ async function proxyAlephEvents(
     const isReady = message.event === "job.ready" || alephJob.status === "ready";
 
     if (alephJob) {
-      const updated = await updateAlephSnapshot(repository, job.id, phase, alephJob, sequence);
+      const updated = await updateAlephSnapshot(repository, job.id, alephJob, sequence);
       if (updated) await onJob(updated);
     }
     if (isCancelled) {
@@ -593,23 +588,10 @@ async function proxyAlephEvents(
         await onJob(current);
         return;
       }
-      if (phase === "ocr") {
-        const processing = await repository.updateImportJob(job.id, "ai_processing");
-        if (processing) await onJob(processing);
-      }
+      const processing = await repository.updateImportJob(job.id, "ai_processing");
+      if (processing) await onJob(processing);
       try {
-        if (phase === "convert") {
-          await finalizeAlephConvertJob(env, repository, job.id);
-          const next = await repository.getImportJob(job.id);
-          if (next) {
-            await onJob(next);
-            if (next.ocrJobId && next.status === "ocr_processing") {
-              await proxyAlephEvents(env, repository, next, onJob);
-            }
-          }
-        } else {
-          await finalizeAlephOcrJob(env, repository, job.id);
-        }
+        await finalizeAlephOcrJob(env, repository, job.id);
       } catch (error) {
         await repository.markImportJobFailed(job.id, {
           message: error instanceof Error ? error.message : "导入处理失败",

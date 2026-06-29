@@ -11,7 +11,7 @@ describe("Aleph-OCR client", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const job = await new AlephOcrClient("https://ocr.example.com/", "secret").createJob(
+    const job = await new AlephOcrClient("https://ocr.example.com/", "secret").createOcrJob(
       {
         bytes: new TextEncoder().encode("image").buffer,
         filename: "receipt.png",
@@ -26,13 +26,14 @@ describe("Aleph-OCR client", () => {
 
     expect(job).toEqual({ jobId: "ocr_1", status: "queued" });
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://ocr.example.com/v1/jobs",
+      "https://ocr.example.com/v1/tools/ocr",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({ authorization: "Bearer secret", "Idempotency-Key": "import_1" }),
       }),
     );
     const body = (fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.body as FormData;
+    expect(body.get("ocrMode")).toBe("small");
     expect(body.get("callbackUrl")).toBe("https://api.example.com/imports/aleph-webhook");
     expect(JSON.parse(String(body.get("metadata")))).toEqual({ importJobId: "import_1" });
   });
@@ -55,13 +56,13 @@ describe("Aleph-OCR client", () => {
     );
   });
 
-  it("creates async image conversion jobs with idempotency metadata", async () => {
+  it("creates async image pipeline jobs with fixed preprocessing and OCR options", async () => {
     const fetchMock = vi.fn<typeof globalThis.fetch>(async () =>
-      Response.json({ success: true, data: { jobId: "convert_1", status: "queued", operation: "image.convert" } }),
+      Response.json({ success: true, data: { jobId: "pipeline_1", status: "queued", operation: "image.pipeline" } }),
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const job = await new AlephOcrClient("https://ocr.example.com/", "secret").createImageConversionJob(
+    const job = await new AlephOcrClient("https://ocr.example.com/", "secret").createImagePipelineJob(
       {
         bytes: new TextEncoder().encode("heic").buffer,
         filename: "receipt.heic",
@@ -69,25 +70,37 @@ describe("Aleph-OCR client", () => {
       },
       {
         callbackUrl: "https://api.example.com/imports/aleph-webhook",
-        metadata: { importJobId: "import_1", phase: "convert" },
-        idempotencyKey: "convert:import_1:0",
+        metadata: { importJobId: "import_1", phase: "pipeline" },
+        idempotencyKey: "pipeline:import_1:0",
       },
     );
 
-    expect(job).toEqual({ jobId: "convert_1", status: "queued", operation: "image.convert" });
+    expect(job).toEqual({ jobId: "pipeline_1", status: "queued", operation: "image.pipeline" });
     const body = (fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.body as FormData;
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://ocr.example.com/v1/tools/image/convert",
+      "https://ocr.example.com/v1/tools/image/pipeline",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
           authorization: "Bearer secret",
-          "Idempotency-Key": "convert:import_1:0",
+          "Idempotency-Key": "pipeline:import_1:0",
         }),
       }),
     );
-    expect(body.get("targetFormat")).toBe("jpeg");
-    expect(JSON.parse(String(body.get("metadata")))).toEqual({ importJobId: "import_1", phase: "convert" });
+    const pipeline = JSON.parse(String(body.get("pipeline")));
+    expect(pipeline).toEqual({
+      convert: { targetFormat: "webp", width: 1600, fit: "inside" },
+      compress: {
+        outputFormat: "jpeg",
+        targetSizeBytes: 900000,
+        maxWidth: 1600,
+        maxHeight: 1600,
+        minQuality: 45,
+        maxQuality: 85,
+      },
+      ocr: { ocrMode: "small" },
+    });
+    expect(JSON.parse(String(body.get("metadata")))).toEqual({ importJobId: "import_1", phase: "pipeline" });
   });
 
   it("surfaces Aleph-OCR API errors", async () => {
@@ -142,6 +155,7 @@ describe("Aleph-OCR client", () => {
       }),
     ).toBeCloseTo(0.8);
     expect(ocrConfidence({ plainText: "text", markdown: "text", pages: [{ text: "a" }] })).toBe(1);
+    expect(ocrConfidence({ ocr: { plainText: "text", markdown: "text", pages: [{ text: "a", confidence: 0.6 }] } })).toBe(0.6);
   });
 
   it("verifies Aleph-OCR webhook HMAC signatures", async () => {

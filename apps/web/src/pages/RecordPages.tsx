@@ -530,7 +530,17 @@ export function TransactionFormSheet({
     setAttachments((current) =>
       current.map((item) => {
         const job = jobMap.get(item.id);
-        return job ? { ...item, status: "processing", jobId: job.id, progress: job.progress } : item;
+        return job
+          ? {
+              ...item,
+              status: "processing",
+              jobId: job.id,
+              progress: job.progress,
+              stage: job.stage,
+              currentPage: job.currentPage,
+              totalPages: job.totalPages,
+            }
+          : item;
       }),
     );
     stopWatchingRef.current?.();
@@ -545,6 +555,9 @@ export function TransactionFormSheet({
                   status: job.status === "failed" ? "failed" : terminalImportStatuses.has(job.status) ? "completed" : "processing",
                   errorMessage: job.errorMessage,
                   progress: job.progress,
+                  stage: job.stage,
+                  currentPage: job.currentPage,
+                  totalPages: job.totalPages,
                 }
               : item,
           ),
@@ -1241,13 +1254,15 @@ function categoryColor(category: { name?: string }, type: "income" | "expense") 
 }
 
 function isActiveImport(job: ImportJobStatus) {
-  return ["uploaded", "parsing", "converting", "ocr_processing", "ai_processing", "processing"].includes(job.status);
+  return ["uploaded", "parsing", "ocr_processing", "ai_processing", "processing"].includes(job.status);
 }
 
 function formatActiveImportSummary(imports: ImportJobStatus[]) {
   const first = imports[0];
   if (!first) return "";
   if (first.status === "ai_processing") return imports.length > 1 ? `${imports.length} 个文件，AI 分析中` : "AI 分析中";
+  if (first.stage === "converting") return imports.length > 1 ? `${imports.length} 个文件，正在转换图片` : "正在转换图片";
+  if (first.stage === "compressing") return imports.length > 1 ? `${imports.length} 个文件，正在压缩图片` : "正在压缩图片";
   if (typeof first.currentPage === "number" && typeof first.totalPages === "number") {
     return imports.length > 1 ? `${imports.length} 个文件，第 ${first.currentPage}/${first.totalPages} 页` : `第 ${first.currentPage}/${first.totalPages} 页`;
   }

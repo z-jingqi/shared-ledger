@@ -323,13 +323,15 @@ function isSameDay(value: string, now: Date) {
 }
 
 function isProcessingJob(job: ImportJob) {
-  return ["uploaded", "parsing", "converting", "ocr_processing", "ai_processing"].includes(job.status);
+  return ["uploaded", "parsing", "ocr_processing", "ai_processing"].includes(job.status);
 }
 
 function formatHomeImportProgress(jobs: ImportJob[]) {
   const first = jobs[0];
   if (!first) return "";
   if (first.status === "ai_processing") return jobs.length > 1 ? `${jobs.length} 个文件，AI 分析中` : "AI 分析中";
+  if (first.stage === "converting") return jobs.length > 1 ? `${jobs.length} 个文件，正在转换图片` : "正在转换图片";
+  if (first.stage === "compressing") return jobs.length > 1 ? `${jobs.length} 个文件，正在压缩图片` : "正在压缩图片";
   if (typeof first.currentPage === "number" && typeof first.totalPages === "number") {
     return jobs.length > 1 ? `${jobs.length} 个文件，第 ${first.currentPage}/${first.totalPages} 页` : `第 ${first.currentPage}/${first.totalPages} 页`;
   }
