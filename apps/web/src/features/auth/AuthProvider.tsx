@@ -1,5 +1,5 @@
 import type { SubscriptionPlan } from "@shared-ledger/shared";
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, type ReactNode, use, useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../../lib";
 
 export type SessionUser = { id: string; name: string; email: string; phone?: string; plan: SubscriptionPlan; avatarUrl?: string };
@@ -35,10 +35,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("ledger:unauthorized", unauthorized);
   }, []);
   const value = useMemo(() => ({ user, loading, refresh, setUser }), [user, loading, refresh]);
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return <AuthContext value={value}>{children}</AuthContext>;
 }
 export function useAuth() {
-  const value = useContext(AuthContext);
+  const value = use(AuthContext);
   if (!value) throw new Error("useAuth 必须在 AuthProvider 内使用");
   return value;
 }

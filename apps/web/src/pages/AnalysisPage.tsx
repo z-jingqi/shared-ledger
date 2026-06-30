@@ -2,7 +2,8 @@ import { CaretRightIcon, SparkleIcon, WarningCircleIcon } from "@phosphor-icons/
 import { useState } from "react";
 import { BookSwitcherSheet } from "../components/books/BookSwitcherSheet";
 import type { LedgerTransaction } from "../components/ledger/Transactions";
-import { IosMetric, IosPage, IosScroll, IosTopBar, yuan } from "../components/ios/IosDesign";
+import { IosMetric, IosPage, IosScroll, IosTopBar } from "../components/ios/IosDesign";
+import { yuan } from "../features/formatting/money";
 import { useAppSheetActions } from "../features/sheets/SheetContext";
 import { useActiveBook } from "../hooks/useActiveBook";
 import { useApi } from "../hooks/useApi";

@@ -8,7 +8,7 @@ import {
   UserCircleIcon,
 } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useReducer, useState } from "react";
 import { useForm } from "react-hook-form";
 import type { UseFormRegisterReturn } from "react-hook-form";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -27,37 +27,67 @@ import { api } from "../lib";
 type LoginForm = { identifier: string; password: string };
 type RegisterForm = { name: string; password: string; confirmPassword: string };
 type SubscriptionForm = { email: string; phone: string };
+type PasswordState = {
+  currentPassword: string;
+  newPassword: string;
+  confirmPassword: string;
+  error: string;
+  saved: boolean;
+  saving: boolean;
+};
+type PasswordAction =
+  | { type: "field"; field: "currentPassword" | "newPassword" | "confirmPassword"; value: string }
+  | { type: "submit" }
+  | { type: "error"; error: string }
+  | { type: "success" };
+
+const initialPasswordState: PasswordState = {
+  currentPassword: "",
+  newPassword: "",
+  confirmPassword: "",
+  error: "",
+  saved: false,
+  saving: false,
+};
+const subscriptionFeatures = [
+  ["AI 自然语言记账", "“记一笔昨天午餐 38” 即可入账"],
+  ["AI 智能查账与分析", "用一句话查询、统计、生成报告"],
+  ["文件批量识别", "小票、账单、Excel 一次处理多份"],
+  ["高级分析与异常提醒", "趋势、成员贡献、大额预警"],
+] as const;
+
+function passwordReducer(state: PasswordState, action: PasswordAction): PasswordState {
+  switch (action.type) {
+    case "field":
+      return { ...state, [action.field]: action.value, saved: false, error: "" };
+    case "submit":
+      return { ...state, saved: false, error: "", saving: true };
+    case "error":
+      return { ...state, error: action.error, saving: false };
+    case "success":
+      return { ...initialPasswordState, saved: true };
+  }
+}
 
 export function AccountSettingsPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [passwordError, setPasswordError] = useState("");
-  const [passwordSaved, setPasswordSaved] = useState(false);
-  const [savingPassword, setSavingPassword] = useState(false);
+  const [passwordState, dispatchPassword] = useReducer(passwordReducer, initialPasswordState);
+  const { currentPassword, newPassword, confirmPassword, error: passwordError, saved: passwordSaved, saving: savingPassword } = passwordState;
   const changePassword = async () => {
-    setPasswordSaved(false);
-    setPasswordError("");
     if (newPassword !== confirmPassword) {
-      setPasswordError("两次输入的新密码不一致");
+      dispatchPassword({ type: "error", error: "两次输入的新密码不一致" });
       return;
     }
-    setSavingPassword(true);
+    dispatchPassword({ type: "submit" });
     try {
       await api("/auth/me/password", {
         method: "PUT",
         body: JSON.stringify({ currentPassword, newPassword }),
       });
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-      setPasswordSaved(true);
+      dispatchPassword({ type: "success" });
     } catch (cause) {
-      setPasswordError(cause instanceof Error ? cause.message : "修改密码失败");
-    } finally {
-      setSavingPassword(false);
+      dispatchPassword({ type: "error", error: cause instanceof Error ? cause.message : "修改密码失败" });
     }
   };
   return (
@@ -77,13 +107,32 @@ export function AccountSettingsPage() {
           <h2>修改密码</h2>
           <IosCard className="ios-form-card ios-password-card">
             <IosField label="当前密码">
-              <input autoComplete="current-password" type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.currentTarget.value)} />
+              <input
+                aria-label="当前密码"
+                autoComplete="current-password"
+                type="password"
+                value={currentPassword}
+                onChange={(event) => dispatchPassword({ type: "field", field: "currentPassword", value: event.currentTarget.value })}
+              />
             </IosField>
             <IosField label="新密码">
-              <input autoComplete="new-password" type="password" value={newPassword} onChange={(event) => setNewPassword(event.currentTarget.value)} placeholder="至少 6 位" />
+              <input
+                aria-label="新密码"
+                autoComplete="new-password"
+                type="password"
+                value={newPassword}
+                onChange={(event) => dispatchPassword({ type: "field", field: "newPassword", value: event.currentTarget.value })}
+                placeholder="至少 6 位"
+              />
             </IosField>
             <IosField label="确认新密码" error={passwordError}>
-              <input autoComplete="new-password" type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.currentTarget.value)} />
+              <input
+                aria-label="确认新密码"
+                autoComplete="new-password"
+                type="password"
+                value={confirmPassword}
+                onChange={(event) => dispatchPassword({ type: "field", field: "confirmPassword", value: event.currentTarget.value })}
+              />
             </IosField>
             {passwordSaved ? <p className="ios-success-note">密码已更新，下次登录请使用新密码。</p> : null}
             <IosButton disabled={savingPassword || !currentPassword || !newPassword || !confirmPassword} onClick={() => void changePassword()}>
@@ -124,12 +173,6 @@ export function SubscriptionPage() {
       setError(cause instanceof Error ? cause.message : "订阅失败");
     }
   });
-  const features = [
-    ["AI 自然语言记账", "“记一笔昨天午餐 38” 即可入账"],
-    ["AI 智能查账与分析", "用一句话查询、统计、生成报告"],
-    ["文件批量识别", "小票、账单、Excel 一次处理多份"],
-    ["高级分析与异常提醒", "趋势、成员贡献、大额预警"],
-  ];
   return (
     <IosPage>
       <IosTopBar title="订阅升级" />
@@ -140,7 +183,7 @@ export function SubscriptionPage() {
           <p>让记账、查账与分析都交给 AI</p>
         </section>
         <IosCard className="ios-upgrade-features">
-          {features.map(([title, text]) => (
+          {subscriptionFeatures.map(([title, text]) => (
             <div key={title}>
               <span>
                 <CheckIcon size={14} weight="bold" />

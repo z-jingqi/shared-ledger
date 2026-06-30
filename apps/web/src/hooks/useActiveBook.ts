@@ -2,14 +2,16 @@ import { useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useApi } from "./useApi";
 
-export const LAST_ACTIVE_BOOK_STORAGE_KEY = "shared-ledger:last-active-book-id";
+const LAST_ACTIVE_BOOK_STORAGE_KEY = "shared-ledger:last-active-book-id";
 
 type Book = { id: string; name: string; currency: string };
+const emptyBooks: Book[] = [];
+
 export function useActiveBook() {
   const [search, setSearch] = useSearchParams();
   const { data, ...state } = useApi<{ books: Book[] }>("/books");
   const requested = search.get("bookId");
-  const books = data?.books ?? [];
+  const books = data?.books ?? emptyBooks;
   const stored = useMemo(() => readLastActiveBookId(), []);
   const book =
     books.find((item) => item.id === requested) ??
@@ -49,7 +51,7 @@ export function useActiveBook() {
   return { ...state, book, books, setActiveBook };
 }
 
-export function readLastActiveBookId() {
+function readLastActiveBookId() {
   try {
     return window.localStorage.getItem(LAST_ACTIVE_BOOK_STORAGE_KEY);
   } catch {
@@ -65,7 +67,7 @@ export function writeLastActiveBookId(bookId: string) {
   }
 }
 
-export function clearLastActiveBookId() {
+function clearLastActiveBookId() {
   try {
     window.localStorage.removeItem(LAST_ACTIVE_BOOK_STORAGE_KEY);
   } catch {

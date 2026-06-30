@@ -14,7 +14,7 @@ import {
   UsersThreeIcon,
 } from "@phosphor-icons/react";
 import { Input } from "@shared-ledger/ui";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useReducer, useRef, useState, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -38,6 +38,28 @@ import { api } from "../lib";
 
 type Resource = { id: string; name: string; type?: "income" | "expense"; icon?: string; sortOrder?: number };
 type ImportJobSummary = { id: string; fileName?: string; status: string };
+type ProfileEditState = { avatarUploading: boolean; email: string; error: string; name: string; saving: boolean };
+type ProfileEditAction =
+  | { type: "field"; field: "email" | "name"; value: string }
+  | { type: "avatar-start" }
+  | { type: "avatar-finish" }
+  | { type: "save-start" }
+  | { type: "save-error"; error: string };
+
+function profileEditReducer(state: ProfileEditState, action: ProfileEditAction): ProfileEditState {
+  switch (action.type) {
+    case "field":
+      return { ...state, [action.field]: action.value, error: "" };
+    case "avatar-start":
+      return { ...state, avatarUploading: true };
+    case "avatar-finish":
+      return { ...state, avatarUploading: false };
+    case "save-start":
+      return { ...state, error: "", saving: true };
+    case "save-error":
+      return { ...state, error: action.error, saving: false };
+  }
+}
 
 export function SettingsPage() {
   const { user, setUser } = useAuth();
@@ -181,17 +203,19 @@ export function SettingsPage() {
 function ProfileEditSheet({ close }: { close: () => void }) {
   const { user, setUser } = useAuth();
   const avatarInputRef = useRef<HTMLInputElement>(null);
-  const [name, setName] = useState(user?.name ?? "");
-  const [email, setEmail] = useState(user?.email ?? "");
-  const [saving, setSaving] = useState(false);
-  const [avatarUploading, setAvatarUploading] = useState(false);
-  const [error, setError] = useState("");
+  const [{ avatarUploading, email, error, name, saving }, dispatchProfileEdit] = useReducer(profileEditReducer, {
+    avatarUploading: false,
+    email: user?.email ?? "",
+    error: "",
+    name: user?.name ?? "",
+    saving: false,
+  });
 
   const uploadAvatar = async (file?: File) => {
     if (!file || avatarUploading) return;
     const formData = new FormData();
     formData.append("avatar", file);
-    setAvatarUploading(true);
+    dispatchProfileEdit({ type: "avatar-start" });
     try {
       const result = await api<{ user: NonNullable<typeof user> }>("/auth/me/avatar", {
         method: "PUT",
@@ -202,15 +226,14 @@ function ProfileEditSheet({ close }: { close: () => void }) {
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : "头像上传失败", { duration: 3000, closeButton: true });
     } finally {
-      setAvatarUploading(false);
+      dispatchProfileEdit({ type: "avatar-finish" });
       if (avatarInputRef.current) avatarInputRef.current.value = "";
     }
   };
 
   const save = async () => {
     if (!user) return;
-    setSaving(true);
-    setError("");
+    dispatchProfileEdit({ type: "save-start" });
     try {
       const result = await api<{ user: NonNullable<typeof user> }>("/auth/me/profile", {
         method: "PATCH",
@@ -220,9 +243,7 @@ function ProfileEditSheet({ close }: { close: () => void }) {
       toast.success("资料已保存", { duration: 2400, closeButton: true });
       close();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "保存失败");
-    } finally {
-      setSaving(false);
+      dispatchProfileEdit({ type: "save-error", error: cause instanceof Error ? cause.message : "保存失败" });
     }
   };
 
@@ -237,6 +258,7 @@ function ProfileEditSheet({ close }: { close: () => void }) {
           ref={avatarInputRef}
           className="sr-only"
           type="file"
+          aria-label="上传头像"
           accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
           onChange={(event) => void uploadAvatar(event.currentTarget.files?.[0])}
         />
@@ -245,10 +267,10 @@ function ProfileEditSheet({ close }: { close: () => void }) {
           <small>{avatarUploading ? "上传中…" : "更换头像"}</small>
         </button>
         <IosField label="昵称" error={!name.trim() ? "请输入昵称" : undefined}>
-          <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="昵称" />
+          <Input value={name} onChange={(event) => dispatchProfileEdit({ type: "field", field: "name", value: event.currentTarget.value })} placeholder="昵称" />
         </IosField>
         <IosField label="邮箱">
-          <Input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="可选，用于邀请和找回" />
+          <Input type="email" value={email} onChange={(event) => dispatchProfileEdit({ type: "field", field: "email", value: event.currentTarget.value })} placeholder="可选，用于邀请和找回" />
         </IosField>
         {error && <p className="field-error">{error}</p>}
       </div>
@@ -257,14 +279,11 @@ function ProfileEditSheet({ close }: { close: () => void }) {
 }
 
 function ProfileAvatar({ name, url }: { name?: string; url?: string }) {
-  const [failed, setFailed] = useState(false);
+  const [failedUrl, setFailedUrl] = useState<string | undefined>();
   const usableUrl = url && !url.includes("/auth/avatar/") ? url : undefined;
+  const failed = Boolean(usableUrl && failedUrl === usableUrl);
 
-  useEffect(() => {
-    setFailed(false);
-  }, [usableUrl]);
-
-  if (usableUrl && !failed) return <img src={usableUrl} alt="" onError={() => setFailed(true)} />;
+  if (usableUrl && !failed) return <img src={usableUrl} alt="" onError={() => setFailedUrl(usableUrl)} />;
   return <span>{userInitials(name)}</span>;
 }
 
@@ -290,16 +309,13 @@ export function ManagementSettingsPage() {
 function BookSettingsPage({ bookId }: { bookId: string }) {
   const navigate = useNavigate();
   const { data, reload } = useApi<{ book: { name: string; currency: string }; role?: string }>(`/books/${bookId}`);
-  const [bookName, setBookName] = useState("");
+  const [bookNameEdit, setBookNameEdit] = useState<{ bookId: string; name: string }>();
   const [bookError, setBookError] = useState("");
   const [savingBook, setSavingBook] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  useEffect(() => {
-    if (data?.book.name) setBookName(data.book.name);
-  }, [data?.book.name]);
-
   const canManageBook = data?.role === "creator" || data?.role === "admin";
+  const bookName = bookNameEdit?.bookId === bookId ? bookNameEdit.name : (data?.book.name ?? "");
   const trimmedBookName = bookName.trim();
   const saveBook = async () => {
     if (!trimmedBookName || trimmedBookName === data?.book.name) return;
@@ -308,6 +324,7 @@ function BookSettingsPage({ bookId }: { bookId: string }) {
     try {
       await api(`/books/${bookId}`, { method: "PATCH", body: JSON.stringify({ name: trimmedBookName }) });
       await reload();
+      setBookNameEdit(undefined);
       toast.success("账本名称已更新", { duration: 2400, closeButton: true });
     } catch (cause) {
       setBookError(cause instanceof Error ? cause.message : "保存失败");
@@ -344,7 +361,11 @@ function BookSettingsPage({ bookId }: { bookId: string }) {
         {canManageBook && (
           <IosCard className="ios-form-card ios-book-rename-card">
             <IosField label="账本名称" error={bookError}>
-              <Input value={bookName} onChange={(event) => setBookName(event.target.value)} placeholder="账本名称" />
+              <Input
+                value={bookName}
+                onChange={(event) => setBookNameEdit({ bookId, name: event.currentTarget.value })}
+                placeholder="账本名称"
+              />
             </IosField>
             <IosButton disabled={savingBook || !trimmedBookName || trimmedBookName === data?.book.name} onClick={() => void saveBook()}>
               {savingBook ? "保存中…" : "保存名称"}

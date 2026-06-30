@@ -29,13 +29,7 @@ export function invalidateLedgerData(detail: LedgerDataInvalidation = {}) {
   });
 }
 
-export function onLedgerDataInvalidated(listener: (detail: LedgerDataInvalidation) => void) {
-  const handler = (event: Event) => listener((event as CustomEvent<LedgerDataInvalidation>).detail ?? {});
-  window.addEventListener(eventName, handler);
-  return () => window.removeEventListener(eventName, handler);
-}
-
-export function shouldReloadApiPath(path: string | undefined, detail: LedgerDataInvalidation) {
+function shouldReloadApiPath(path: string | undefined, detail: LedgerDataInvalidation) {
   if (!path) return false;
   const scopes = new Set(detail.scopes ?? ["all"]);
   if (scopes.has("all")) return true;

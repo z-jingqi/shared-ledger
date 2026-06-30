@@ -14,10 +14,10 @@ import { useActiveBook } from "../hooks/useActiveBook";
 import { AddActionMenu } from "./AddActionMenu";
 
 const tabs = [
-  { to: "/home", label: "首页", key: "home", Icon: HouseIcon },
-  { to: "/records", label: "流水", key: "records", Icon: ListBulletsIcon },
-  { to: "/analysis", label: "分析", key: "analysis", Icon: ChartBarIcon },
-  { to: "/settings", label: "我的", key: "settings", Icon: UserCircleIcon },
+  { to: "/home", label: "首页", id: "home", Icon: HouseIcon },
+  { to: "/records", label: "流水", id: "records", Icon: ListBulletsIcon },
+  { to: "/analysis", label: "分析", id: "analysis", Icon: ChartBarIcon },
+  { to: "/settings", label: "我的", id: "settings", Icon: UserCircleIcon },
 ] as const;
 
 export function AppFrame({ children }: { children: ReactNode }) {
@@ -29,7 +29,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
 }
 
 function AppFrameInner({ children }: { children: ReactNode }) {
-  const location = useLocation();
+  const routerLocation = useLocation();
   const { user } = useAuth();
   const { book } = useActiveBook();
   const { openSheet } = useAppSheetActions();
@@ -37,11 +37,11 @@ function AppFrameInner({ children }: { children: ReactNode }) {
   const uploadInputRef = useRef<ImportFileUploadInputHandle>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const routeState = location.state as { backgroundLocation?: Location } | null;
-  const backgroundLocation = routeState?.backgroundLocation ?? location;
+  const routeState = routerLocation.state as { backgroundLocation?: Location } | null;
+  const backgroundLocation = routeState?.backgroundLocation ?? routerLocation;
   const shellPathname = backgroundLocation.pathname;
-  const isAuthPage = ["/login", "/register"].includes(location.pathname);
-  const isCreateBookPage = location.pathname === "/books/new";
+  const isAuthPage = ["/login", "/register"].includes(routerLocation.pathname);
+  const isCreateBookPage = routerLocation.pathname === "/books/new";
   const bottomNavTab = getBottomNavTab(shellPathname);
   const showBottomNav = Boolean(
     user && bottomNavTab && !isAuthPage && !isCreateBookPage && shellPathname !== "/ai",
@@ -50,7 +50,7 @@ function AppFrameInner({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     setAddMenuOpen(false);
-  }, [location.pathname, location.search]);
+  }, [routerLocation.pathname, routerLocation.search]);
 
   const goToManualAdd = () => {
     if (!book?.id) {
@@ -78,18 +78,18 @@ function AppFrameInner({ children }: { children: ReactNode }) {
           <nav className="ios-bottom-nav" aria-label="主导航">
             <div className="ios-bottom-nav-group">
               {tabs.slice(0, 2).map((tab) => (
-                <BottomTab {...tab} active={bottomNavTab === tab.key} bookQuery={bookQuery} key={tab.key} />
+                <BottomTab key={tab.id} {...tab} active={bottomNavTab === tab.id} bookQuery={bookQuery} />
               ))}
             </div>
             <span className="ios-bottom-nav-spacer" aria-hidden="true" />
             <div className="ios-bottom-nav-group">
               {tabs.slice(2).map((tab) => (
                 <BottomTab
+                  key={tab.id}
                   {...tab}
-                  active={bottomNavTab === tab.key}
-                  badge={tab.key === "settings" ? invitationBadge : 0}
+                  active={bottomNavTab === tab.id}
+                  badge={tab.id === "settings" ? invitationBadge : 0}
                   bookQuery={bookQuery}
-                  key={tab.key}
                 />
               ))}
             </div>

@@ -1,5 +1,5 @@
-import type { ButtonHTMLAttributes, CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import type { ButtonHTMLAttributes, CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 import { CaretLeftIcon } from "@phosphor-icons/react";
 
 export type IosBookLike = { id?: string; name?: string; currency?: string; color?: string };
@@ -13,7 +13,7 @@ export function BookMark({ book, size = 26 }: { book?: IosBookLike; size?: numbe
   );
 }
 
-export function LedgerPill({
+function LedgerPill({
   book,
   label,
   suffix,
@@ -97,7 +97,7 @@ export function IosCard({ children, className = "", onClick }: { children: React
   return <section className={`ios-card ${className}`}>{children}</section>;
 }
 
-export function IosSkeleton({ className = "" }: { className?: string }) {
+function IosSkeleton({ className = "" }: { className?: string }) {
   return <span className={`ios-skeleton ${className}`} aria-hidden="true" />;
 }
 
@@ -183,20 +183,20 @@ export function IosSheet({
   const currentDragYRef = useRef(0);
   const closeTimerRef = useRef<number | undefined>(undefined);
 
-  const closeAnimated = () => {
+  const closeAnimated = useCallback(() => {
     if (closing) return;
     setClosing(true);
     window.clearTimeout(closeTimerRef.current);
     closeTimerRef.current = window.setTimeout(onClose, 190);
-  };
-  const applyDrag = (clientY: number) => {
+  }, [closing, onClose]);
+  const applyDrag = useCallback((clientY: number) => {
     if (!draggingRef.current) return;
     const delta = clientY - startYRef.current;
     const next = Math.max(-28, latestYRef.current + delta);
     currentDragYRef.current = next;
     setDragY(next);
-  };
-  const finishDrag = () => {
+  }, []);
+  const finishDrag = useCallback(() => {
     if (!draggingRef.current) return;
     draggingRef.current = false;
     setDragging(false);
@@ -206,8 +206,8 @@ export function IosSheet({
       currentDragYRef.current = 0;
       setDragY(0);
     }
-  };
-  const beginDrag = (event: ReactPointerEvent<HTMLElement>) => {
+  }, [closeAnimated]);
+  const beginDrag = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (disableDragClose) return;
     startYRef.current = event.clientY;
     latestYRef.current = dragY;
@@ -215,21 +215,23 @@ export function IosSheet({
     draggingRef.current = true;
     setDragging(true);
     event.currentTarget.setPointerCapture(event.pointerId);
-  };
-  const moveDrag = (event: ReactPointerEvent<HTMLElement>) => {
+  }, [disableDragClose, dragY]);
+  const moveDrag = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     applyDrag(event.clientY);
-  };
-  const endDrag = (event: ReactPointerEvent<HTMLElement>) => {
+  }, [applyDrag]);
+  const endDrag = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
     finishDrag();
-  };
+  }, [finishDrag]);
+  const handleWindowDragMove = useEffectEvent((event: globalThis.PointerEvent) => applyDrag(event.clientY));
+  const handleWindowDragEnd = useEffectEvent(() => finishDrag());
 
   useEffect(() => {
     if (!dragging) return undefined;
-    const handleMove = (event: globalThis.PointerEvent) => applyDrag(event.clientY);
-    const handleEnd = () => finishDrag();
+    const handleMove = (event: globalThis.PointerEvent) => handleWindowDragMove(event);
+    const handleEnd = () => handleWindowDragEnd();
     window.addEventListener("pointermove", handleMove);
     window.addEventListener("pointerup", handleEnd);
     window.addEventListener("pointercancel", handleEnd);
@@ -252,9 +254,9 @@ export function IosSheet({
         aria-label="弹层背景"
         onClick={disableBackdropClose ? undefined : closeAnimated}
       />
-      <section
+      <dialog
+        open
         className={`ios-sheet ${full ? "full" : ""} ${className}${closing ? " closing" : ""}${dragging ? " dragging" : ""}`}
-        role="dialog"
         aria-modal="true"
         aria-label={title}
         style={{
@@ -264,11 +266,10 @@ export function IosSheet({
       >
         <header className={`ios-sheet-header ${full ? "full" : ""}`}>
           {!hideGrabber && (
-            <span
+            <button
               className="ios-sheet-grabber"
-              role="button"
+              type="button"
               aria-label="拖动关闭"
-              tabIndex={0}
               onPointerDown={beginDrag}
               onPointerMove={moveDrag}
               onPointerUp={endDrag}
@@ -291,7 +292,7 @@ export function IosSheet({
         </header>
         <div className="ios-sheet-body ios-scroll">{children}</div>
         {footer ? <footer className="ios-sheet-footer">{footer}</footer> : null}
-      </section>
+      </dialog>
     </div>
   );
 }
@@ -372,7 +373,7 @@ export function IosDialog({
   return (
     <div className="ios-dialog-layer">
       <button className="ios-dialog-backdrop" type="button" aria-label="取消" onClick={onCancel} />
-      <section className="ios-dialog" role="alertdialog" aria-modal="true" aria-label={title}>
+      <dialog open className="ios-dialog" role="alertdialog" aria-modal="true" aria-label={title}>
         {danger ? <span className="ios-dialog-danger">!</span> : null}
         <h2>{title}</h2>
         <p>{message}</p>
@@ -384,33 +385,18 @@ export function IosDialog({
             {confirmText}
           </button>
         </div>
-      </section>
+      </dialog>
     </div>
   );
 }
 
-export function submitGuard(handler: () => Promise<void> | void) {
-  return (event: FormEvent) => {
-    event.preventDefault();
-    void handler();
-  };
-}
-
-export function bookInitial(book?: IosBookLike) {
+function bookInitial(book?: IosBookLike) {
   return (book?.name?.trim()?.[0] ?? "账").toUpperCase();
 }
 
-export function bookColor(book?: IosBookLike) {
+function bookColor(book?: IosBookLike) {
   const colors = ["#ff681c", "#4c8dff", "#14b8a6", "#a855f7", "#ff5d8f"];
   if (!book?.id) return book?.color ?? colors[0];
   const sum = Array.from(book.id).reduce((acc, char) => acc + char.charCodeAt(0), 0);
   return book.color ?? colors[sum % colors.length];
-}
-
-export function yuan(value: number | undefined | null, currency = "CNY") {
-  return new Intl.NumberFormat("zh-CN", {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 2,
-  }).format(Number(value ?? 0));
 }

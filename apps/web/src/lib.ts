@@ -1,4 +1,5 @@
 export const API = import.meta.env.VITE_API_URL || "/api";
+
 type ApiErrorPayload = {
   error?: string;
   code?: string;
@@ -71,5 +72,3 @@ export async function apiFetchWithRefresh(path: string, init?: RequestInit): Pro
   window.dispatchEvent(new Event("ledger:unauthorized"));
   return response;
 }
-export const money = (value: number) =>
-  new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY" }).format(value);

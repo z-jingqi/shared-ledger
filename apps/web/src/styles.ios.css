@@ -443,6 +443,8 @@ html.is-ios {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  margin: 0;
+  border: 0;
   border-radius: 26px 26px 0 0;
   background: var(--ios-bg-2);
   box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.18);
@@ -486,7 +488,10 @@ html.is-ios {
   width: 38px;
   height: 18px;
   transform: translateX(-50%);
+  border: 0;
   border-radius: 99px;
+  padding: 0;
+  background: transparent;
   cursor: grab;
   touch-action: none;
 }
@@ -694,6 +699,8 @@ html.is-ios {
   position: relative;
   width: 100%;
   max-width: 300px;
+  margin: 0;
+  border: 0;
   border-radius: 22px;
   padding: 24px 22px 18px;
   background: #fff;

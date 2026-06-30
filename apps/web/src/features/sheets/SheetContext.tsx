@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, use, useCallback, useMemo, useState, type ReactNode } from "react";
 
 export type AppSheet =
   | { type: "record-form"; recordId?: string; initialType?: "expense" | "income" }
@@ -30,21 +30,21 @@ export function AppSheetProvider({ children }: { children: ReactNode }) {
   const stateValue = useMemo(() => ({ sheet }), [sheet]);
   const actionsValue = useMemo(() => ({ openSheet, closeSheet }), [closeSheet, openSheet]);
   return (
-    <AppSheetActionsContext.Provider value={actionsValue}>
-      <AppSheetContext.Provider value={stateValue}>{children}</AppSheetContext.Provider>
-    </AppSheetActionsContext.Provider>
+    <AppSheetActionsContext value={actionsValue}>
+      <AppSheetContext value={stateValue}>{children}</AppSheetContext>
+    </AppSheetActionsContext>
   );
 }
 
 export function useAppSheet() {
-  const state = useContext(AppSheetContext);
-  const actions = useContext(AppSheetActionsContext);
+  const state = use(AppSheetContext);
+  const actions = use(AppSheetActionsContext);
   if (!state || !actions) throw new Error("useAppSheet must be used within AppSheetProvider");
   return { ...state, ...actions };
 }
 
 export function useAppSheetActions() {
-  const value = useContext(AppSheetActionsContext);
+  const value = use(AppSheetActionsContext);
   if (!value) throw new Error("useAppSheetActions must be used within AppSheetProvider");
   return value;
 }

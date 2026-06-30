@@ -1,5 +1,9 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "jsx": "react-jsx", "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.tsbuildinfo" },
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.tsbuildinfo",
+    "types": ["vitest", "@testing-library/jest-dom"]
+  },
   "include": ["src", "vite.config.ts", "playwright.config.ts"]
 }

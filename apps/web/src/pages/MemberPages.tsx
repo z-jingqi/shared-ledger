@@ -58,11 +58,13 @@ export function MembersSheet({ onClose }: { onClose: () => void }) {
   const [view, setView] = useState<MemberSheetView>({ type: "list" });
   const pendingSentInvitations = sentInvitations?.invitations.filter((item) => item.status === "pending") ?? [];
   const myMember = data?.members.find((member) => member.userId === user?.id);
+  const receivedInvitationIds = useMemo(() => receivedInvitations.map((item) => item.id), [receivedInvitations]);
+  const receivedInvitationKey = receivedInvitationIds.join(",");
   const close = onClose;
 
   useEffect(() => {
-    if (user?.id && receivedInvitations.length) markInvitationIdsViewed(user.id, receivedInvitations.map((item) => item.id));
-  }, [receivedInvitations.map((item) => item.id).join(","), user?.id]);
+    if (user?.id && receivedInvitationIds.length) markInvitationIdsViewed(user.id, receivedInvitationIds);
+  }, [receivedInvitationIds, receivedInvitationKey, user?.id]);
 
   const handleReceivedInvitation = async (id: string, action: "accept" | "decline") => {
     try {
@@ -313,6 +315,7 @@ function InviteMemberSheet({
           <IosField label="邀请对象" error={message}>
             <input
               value={target}
+              aria-label="邀请对象"
               placeholder="邮箱 / 手机号 / 用户名 / 用户 ID"
               onChange={(event) => {
                 setTarget(event.currentTarget.value);
@@ -356,12 +359,10 @@ function MemberRoleSheet({
   const bookId = book?.id;
   const { data } = useApi<{ members: Member[] }>(bookId ? `/books/${bookId}/members` : undefined);
   const member = useMemo(() => data?.members.find((item) => item.id === memberId), [data?.members, memberId]);
-  const [role, setRole] = useState<"admin" | "member">("member");
+  const memberRole = member?.role === "admin" ? "admin" : "member";
+  const [roleOverride, setRoleOverride] = useState<{ memberId: string; role: "admin" | "member" } | undefined>();
+  const role = roleOverride?.memberId === memberId ? roleOverride.role : memberRole;
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    if (member?.role === "admin" || member?.role === "member") setRole(member.role);
-  }, [member?.role]);
 
   const save = async () => {
     if (!bookId || !memberId) return;
@@ -397,7 +398,7 @@ function MemberRoleSheet({
           </IosCard>
           <div className="ios-role-cards">
             {(["member", "admin"] as const).map((value) => (
-              <button className={role === value ? "active" : ""} type="button" onClick={() => setRole(value)} key={value}>
+              <button className={role === value ? "active" : ""} type="button" onClick={() => setRoleOverride({ memberId, role: value })} key={value}>
                 <ShieldCheckIcon size={20} />
                 <b>{roleLabel(value)}</b>
                 <small>{value === "admin" ? "可邀请成员、管理成员" : "可查看账本并记录"}</small>

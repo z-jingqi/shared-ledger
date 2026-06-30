@@ -1,25 +1,8 @@
-import { ArrowDownIcon, ListNumbersIcon, SparkleIcon } from "@phosphor-icons/react";
-import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useReducer, useRef } from "react";
 import { toast } from "sonner";
 import type { ImportAttachmentView } from "../imports/ImportAttachmentCards";
-import {
-  AiAnalysisCard,
-  AiConfirmation,
-  AiConversation,
-  AiImportJobCard,
-  AiInviteCard,
-  AiMarkdownText,
-  AiMemberCard,
-  AiMessage,
-  AiNavigationCard,
-  AiPendingConfirmationBar,
-  AiProfileCard,
-  AiPromptInput,
-  AiRecordCard,
-  AiSearchResultCard,
-  AiThinkingMessage,
-  AiToolStatus,
-} from "./AiElements";
+import { AiPendingConfirmationBar, AiPromptInput } from "./AiElements";
+import { AiMessageList, type AiMessageIndexItem } from "./AiMessageList";
 import { maximumAttachmentFiles, supportedImportAccept } from "../../features/imports/upload";
 import { isSupportedAttachment, supportedFileDescription } from "../../features/imports/files";
 import { normalizeAiPart, type AiRenderableMessage, type AiStructuredPart } from "../../features/ai/types";
@@ -61,102 +44,226 @@ type PendingAiConfirmation = {
 };
 
 const confirmationTimeoutMs = 10 * 60_000;
+type AiChatState = {
+  aiError: string;
+  attachmentError: string;
+  attachments: ImportAttachmentView[];
+  indexOpen: boolean;
+  indexVisible: boolean;
+  input: string;
+  isStreaming: boolean;
+  loadingSession: boolean;
+  messages: AiRenderableMessage[];
+  pendingAiConfirmation?: PendingAiConfirmation;
+  showJumpToBottom: boolean;
+  thinkingAssistantId?: string;
+};
+type AiChatAction =
+  | { type: "input"; value: string }
+  | { type: "attachments-added"; attachments: ImportAttachmentView[]; error?: string }
+  | { type: "attachments-cleared"; ids: string[] }
+  | { type: "attachment-error"; error: string }
+  | { type: "session-load-start" }
+  | { type: "session-loaded"; messages: AiRenderableMessage[] }
+  | { type: "session-load-error"; error: string }
+  | { type: "submit-start"; userMessage: AiRenderableMessage; assistantId: string }
+  | { type: "assistant-delta"; assistantId: string; delta: string }
+  | { type: "stream-finished"; assistantId: string; assistantMessage: AiRenderableMessage; pending?: PendingAiConfirmation }
+  | { type: "stream-aborted"; assistantId: string }
+  | { type: "stream-error"; assistantId: string; error: string }
+  | { type: "stream-stop" }
+  | { type: "confirmation-busy"; pending: PendingAiConfirmation }
+  | { type: "confirmation-clear" }
+  | { type: "confirmation-failed"; pending: PendingAiConfirmation }
+  | { type: "confirmation-message"; message: AiRenderableMessage }
+  | { type: "jump-visible"; visible: boolean }
+  | { type: "index-reveal" }
+  | { type: "index-toggle" }
+  | { type: "index-hide" };
 
-export function AiChat({
-  bookId,
-  page,
-  compact = false,
-  sessionId,
-  clearSignal = 0,
-  onSessionActivity,
-}: {
+function initialAiChatState(sessionId?: string): AiChatState {
+  return {
+    aiError: "",
+    attachmentError: "",
+    attachments: [],
+    indexOpen: false,
+    indexVisible: false,
+    input: "",
+    isStreaming: false,
+    loadingSession: Boolean(sessionId),
+    messages: [],
+    pendingAiConfirmation: undefined,
+    showJumpToBottom: false,
+    thinkingAssistantId: undefined,
+  };
+}
+
+function aiChatReducer(state: AiChatState, action: AiChatAction): AiChatState {
+  switch (action.type) {
+    case "input":
+      return { ...state, input: action.value };
+    case "attachments-added":
+      return { ...state, attachments: action.attachments, attachmentError: action.error ?? "" };
+    case "attachments-cleared": {
+      const removing = new Set(action.ids);
+      return { ...state, attachments: state.attachments.filter((attachment) => !removing.has(attachment.id)) };
+    }
+    case "attachment-error":
+      return { ...state, attachmentError: action.error };
+    case "session-load-start":
+      return { ...state, loadingSession: true };
+    case "session-loaded":
+      return { ...state, aiError: "", loadingSession: false, messages: action.messages };
+    case "session-load-error":
+      return { ...state, aiError: action.error, loadingSession: false };
+    case "submit-start":
+      return {
+        ...state,
+        aiError: "",
+        attachments: [],
+        input: "",
+        isStreaming: true,
+        messages: [...state.messages, action.userMessage],
+        thinkingAssistantId: action.assistantId,
+      };
+    case "assistant-delta":
+      return {
+        ...state,
+        messages: appendAssistantDelta(state.messages, action.assistantId, action.delta),
+        thinkingAssistantId: undefined,
+      };
+    case "stream-finished": {
+      const messages = hasRenderableMessageContent(action.assistantMessage)
+        ? finalizeAssistantMessage(state.messages, action.assistantId, action.assistantMessage)
+        : state.messages.some((message) => message.id === action.assistantId)
+          ? state.messages
+          : removeEmptyAssistant(state.messages, action.assistantId);
+      return {
+        ...state,
+        isStreaming: false,
+        messages,
+        pendingAiConfirmation: action.pending,
+        thinkingAssistantId: undefined,
+      };
+    }
+    case "stream-aborted":
+      return {
+        ...state,
+        isStreaming: false,
+        messages: removeEmptyAssistant(state.messages, action.assistantId),
+        thinkingAssistantId: undefined,
+      };
+    case "stream-error":
+      return {
+        ...state,
+        aiError: action.error,
+        isStreaming: false,
+        messages: removeEmptyAssistant(state.messages, action.assistantId),
+        thinkingAssistantId: undefined,
+      };
+    case "stream-stop":
+      return { ...state, isStreaming: false, thinkingAssistantId: undefined };
+    case "confirmation-busy":
+      return { ...state, pendingAiConfirmation: { ...action.pending, busy: true } };
+    case "confirmation-clear":
+      return { ...state, pendingAiConfirmation: undefined };
+    case "confirmation-failed":
+      return { ...state, pendingAiConfirmation: { ...action.pending, busy: false } };
+    case "confirmation-message":
+      return { ...state, messages: [...state.messages, action.message] };
+    case "jump-visible":
+      return { ...state, showJumpToBottom: action.visible };
+    case "index-reveal":
+      return { ...state, indexVisible: true };
+    case "index-toggle":
+      return { ...state, indexOpen: !state.indexOpen };
+    case "index-hide":
+      return { ...state, indexOpen: false, indexVisible: false };
+  }
+}
+
+type AiChatProps = {
   bookId?: string;
   page: string;
   compact?: boolean;
   sessionId?: string;
-  clearSignal?: number;
   onSessionActivity?: (detail: { title?: string; hasMessages?: boolean }) => void;
-}) {
-  const [input, setInput] = useState("");
-  const [attachments, setAttachments] = useState<ImportAttachmentView[]>([]);
-  const [attachmentError, setAttachmentError] = useState("");
-  const [messages, setMessages] = useState<AiRenderableMessage[]>([]);
-  const [loadingSession, setLoadingSession] = useState(false);
-  const [isStreaming, setStreaming] = useState(false);
-  const [thinkingAssistantId, setThinkingAssistantId] = useState<string | undefined>();
-  const [aiError, setAiError] = useState("");
-  const [pendingAiConfirmation, setPendingAiConfirmation] = useState<PendingAiConfirmation | undefined>();
-  const [autoScroll, setAutoScroll] = useState(true);
-  const [showJumpToBottom, setShowJumpToBottom] = useState(false);
-  const [indexVisible, setIndexVisible] = useState(false);
-  const [indexOpen, setIndexOpen] = useState(false);
+};
+
+function useAiChatController({
+  bookId,
+  page,
+  sessionId,
+  onSessionActivity,
+}: Omit<AiChatProps, "compact">) {
+  const [state, dispatch] = useReducer(aiChatReducer, sessionId, initialAiChatState);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | undefined>(undefined);
   const indexHideTimerRef = useRef<number | undefined>(undefined);
   const userScrollIntentRef = useRef(false);
-  const previewUrlsRef = useRef(new Set<string>());
+  const autoScrollRef = useRef(true);
+  const previewUrlsRef = useRef<Set<string> | null>(null);
+  if (previewUrlsRef.current === null) previewUrlsRef.current = new Set<string>();
+  const {
+    aiError,
+    attachmentError,
+    attachments,
+    indexOpen,
+    indexVisible,
+    input,
+    isStreaming,
+    loadingSession,
+    messages,
+    pendingAiConfirmation,
+    showJumpToBottom,
+    thinkingAssistantId,
+  } = state;
   const busy = isStreaming || loadingSession;
 
-  const userMessageIndex = useMemo(
-    () =>
-      messages
-        .filter((message) => message.role === "user")
-        .map((message, index) => ({
-          id: message.id,
-          label: userMessageLabel(message) || `第 ${index + 1} 条消息`,
-        })),
+  const userMessageIndex = useMemo<AiMessageIndexItem[]>(
+    () => {
+      const index: Array<{ id: string; label: string }> = [];
+      for (const message of messages) {
+        if (message.role === "user") {
+          index.push({
+            id: message.id,
+            label: userMessageLabel(message) || `第 ${index.length + 1} 条消息`,
+          });
+        }
+      }
+      return index;
+    },
     [messages],
   );
 
   useEffect(() => {
     if (!sessionId) return;
     abortControllerRef.current?.abort();
-    setInput("");
-    setAttachments([]);
-    setAttachmentError("");
-    setAiError("");
-    setPendingAiConfirmation(undefined);
-    setThinkingAssistantId(undefined);
-    setIndexOpen(false);
-    setIndexVisible(false);
-    userScrollIntentRef.current = false;
-    setAutoScroll(true);
-    setShowJumpToBottom(false);
-    setLoadingSession(true);
+    dispatch({ type: "session-load-start" });
     api<AiSessionResponse>(`/ai/sessions/${sessionId}`)
       .then((result) => {
-        setMessages((result.session.messages ?? []).map(serverMessageToRenderable));
+        dispatch({ type: "session-loaded", messages: (result.session.messages ?? []).map(serverMessageToRenderable) });
         onSessionActivity?.({ title: result.session.title, hasMessages: Boolean(result.session.messages?.length) });
       })
       .catch((cause) => {
         const message = cause instanceof Error ? cause.message : "读取 AI 会话失败";
-        setAiError(message);
+        dispatch({ type: "session-load-error", error: message });
         toast.error(message, { duration: 3000, closeButton: true });
-      })
-      .finally(() => setLoadingSession(false));
+      });
   }, [onSessionActivity, sessionId]);
 
   useEffect(() => {
-    if (!sessionId || clearSignal <= 0) return;
-    setMessages([]);
-    setPendingAiConfirmation(undefined);
-    setAiError("");
-    setThinkingAssistantId(undefined);
-    onSessionActivity?.({ title: "新会话", hasMessages: false });
-  }, [clearSignal, onSessionActivity, sessionId]);
-
-  useEffect(() => {
     attachments.forEach((attachment) => {
-      if (attachment.previewUrl) previewUrlsRef.current.add(attachment.previewUrl);
+      if (attachment.previewUrl) previewUrlsRef.current?.add(attachment.previewUrl);
     });
   }, [attachments]);
 
   useEffect(() => () => {
     abortControllerRef.current?.abort();
     if (indexHideTimerRef.current) window.clearTimeout(indexHideTimerRef.current);
-    previewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    previewUrlsRef.current?.forEach((url) => URL.revokeObjectURL(url));
   }, []);
 
   useEffect(() => {
@@ -182,9 +289,9 @@ export function AiChat({
   }, [input, attachments.length]);
 
   useEffect(() => {
-    if (!autoScroll) return;
+    if (!autoScrollRef.current) return;
     scrollMessagesToBottom("auto");
-  }, [autoScroll, messages, thinkingAssistantId]);
+  }, [messages, thinkingAssistantId]);
 
   const handleMessagesScroll = () => {
     const container = messagesRef.current;
@@ -192,8 +299,8 @@ export function AiChat({
     if (userScrollIntentRef.current) revealMessageIndex();
     const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
     const nearBottom = distanceToBottom < 72;
-    setAutoScroll(nearBottom);
-    setShowJumpToBottom(!nearBottom);
+    autoScrollRef.current = nearBottom;
+    dispatch({ type: "jump-visible", visible: !nearBottom });
   };
 
   const handleUserScrollIntent = () => {
@@ -203,12 +310,11 @@ export function AiChat({
 
   const revealMessageIndex = () => {
     if (!userMessageIndex.length) return;
-    setIndexVisible(true);
+    dispatch({ type: "index-reveal" });
     if (indexHideTimerRef.current) window.clearTimeout(indexHideTimerRef.current);
     indexHideTimerRef.current = window.setTimeout(() => {
       userScrollIntentRef.current = false;
-      setIndexOpen(false);
-      setIndexVisible(false);
+      dispatch({ type: "index-hide" });
     }, 3000);
   };
 
@@ -216,8 +322,8 @@ export function AiChat({
     const container = messagesRef.current;
     if (!container) return;
     scrollContainerTo(container, container.scrollHeight, behavior);
-    setAutoScroll(true);
-    setShowJumpToBottom(false);
+    autoScrollRef.current = true;
+    dispatch({ type: "jump-visible", visible: false });
   };
 
   const scrollToMessage = (messageId: string) => {
@@ -227,10 +333,10 @@ export function AiChat({
     const containerRect = container.getBoundingClientRect();
     const targetRect = target.getBoundingClientRect();
     const top = targetRect.top - containerRect.top + container.scrollTop - 14;
-    setAutoScroll(false);
-    setShowJumpToBottom(true);
+    autoScrollRef.current = false;
+    dispatch({ type: "jump-visible", visible: true });
     scrollContainerTo(container, Math.max(0, top), "smooth");
-    setIndexOpen(false);
+    dispatch({ type: "index-hide" });
   };
 
   const addAttachments = (files: FileList | null) => {
@@ -239,7 +345,7 @@ export function AiChat({
     const unsupported = incoming.find((file) => !isSupportedAttachment(file));
     if (unsupported) {
       const message = `${unsupported.name} 不是支持的 ${supportedFileDescription} 格式。`;
-      setAttachmentError(message);
+      dispatch({ type: "attachment-error", error: message });
       toast.error("附件格式暂不支持", { description: message, duration: 3000, closeButton: true });
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
@@ -248,19 +354,16 @@ export function AiChat({
     if (attachments.length + incoming.length > maximumAttachmentFiles) {
       toast.warning(`一次最多添加 ${maximumAttachmentFiles} 个附件`, { duration: 3000, closeButton: true });
     }
-    setAttachmentError("");
-    setAttachments(next);
+    dispatch({ type: "attachments-added", attachments: next });
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const clearAttachments = (ids: string[]) => {
     const removing = new Set(ids);
-    setAttachments((current) => {
-      current.forEach((attachment) => {
-        if (removing.has(attachment.id) && attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
-      });
-      return current.filter((attachment) => !removing.has(attachment.id));
+    attachments.forEach((attachment) => {
+      if (removing.has(attachment.id) && attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
     });
+    dispatch({ type: "attachments-cleared", ids });
   };
 
   const submit = async (event: FormEvent) => {
@@ -268,55 +371,42 @@ export function AiChat({
     if (!sessionId) return;
     const text = input.trim();
     if (!text && attachments.length === 0) return;
-    setInput("");
-    setAiError("");
     const outgoingAttachments = attachments;
-    setAttachments([]);
     const userMessage: AiRenderableMessage = {
       id: `ai_user_${crypto.randomUUID()}`,
       role: "user",
       parts: [{ type: "text", text: text || `上传 ${outgoingAttachments.length} 个附件` }],
     };
     const assistantId = `ai_assistant_${crypto.randomUUID()}`;
-    setMessages((current) => [...current, userMessage]);
-    setThinkingAssistantId(assistantId);
+    dispatch({ type: "submit-start", userMessage, assistantId });
     try {
-      setStreaming(true);
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
       const result = await requestAiStream(sessionId, {
         message: text,
         bookId,
         page,
+        signal: controller.signal,
         timeZone: getClientTimeZone(),
         attachments: outgoingAttachments.map((attachment) => attachment.file),
         onDelta: (delta) => {
-          setThinkingAssistantId(undefined);
-          setMessages((current) => appendAssistantDelta(current, assistantId, delta));
+          dispatch({ type: "assistant-delta", assistantId, delta });
         },
       });
       const assistantMessage = assistantMessageFromResponse(result, assistantId);
-      setThinkingAssistantId(undefined);
-      setMessages((current) => {
-        if (hasRenderableMessageContent(assistantMessage)) return upsertAssistantMessage(current, assistantMessage);
-        const hasStreamedAssistant = current.some((message) => message.id === assistantId);
-        return hasStreamedAssistant ? current : removeEmptyAssistant(current, assistantId);
-      });
       const pending = findPendingAiConfirmation(responseParts(result));
-      setPendingAiConfirmation(pending);
+      dispatch({ type: "stream-finished", assistantId, assistantMessage, pending });
       onSessionActivity?.({ title: aiSessionTitle([...messages, userMessage]), hasMessages: true });
       if (bookId) invalidateLedgerData({ bookId, scopes: ["all"] });
     } catch (cause) {
-      setThinkingAssistantId(undefined);
       if (cause instanceof DOMException && cause.name === "AbortError") {
-        setMessages((current) => removeEmptyAssistant(current, assistantId));
+        dispatch({ type: "stream-aborted", assistantId });
         return;
       }
       const message = cause instanceof Error ? cause.message : "AI 助手暂时不可用";
-      setAiError(message);
-      setMessages((current) => removeEmptyAssistant(current, assistantId));
+      dispatch({ type: "stream-error", assistantId, error: message });
       toast.error(message, { duration: 3000, closeButton: true });
     } finally {
-      setStreaming(false);
-      setThinkingAssistantId(undefined);
       abortControllerRef.current = undefined;
       outgoingAttachments.forEach((attachment) => {
         if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
@@ -324,58 +414,25 @@ export function AiChat({
     }
   };
 
-  const requestAiStream = async (
-    targetSessionId: string,
-    input: {
-      message: string;
-      bookId?: string;
-      page: string;
-      timeZone: string;
-      attachments: File[];
-      onDelta: (delta: string) => void;
-    },
-  ) => {
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-    const body = new FormData();
-    body.set("message", input.message);
-    body.set("page", input.page);
-    body.set("timeZone", input.timeZone);
-    if (input.bookId) body.set("bookId", input.bookId);
-    input.attachments.forEach((file) => body.append("files", file, file.name));
-    const response = await apiFetchWithRefresh(`/ai/sessions/${targetSessionId}/messages/stream`, {
-      method: "POST",
-      body,
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      const payload = await response.json().catch(() => ({ error: "AI 助手暂时不可用" }));
-      throw new Error(String(payload.error ?? "AI 助手暂时不可用"));
-    }
-    if (!response.body) throw new Error("AI 响应为空");
-    return readAiEventStream(response.body, { signal: controller.signal, onDelta: input.onDelta });
-  };
-
   const stopStreamingResponse = () => {
     abortControllerRef.current?.abort();
     abortControllerRef.current = undefined;
-    setThinkingAssistantId(undefined);
-    setStreaming(false);
+    dispatch({ type: "stream-stop" });
   };
 
   const confirmPendingAiAction = async () => {
     const pending = pendingAiConfirmation;
     if (!pending) return;
     try {
-      setPendingAiConfirmation({ ...pending, busy: true });
+      dispatch({ type: "confirmation-busy", pending });
       const result = await api<AiChatResponse>(`/ai/confirmations/${pending.confirmationId}/confirm`, { method: "POST" });
-      setPendingAiConfirmation(undefined);
+      dispatch({ type: "confirmation-clear" });
       const parts = responseParts(result);
-      if (parts.length) setMessages((current) => [...current, assistantMessageFromResponse(result, `ai_confirmed_${crypto.randomUUID()}`)]);
+      if (parts.length) dispatch({ type: "confirmation-message", message: assistantMessageFromResponse(result, `ai_confirmed_${crypto.randomUUID()}`) });
       if (bookId) invalidateLedgerData({ bookId, scopes: ["all"] });
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "确认操作失败";
-      setPendingAiConfirmation({ ...pending, busy: false });
+      dispatch({ type: "confirmation-failed", pending });
       toast.error(message, { duration: 3000, closeButton: true });
     }
   };
@@ -383,7 +440,7 @@ export function AiChat({
   const cancelPendingAiAction = async () => {
     const pending = pendingAiConfirmation;
     if (!pending) return;
-    setPendingAiConfirmation(undefined);
+    dispatch({ type: "confirmation-clear" });
     try {
       await api(`/ai/confirmations/${pending.confirmationId}/cancel`, { method: "POST" });
     } catch (cause) {
@@ -391,135 +448,89 @@ export function AiChat({
     }
   };
 
-  const hasConversation = messages.length > 0;
+  return {
+    addAttachments,
+    aiError,
+    attachmentError,
+    attachments,
+    busy,
+    cancelPendingAiAction,
+    clearAttachments,
+    confirmPendingAiAction,
+    fileInputRef,
+    handleMessagesScroll,
+    handleUserScrollIntent,
+    indexOpen,
+    indexVisible,
+    input,
+    isStreaming,
+    messages,
+    messagesRef,
+    pendingAiConfirmation,
+    scrollMessagesToBottom,
+    scrollToMessage,
+    setInput: (value: string) => dispatch({ type: "input", value }),
+    showJumpToBottom,
+    stopStreamingResponse,
+    submit,
+    textareaRef,
+    thinkingAssistantId,
+    toggleIndex: () => dispatch({ type: "index-toggle" }),
+    userMessageIndex,
+  };
+}
 
+export function AiChat({ compact = false, ...controllerProps }: AiChatProps) {
+  const controller = useAiChatController(controllerProps);
   return (
     <div className={compact ? "ai-content" : "ai-page"}>
-      {userMessageIndex.length > 0 && (
-        <div className={`ai-message-index ${indexVisible || indexOpen ? "visible" : ""}`}>
-          <button type="button" aria-label="打开会话目录" onClick={() => setIndexOpen((value) => !value)}>
-            <ListNumbersIcon size={18} weight="bold" />
-          </button>
-          {indexOpen && (
-            <div className="ai-message-index-panel" role="menu" aria-label="当前会话目录">
-              <strong>当前会话</strong>
-              {userMessageIndex.map((item, index) => (
-                <button type="button" role="menuitem" onClick={() => scrollToMessage(item.id)} key={item.id}>
-                  <span>{index + 1}</span>
-                  <b>{item.label}</b>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-      {!hasConversation ? (
-        <div className="ai-empty">
-          <SparkleIcon size={33} weight="fill" />
-          <h2>你好，我是你的 AI 助手 👋</h2>
-          <p>你可以随便聊，也可以让我操作账本、资料、成员、分类或文件。</p>
-        </div>
-      ) : (
-        <AiConversation ref={messagesRef} onScroll={handleMessagesScroll} onUserScrollIntent={handleUserScrollIntent}>
-          {messages.map((message, index) => (
-            <RenderedAiMessage key={message.id} message={message} streaming={isStreaming && index === messages.length - 1} />
-          ))}
-          {thinkingAssistantId ? <AiThinkingMessage /> : null}
-        </AiConversation>
-      )}
-      {showJumpToBottom && (
-        <button className="ai-scroll-bottom-button icon-only" type="button" aria-label="回到底部" onClick={() => scrollMessagesToBottom()}>
-          <ArrowDownIcon size={18} weight="bold" />
-        </button>
-      )}
-      {pendingAiConfirmation && (
+      <AiMessageList
+        indexOpen={controller.indexOpen}
+        indexVisible={controller.indexVisible}
+        isStreaming={controller.isStreaming}
+        messages={controller.messages}
+        messagesRef={controller.messagesRef}
+        onMessagesScroll={controller.handleMessagesScroll}
+        onScrollBottom={() => controller.scrollMessagesToBottom()}
+        onScrollToMessage={controller.scrollToMessage}
+        onToggleIndex={controller.toggleIndex}
+        onUserScrollIntent={controller.handleUserScrollIntent}
+        showJumpToBottom={controller.showJumpToBottom}
+        thinkingAssistantId={controller.thinkingAssistantId}
+        userMessageIndex={controller.userMessageIndex}
+      />
+      {controller.pendingAiConfirmation && (
         <AiPendingConfirmationBar
-          title={pendingAiConfirmation.title}
-          description={pendingAiConfirmation.description}
-          confirmLabel={pendingAiConfirmation.confirmLabel}
-          cancelLabel={pendingAiConfirmation.cancelLabel}
-          expiresAt={pendingAiConfirmation.expiresAt}
+          title={controller.pendingAiConfirmation.title}
+          description={controller.pendingAiConfirmation.description}
+          confirmLabel={controller.pendingAiConfirmation.confirmLabel}
+          cancelLabel={controller.pendingAiConfirmation.cancelLabel}
+          expiresAt={controller.pendingAiConfirmation.expiresAt}
           progressDurationMs={confirmationTimeoutMs}
-          busy={pendingAiConfirmation.busy}
-          onCancel={() => void cancelPendingAiAction()}
-          onConfirm={() => void confirmPendingAiAction()}
+          busy={controller.pendingAiConfirmation.busy}
+          onCancel={() => void controller.cancelPendingAiAction()}
+          onConfirm={() => void controller.confirmPendingAiAction()}
         />
       )}
       <AiPromptInput
-        attachments={attachments}
-        attachmentError={attachmentError}
-        busy={busy}
-        canAttach={attachments.length < maximumAttachmentFiles}
+        attachments={controller.attachments}
+        attachmentError={controller.attachmentError}
+        busy={controller.busy}
+        canAttach={controller.attachments.length < maximumAttachmentFiles}
         accept={supportedImportAccept}
-        input={input}
-        textareaRef={textareaRef}
-        fileInputRef={fileInputRef}
-        isStreaming={isStreaming}
-        onAddAttachments={addAttachments}
-        onClearAttachment={(id) => clearAttachments([id])}
-        onInputChange={setInput}
-        onStop={stopStreamingResponse}
-        onSubmit={submit}
+        input={controller.input}
+        textareaRef={controller.textareaRef}
+        fileInputRef={controller.fileInputRef}
+        isStreaming={controller.isStreaming}
+        onAddAttachments={controller.addAttachments}
+        onClearAttachment={(id) => controller.clearAttachments([id])}
+        onInputChange={controller.setInput}
+        onStop={controller.stopStreamingResponse}
+        onSubmit={controller.submit}
       />
-      {aiError && <p className="field-error">{aiError}</p>}
+      {controller.aiError && <p className="field-error">{controller.aiError}</p>}
     </div>
   );
-}
-
-function RenderedAiMessage({ message, streaming }: { message: AiRenderableMessage; streaming: boolean }) {
-  const role = message.role === "user" ? "user" : "assistant";
-  const parts = (message.parts ?? []).map(normalizeAiPart).filter((part): part is AiStructuredPart => Boolean(part));
-  const text = parts
-    .filter((part) => part.type === "text")
-    .map((part) => (part.type === "text" ? part.text : ""))
-    .join("");
-
-  if (role === "user") {
-    return (
-      <AiMessage role="user" messageId={message.id}>
-        <p>{text}</p>
-      </AiMessage>
-    );
-  }
-
-  return (
-    <AiMessage role="assistant" messageId={message.id}>
-      <div className="ai-part-stack">
-        {parts.map((part, index) => (
-          <RenderedAiPart key={`${part.type}_${index}`} part={part} streaming={streaming && index === parts.length - 1} />
-        ))}
-      </div>
-    </AiMessage>
-  );
-}
-
-function RenderedAiPart({ part, streaming }: { part: AiStructuredPart; streaming: boolean }) {
-  switch (part.type) {
-    case "text":
-      return <AiMarkdownText streaming={streaming}>{part.text}</AiMarkdownText>;
-    case "tool-status":
-      return <AiToolStatus part={part} />;
-    case "record-card":
-      return <AiRecordCard part={part} />;
-    case "search-result-card":
-      return <AiSearchResultCard part={part} />;
-    case "analysis-card":
-      return <AiAnalysisCard part={part} />;
-    case "import-job-card":
-      return <AiImportJobCard part={part} />;
-    case "invite-card":
-      return <AiInviteCard part={part} />;
-    case "profile-card":
-      return <AiProfileCard part={part} />;
-    case "member-card":
-      return <AiMemberCard part={part} />;
-    case "navigation-card":
-      return <AiNavigationCard part={part} />;
-    case "confirmation":
-      return <AiConfirmation part={part} />;
-    default:
-      return null;
-  }
 }
 
 function createAttachment(file: File): ImportAttachmentView {
@@ -530,6 +541,37 @@ function createAttachment(file: File): ImportAttachmentView {
     status: "idle",
     ...(canPreview ? { previewUrl: URL.createObjectURL(file) } : {}),
   };
+}
+
+async function requestAiStream(
+  targetSessionId: string,
+  input: {
+    message: string;
+    bookId?: string;
+    page: string;
+    signal: AbortSignal;
+    timeZone: string;
+    attachments: File[];
+    onDelta: (delta: string) => void;
+  },
+) {
+  const body = new FormData();
+  body.set("message", input.message);
+  body.set("page", input.page);
+  body.set("timeZone", input.timeZone);
+  if (input.bookId) body.set("bookId", input.bookId);
+  input.attachments.forEach((file) => body.append("files", file, file.name));
+  const response = await apiFetchWithRefresh(`/ai/sessions/${targetSessionId}/messages/stream`, {
+    method: "POST",
+    body,
+    signal: input.signal,
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({ error: "AI 助手暂时不可用" }));
+    throw new Error(String(payload.error ?? "AI 助手暂时不可用"));
+  }
+  if (!response.body) throw new Error("AI 响应为空");
+  return readAiEventStream(response.body, { signal: input.signal, onDelta: input.onDelta });
 }
 
 function serverMessageToRenderable(message: AiSessionMessage): AiRenderableMessage {
@@ -576,6 +618,22 @@ function upsertAssistantMessage(messages: AiRenderableMessage[], assistantMessag
   return found ? next : [...messages, assistantMessage];
 }
 
+function finalizeAssistantMessage(
+  messages: AiRenderableMessage[],
+  streamingAssistantId: string,
+  assistantMessage: AiRenderableMessage,
+): AiRenderableMessage[] {
+  if (assistantMessage.id === streamingAssistantId) return upsertAssistantMessage(messages, assistantMessage);
+  let replacedStreamingMessage = false;
+  const next = messages.map((message) => {
+    if (message.id !== streamingAssistantId) return message;
+    replacedStreamingMessage = true;
+    return assistantMessage;
+  });
+  if (replacedStreamingMessage) return next;
+  return upsertAssistantMessage(messages, assistantMessage);
+}
+
 function hasRenderableMessageContent(message: AiRenderableMessage) {
   return (message.parts ?? [])
     .map((part) => normalizeAiPart(part))
@@ -602,34 +660,50 @@ async function readAiEventStream(
   const decoder = new TextDecoder();
   let buffer = "";
   let donePayload: AiChatResponse | undefined;
-  while (!handlers.signal.aborted) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true }).replaceAll("\r\n", "\n");
-    let boundary = buffer.indexOf("\n\n");
-    while (boundary >= 0) {
-      const raw = buffer.slice(0, boundary);
-      buffer = buffer.slice(boundary + 2);
-      const event = parseSseEvent(raw);
-      if (event?.name === "message_delta") handlers.onDelta(String(event.data.text ?? ""));
-      if (event?.name === "done") donePayload = event.data as AiChatResponse;
-      if (event?.name === "error") throw new Error(String(event.data.message ?? "AI 助手暂时不可用"));
-      boundary = buffer.indexOf("\n\n");
-    }
-  }
-  if (handlers.signal.aborted) throw new DOMException("Aborted", "AbortError");
-  return donePayload ?? { parts: [] };
+
+  return new Promise((resolve, reject) => {
+    const pump = () => {
+      if (handlers.signal.aborted) {
+        reject(new DOMException("Aborted", "AbortError"));
+        return;
+      }
+      reader.read().then(({ value, done }) => {
+        if (done) {
+          resolve(donePayload ?? { parts: [] });
+          return;
+        }
+        buffer += decoder.decode(value, { stream: true }).replaceAll("\r\n", "\n");
+        const events = buffer.split("\n\n");
+        buffer = events.pop() ?? "";
+        for (const raw of events) {
+          const event = parseSseEvent(raw);
+          if (event?.name === "message_delta") handlers.onDelta(String(event.data.text ?? ""));
+          if (event?.name === "done") donePayload = event.data as AiChatResponse;
+          if (event?.name === "error") {
+            reject(new Error(String(event.data.message ?? "AI 助手暂时不可用")));
+            return;
+          }
+        }
+        pump();
+      }, reject);
+    };
+    pump();
+  });
 }
 
 function parseSseEvent(raw: string): { name: string; data: Record<string, unknown> } | undefined {
   const lines = raw.split("\n");
-  const eventLine = lines.find((line) => line.startsWith("event:"));
-  const dataLines = lines.filter((line) => line.startsWith("data:"));
-  if (!eventLine || !dataLines.length) return undefined;
+  let eventName = "";
+  const dataLines: string[] = [];
+  for (const line of lines) {
+    if (line.startsWith("event:")) eventName = line.slice(6).trim();
+    if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+  }
+  if (!eventName || !dataLines.length) return undefined;
   try {
     return {
-      name: eventLine.slice(6).trim(),
-      data: JSON.parse(dataLines.map((line) => line.slice(5).trim()).join("\n")) as Record<string, unknown>,
+      name: eventName,
+      data: JSON.parse(dataLines.join("\n")) as Record<string, unknown>,
     };
   } catch {
     return undefined;
@@ -654,16 +728,17 @@ function findPendingAiConfirmation(parts: unknown[]): PendingAiConfirmation | un
 }
 
 function userMessageLabel(message: AiRenderableMessage) {
-  return (message.parts ?? [])
-    .map((part) => normalizeAiPart(part))
-    .filter((part): part is Extract<AiStructuredPart, { type: "text" }> => Boolean(part && part.type === "text"))
-    .map((part) => part.text)
-    .join(" ")
-    .trim();
+  const text: string[] = [];
+  for (const rawPart of message.parts ?? []) {
+    const part = normalizeAiPart(rawPart);
+    if (part?.type === "text") text.push(part.text);
+  }
+  return text.join(" ").trim();
 }
 
 function aiSessionTitle(messages: AiRenderableMessage[]) {
-  const firstUserText = messages.find((message) => message.role === "user") ? userMessageLabel(messages.find((message) => message.role === "user")!) : "";
+  const firstUserMessage = messages.find((message) => message.role === "user");
+  const firstUserText = firstUserMessage ? userMessageLabel(firstUserMessage) : "";
   if (!firstUserText) return messages.length ? "AI 会话" : "新会话";
   return firstUserText.length > 18 ? `${firstUserText.slice(0, 18)}…` : firstUserText;
 }

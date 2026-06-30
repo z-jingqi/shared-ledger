@@ -7,7 +7,7 @@ import {
   ShoppingCartIcon,
   XCircleIcon,
 } from "@phosphor-icons/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -17,8 +17,8 @@ import {
   IosField,
   IosSegment,
   IosSheet,
-  yuan,
 } from "../components/ios/IosDesign";
+import { yuan } from "../features/formatting/money";
 import { createPreviewThumbnail } from "../features/imports/preview-thumbnail";
 import { terminalImportStatuses, watchImportJobs, type ImportJobStatus } from "../features/imports/status";
 import { cancelImportJob, retryImportJob } from "../features/imports/upload";
@@ -54,6 +54,11 @@ type PendingEditDraft = {
   occurredAt: string;
   categoryName: string;
 };
+type PendingRecordsState = { records: PendingRecord[]; error: string };
+type PendingRecordsAction =
+  | { type: "reset" }
+  | { type: "success"; records: PendingRecord[] }
+  | { type: "error"; error: string };
 
 const jobFilters: { value: JobFilter; label: string }[] = [
   { value: "all", label: "全部" },
@@ -64,30 +69,43 @@ const jobFilters: { value: JobFilter; label: string }[] = [
 const successStatuses = new Set(["completed", "pending_confirmation"]);
 const failedStatuses = new Set(["failed"]);
 const imageExtensions = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".heic", ".heif"];
+const emptyJobs: Job[] = [];
+const importDayFormatter = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "short" });
 const thumbnailBlobCache = new Map<string, Blob>();
 const maxThumbnailCacheSize = 48;
 let activeThumbnailLoads = 0;
 const thumbnailQueue: (() => void)[] = [];
 
+function pendingRecordsReducer(_: PendingRecordsState, action: PendingRecordsAction): PendingRecordsState {
+  switch (action.type) {
+    case "reset":
+      return { records: [], error: "" };
+    case "success":
+      return { records: action.records, error: "" };
+    case "error":
+      return { records: [], error: action.error };
+  }
+}
+
 function usePendingRecords() {
   const { book } = useActiveBook();
   const { data: jobs, reload: reloadJobs } = useApi<{ imports: Job[] }>(book ? `/books/${book.id}/imports` : undefined);
-  const [records, setRecords] = useState<PendingRecord[]>([]);
-  const [error, setError] = useState("");
-  const pendingJobs = useMemo(() => jobs?.imports.filter((job) => job.status === "pending_confirmation") ?? [], [jobs?.imports]);
+  const [{ records, error }, dispatchRecords] = useReducer(pendingRecordsReducer, { records: [], error: "" });
+  const imports = jobs?.imports ?? emptyJobs;
+  const pendingJobs = useMemo(() => imports.filter((job) => job.status === "pending_confirmation"), [imports]);
 
   useEffect(() => {
     let cancelled = false;
     if (!pendingJobs.length) {
-      setRecords([]);
+      dispatchRecords({ type: "reset" });
       return undefined;
     }
     void Promise.all(pendingJobs.map((job) => api<{ records: PendingRecord[] }>(`/imports/${job.id}/records`)))
       .then((results) => {
-        if (!cancelled) setRecords(results.flatMap((item) => item.records.filter((record) => record.status === "pending")));
+        if (!cancelled) dispatchRecords({ type: "success", records: results.flatMap((item) => item.records.filter((record) => record.status === "pending")) });
       })
       .catch((cause) => {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : "读取待确认记录失败");
+        if (!cancelled) dispatchRecords({ type: "error", error: cause instanceof Error ? cause.message : "读取待确认记录失败" });
       });
     return () => {
       cancelled = true;
@@ -225,21 +243,35 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
   const [busyJobId, setBusyJobId] = useState("");
   const stopWatchingRef = useRef<(() => void) | undefined>(undefined);
   const close = onClose;
-  const imports = data?.imports ?? [];
+  const imports = data?.imports ?? emptyJobs;
   const filteredImports = useMemo(() => imports.filter((job) => matchesJobFilter(job, filter)), [filter, imports]);
   const groupedImports = useMemo(() => groupJobsByDay(filteredImports), [filteredImports]);
-  const counts = useMemo(() => ({
-    all: imports.length,
-    processing: imports.filter((job) => matchesJobFilter(job, "processing")).length,
-    success: imports.filter((job) => matchesJobFilter(job, "success")).length,
-    failed: imports.filter((job) => matchesJobFilter(job, "failed")).length,
-  }), [imports]);
+  const activeImports = useMemo(() => {
+    const ids: string[] = [];
+    const keyParts: string[] = [];
+    for (const job of imports) {
+      if (terminalImportStatuses.has(job.status)) continue;
+      ids.push(job.id);
+      keyParts.push(`${job.id}:${job.status}`);
+    }
+    return { ids, key: keyParts.join(",") };
+  }, [imports]);
+  const activeImportIds = activeImports.ids;
+  const activeImportKey = activeImports.key;
+  const counts = useMemo(() => {
+    const next = { all: imports.length, processing: 0, success: 0, failed: 0 };
+    for (const job of imports) {
+      if (matchesJobFilter(job, "processing")) next.processing += 1;
+      if (matchesJobFilter(job, "success")) next.success += 1;
+      if (matchesJobFilter(job, "failed")) next.failed += 1;
+    }
+    return next;
+  }, [imports]);
 
   useEffect(() => {
-    const active = imports.filter((job) => !terminalImportStatuses.has(job.status)).map((job) => job.id);
     stopWatchingRef.current?.();
-    if (!active.length) return undefined;
-    stopWatchingRef.current = watchImportJobs(active, () => void reload(), {
+    if (!activeImportIds.length) return undefined;
+    stopWatchingRef.current = watchImportJobs(activeImportIds, () => void reload(), {
       onDone: () => void reload(),
       onError: (message) => toast.warning(message, { duration: 3000, closeButton: true }),
     });
@@ -247,7 +279,7 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
       stopWatchingRef.current?.();
       stopWatchingRef.current = undefined;
     };
-  }, [imports.map((job) => `${job.id}:${job.status}`).join(","), reload]);
+  }, [activeImportIds, activeImportKey, reload]);
 
   const retry = async (jobId: string) => {
     setBusyJobId(jobId);
@@ -433,16 +465,16 @@ function PendingEditSheet({
           />
         </IosField>
         <IosField label="金额">
-          <input inputMode="decimal" value={draft.amount} onChange={(event) => setDraft((current) => ({ ...current, amount: event.currentTarget.value }))} />
+          <input aria-label="金额" inputMode="decimal" value={draft.amount} onChange={(event) => setDraft((current) => ({ ...current, amount: event.currentTarget.value }))} />
         </IosField>
         <IosField label="类别">
-          <input value={draft.categoryName} onChange={(event) => setDraft((current) => ({ ...current, categoryName: event.currentTarget.value }))} />
+          <input aria-label="类别" value={draft.categoryName} onChange={(event) => setDraft((current) => ({ ...current, categoryName: event.currentTarget.value }))} />
         </IosField>
         <IosField label="日期">
-          <input type="date" value={draft.occurredAt} onChange={(event) => setDraft((current) => ({ ...current, occurredAt: event.currentTarget.value }))} />
+          <input aria-label="日期" type="date" value={draft.occurredAt} onChange={(event) => setDraft((current) => ({ ...current, occurredAt: event.currentTarget.value }))} />
         </IosField>
         <IosField label="备注">
-          <textarea value={draft.note} onChange={(event) => setDraft((current) => ({ ...current, note: event.currentTarget.value }))} />
+          <textarea aria-label="备注" value={draft.note} onChange={(event) => setDraft((current) => ({ ...current, note: event.currentTarget.value }))} />
         </IosField>
       </div>
     </IosSheet>
@@ -639,12 +671,11 @@ function matchesJobFilter(job: Job, filter: JobFilter) {
 }
 
 function groupJobsByDay(jobs: Job[]) {
-  const formatter = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "short" });
   const groups = new Map<string, { key: string; label: string; jobs: Job[] }>();
   jobs.forEach((job) => {
     const date = new Date(job.createdAt ?? Date.now());
     const key = Number.isNaN(date.getTime()) ? "unknown" : date.toISOString().slice(0, 10);
-    const label = key === "unknown" ? "未知时间" : formatter.format(date);
+    const label = key === "unknown" ? "未知时间" : importDayFormatter.format(date);
     const group = groups.get(key) ?? { key, label, jobs: [] };
     group.jobs.push(job);
     groups.set(key, group);

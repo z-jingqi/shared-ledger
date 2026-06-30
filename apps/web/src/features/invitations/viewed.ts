@@ -14,7 +14,7 @@ function safeLocalStorage() {
   }
 }
 
-export function getViewedInvitationIds(userId?: string) {
+function getViewedInvitationIds(userId?: string) {
   const key = storageKey(userId);
   const storage = safeLocalStorage();
   if (!key || !storage) return new Set<string>();
@@ -26,9 +26,17 @@ export function getViewedInvitationIds(userId?: string) {
   }
 }
 
-export function countUnviewedPendingInvitations(invitations: InvitationLike[], userId?: string) {
-  const viewed = getViewedInvitationIds(userId);
-  return invitations.filter((item) => item.status === "pending" && !viewed.has(item.id)).length;
+export function getViewedInvitationSnapshot(userId?: string) {
+  return [...getViewedInvitationIds(userId)].sort().join("|");
+}
+
+export function countUnviewedPendingInvitations(invitations: InvitationLike[], viewedSnapshot: string) {
+  const viewed = new Set(viewedSnapshot ? viewedSnapshot.split("|") : []);
+  let count = 0;
+  for (const item of invitations) {
+    if (item.status === "pending" && !viewed.has(item.id)) count += 1;
+  }
+  return count;
 }
 
 export function markInvitationIdsViewed(userId: string | undefined, invitationIds: string[]) {

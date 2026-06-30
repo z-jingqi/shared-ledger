@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useRef, useState } from "react";
+import { type Ref, useImperativeHandle, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   isSupportedAttachment,
@@ -19,8 +19,13 @@ type ImportFileUploadInputProps = {
   onUploadingChange?: (uploading: boolean) => void;
 };
 
-export const ImportFileUploadInput = forwardRef<ImportFileUploadInputHandle, ImportFileUploadInputProps>(
-  function ImportFileUploadInput({ bookId, disabled = false, onUploaded, onUploadingChange }, ref) {
+export function ImportFileUploadInput({
+  bookId,
+  disabled = false,
+  onUploaded,
+  onUploadingChange,
+  ref,
+}: ImportFileUploadInputProps & { ref?: Ref<ImportFileUploadInputHandle> }) {
     const inputRef = useRef<HTMLInputElement>(null);
     const [uploading, setUploading] = useState(false);
 
@@ -87,16 +92,16 @@ export const ImportFileUploadInput = forwardRef<ImportFileUploadInputHandle, Imp
       }
     };
 
-    return (
-      <input
-        ref={inputRef}
-        className="sr-only"
-        type="file"
-        multiple
-        accept={supportedFileAccept}
-        disabled={disabled || uploading}
-        onChange={(event) => void upload(event.currentTarget.files)}
-      />
-    );
-  },
-);
+  return (
+    <input
+      ref={inputRef}
+      className="sr-only"
+      type="file"
+      multiple
+      aria-label="上传文件"
+      accept={supportedFileAccept}
+      disabled={disabled || uploading}
+      onChange={(event) => void upload(event.currentTarget.files)}
+    />
+  );
+}

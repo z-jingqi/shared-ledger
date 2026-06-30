@@ -119,7 +119,7 @@ export function ImportAttachmentCards({
             aria-label="关闭取消识别"
             onClick={() => setConfirming(undefined)}
           />
-          <section className="import-cancel-sheet" role="dialog" aria-modal="true" aria-label="取消识别">
+          <dialog open className="import-cancel-sheet" aria-modal="true" aria-label="取消识别">
             <span className="sheet-grabber" aria-hidden="true" />
             <h2>取消识别？</h2>
             <p>取消后不会保存这次导入，已处理的页面也会被丢弃。</p>
@@ -143,7 +143,7 @@ export function ImportAttachmentCards({
             >
               继续等待
             </button>
-          </section>
+          </dialog>
         </>
       )}
     </>

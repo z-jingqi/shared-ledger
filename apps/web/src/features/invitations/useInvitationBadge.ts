@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { useApi } from "../../hooks/useApi";
-import { countUnviewedPendingInvitations, onInvitationViewsChanged } from "./viewed";
+import { countUnviewedPendingInvitations, getViewedInvitationSnapshot, onInvitationViewsChanged } from "./viewed";
 
 export type ReceivedInvitation = {
   id: string;
@@ -13,22 +13,26 @@ export type ReceivedInvitation = {
   expiresAt: string;
 };
 
+const emptyInvitations: ReceivedInvitation[] = [];
+
 export function useInvitationBadge(userId?: string) {
   const { data, error, loading, reload } = useApi<{ invitations: ReceivedInvitation[] }>(
     userId ? "/invitations/received" : undefined,
   );
-  const [revision, setRevision] = useState(0);
+  const viewedSnapshot = useSyncExternalStore(
+    onInvitationViewsChanged,
+    () => getViewedInvitationSnapshot(userId),
+    () => "",
+  );
 
-  useEffect(() => onInvitationViewsChanged(() => setRevision((current) => current + 1)), []);
-
-  const invitations = data?.invitations ?? [];
+  const invitations = data?.invitations ?? emptyInvitations;
   const pendingInvitations = useMemo(
     () => invitations.filter((item) => item.status === "pending"),
     [invitations],
   );
   const unreadCount = useMemo(
-    () => countUnviewedPendingInvitations(pendingInvitations, userId),
-    [pendingInvitations, revision, userId],
+    () => countUnviewedPendingInvitations(pendingInvitations, viewedSnapshot),
+    [pendingInvitations, viewedSnapshot],
   );
 
   return {

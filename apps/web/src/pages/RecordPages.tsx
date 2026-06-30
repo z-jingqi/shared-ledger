@@ -13,7 +13,7 @@ import {
   XIcon,
 } from "@phosphor-icons/react";
 import type { FormEvent } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { BookSwitcherSheet } from "../components/books/BookSwitcherSheet";
@@ -31,11 +31,11 @@ import {
   IosSegment,
   IosSheet,
   IosTopBar,
-  yuan,
 } from "../components/ios/IosDesign";
 import { searchTransactionsWithAi, type AiTransactionSearchResponse } from "../features/ai/search";
 import { useAuth } from "../features/auth/AuthProvider";
 import { invalidateLedgerData } from "../features/data/invalidations";
+import { yuan } from "../features/formatting/money";
 import {
   isSupportedAttachment,
   maxAttachmentFiles,
@@ -85,7 +85,61 @@ type FormAttachment = {
   jobId?: string;
   errorMessage?: string;
   progress?: number;
+  stage?: string;
+  currentPage?: number;
+  totalPages?: number;
 };
+type TransactionFormState = {
+  amount: string;
+  attachments: FormAttachment[];
+  categoryId: string;
+  error: string;
+  items: LineItemValue[];
+  lineRows: LineItemRow[];
+  note: string;
+  occurredAt: string;
+  saving: boolean;
+  type: "income" | "expense";
+  view: "form" | "lineItems";
+};
+type TransactionFormAction =
+  | { type: "set-view"; view: "form" | "lineItems" }
+  | { type: "set-type"; value: "income" | "expense" }
+  | { type: "set-amount"; value: string }
+  | { type: "append-digit"; value: string }
+  | { type: "set-category"; value: string }
+  | { type: "set-date"; value: string }
+  | { type: "set-note"; value: string }
+  | { type: "set-error"; error: string }
+  | { type: "set-saving"; saving: boolean }
+  | { type: "add-attachments"; attachments: FormAttachment[] }
+  | { type: "remove-attachment"; id: string }
+  | { type: "mark-attachments-uploading"; ids: Set<string> }
+  | { type: "sync-attachment-jobs"; jobs: Map<string | undefined, ImportJobStatus> }
+  | { type: "update-attachment-job"; job: ImportJobStatus }
+  | { type: "reset-after-save" }
+  | { type: "prepare-line-items" }
+  | { type: "update-line-row"; rowId: string; field: "name" | "amount"; value: string }
+  | { type: "add-line-row" }
+  | { type: "remove-line-row"; row: LineItemRow }
+  | { type: "save-line-rows" };
+type RecordsPageState = {
+  aiSearching: boolean;
+  bookSwitcherOpen: boolean;
+  draftFilters: RecordFilters;
+  filterOpen: boolean;
+  searchText: string;
+};
+type RecordsPageAction =
+  | { type: "search-text"; value: string }
+  | { type: "sync-search"; value: string }
+  | { type: "ai-searching"; value: boolean }
+  | { type: "open-filters"; filters: RecordFilters }
+  | { type: "close-filters" }
+  | { type: "draft-filters"; filters: RecordFilters }
+  | { type: "reset-search" }
+  | { type: "open-book-switcher" }
+  | { type: "close-book-switcher" };
 
 const recordTypeFilterOptions: Array<{ label: string; value: RecordFilterType }> = [
   { label: "全部", value: "all" },
@@ -98,14 +152,152 @@ const recordSortOptions: Array<{ label: string; value: RecordSort }> = [
   { label: "金额最高", value: "amount_desc" },
 ];
 
-export function RecordsPage() {
+const emptyImportJobs: ImportJobStatus[] = [];
+
+function recordsPageReducer(state: RecordsPageState, action: RecordsPageAction): RecordsPageState {
+  switch (action.type) {
+    case "search-text":
+      return { ...state, searchText: action.value };
+    case "sync-search":
+      return state.searchText === action.value ? state : { ...state, searchText: action.value };
+    case "ai-searching":
+      return { ...state, aiSearching: action.value };
+    case "open-filters":
+      return { ...state, draftFilters: action.filters, filterOpen: true };
+    case "close-filters":
+      return { ...state, filterOpen: false };
+    case "draft-filters":
+      return { ...state, draftFilters: action.filters };
+    case "reset-search":
+      return { ...state, searchText: "" };
+    case "open-book-switcher":
+      return { ...state, bookSwitcherOpen: true };
+    case "close-book-switcher":
+      return { ...state, bookSwitcherOpen: false };
+  }
+}
+
+function createTransactionFormState(draft: RecordDraft | undefined, initialType: "income" | "expense"): TransactionFormState {
+  return {
+    amount: String(draft?.amount ?? "0"),
+    attachments: [],
+    categoryId: draft?.categoryId ?? "",
+    error: "",
+    items: draft?.items ?? [],
+    lineRows: getInitialLineItemRows(draft?.items),
+    note: draft?.note ?? "",
+    occurredAt: draft?.occurredAt?.slice(0, 10) ?? toDateInputValue(new Date()),
+    saving: false,
+    type: draft?.type || initialType,
+    view: "form",
+  };
+}
+
+function transactionToRecordDraft(transaction: LedgerTransaction): RecordDraft {
+  return {
+    type: transaction.type,
+    amount: transaction.amount,
+    categoryId: transaction.categoryId ?? "",
+    occurredAt: transaction.occurredAt.slice(0, 10),
+    note: transaction.note ?? "",
+    items: transaction.items ?? [],
+  };
+}
+
+function transactionFormReducer(state: TransactionFormState, action: TransactionFormAction): TransactionFormState {
+  switch (action.type) {
+    case "set-view":
+      return { ...state, view: action.view };
+    case "set-type":
+      return { ...state, type: action.value, categoryId: "" };
+    case "set-amount":
+      return { ...state, amount: action.value };
+    case "append-digit":
+      return {
+        ...state,
+        amount: action.value === "del"
+          ? state.amount.length > 1 ? state.amount.slice(0, -1) : "0"
+          : normalizeAmountInput(state.amount, action.value),
+      };
+    case "set-category":
+      return { ...state, categoryId: action.value };
+    case "set-date":
+      return { ...state, occurredAt: action.value };
+    case "set-note":
+      return { ...state, note: action.value };
+    case "set-error":
+      return { ...state, error: action.error };
+    case "set-saving":
+      return { ...state, saving: action.saving };
+    case "add-attachments":
+      return { ...state, attachments: action.attachments };
+    case "remove-attachment":
+      return { ...state, attachments: state.attachments.filter((attachment) => attachment.id !== action.id) };
+    case "mark-attachments-uploading":
+      return {
+        ...state,
+        attachments: state.attachments.map((item) => (action.ids.has(item.id) ? { ...item, status: "uploading" } : item)),
+      };
+    case "sync-attachment-jobs":
+      return {
+        ...state,
+        attachments: state.attachments.map((item) => {
+          const job = action.jobs.get(item.id);
+          return job ? attachmentFromJob(item, job) : item;
+        }),
+      };
+    case "update-attachment-job":
+      return {
+        ...state,
+        attachments: state.attachments.map((item) => (item.jobId === action.job.id ? attachmentFromJob(item, action.job) : item)),
+      };
+    case "reset-after-save":
+      return { ...state, amount: "0", attachments: [], items: [], note: "" };
+    case "prepare-line-items":
+      return { ...state, lineRows: getInitialLineItemRows(state.items), view: "lineItems" };
+    case "update-line-row":
+      return {
+        ...state,
+        lineRows: state.lineRows.map((item) => (item.id === action.rowId ? { ...item, [action.field]: action.value } : item)),
+      };
+    case "add-line-row":
+      return { ...state, lineRows: [...state.lineRows, { id: crypto.randomUUID(), name: "", amount: "" }] };
+    case "remove-line-row":
+      return {
+        ...state,
+        lineRows: state.lineRows.length === 1
+          ? [{ ...action.row, name: "", amount: "" }]
+          : state.lineRows.filter((item) => item.id !== action.row.id),
+      };
+    case "save-line-rows":
+      return { ...state, items: normalizeLineItemRows(state.lineRows), view: "form" };
+  }
+}
+
+function attachmentFromJob(item: FormAttachment, job: ImportJobStatus): FormAttachment {
+  return {
+    ...item,
+    status: job.status === "failed" ? "failed" : terminalImportStatuses.has(job.status) ? "completed" : "processing",
+    jobId: job.id,
+    errorMessage: job.errorMessage,
+    progress: job.progress,
+    stage: job.stage,
+    currentPage: job.currentPage,
+    totalPages: job.totalPages,
+  };
+}
+
+function useRecordsPageController() {
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = readRecordFilters(searchParams);
-  const [searchText, setSearchText] = useState(filters.q);
-  const [aiSearching, setAiSearching] = useState(false);
-  const [filterOpen, setFilterOpen] = useState(false);
-  const [bookSwitcherOpen, setBookSwitcherOpen] = useState(false);
-  const [draftFilters, setDraftFilters] = useState(filters);
+  const [pageState, dispatchPage] = useReducer(recordsPageReducer, {
+    aiSearching: false,
+    bookSwitcherOpen: false,
+    draftFilters: filters,
+    filterOpen: false,
+    searchText: filters.q,
+  });
+  const { aiSearching, bookSwitcherOpen, draftFilters, filterOpen, searchText } = pageState;
   const { user } = useAuth();
   const { book, books, setActiveBook } = useActiveBook();
   const { openSheet } = useAppSheetActions();
@@ -117,9 +309,18 @@ export function RecordsPage() {
     () => Object.fromEntries((categories?.categories ?? []).map((item) => [item.id, item.name])),
     [categories?.categories],
   );
-  const activeImports = (imports?.imports ?? []).filter(isActiveImport);
-  const pendingCount = (imports?.imports ?? []).filter((item) => item.status === "pending_confirmation").length;
-  const failedCount = (imports?.imports ?? []).filter((item) => item.status === "failed").length;
+  const importJobs = imports?.imports ?? emptyImportJobs;
+  const activeImports = useMemo(() => importJobs.filter(isActiveImport), [importJobs]);
+  const activeImportWatchKey = useMemo(() => activeImports.map((job) => `${job.id}:${job.status}`).join(","), [activeImports]);
+  const { pendingCount, failedCount } = useMemo(() => {
+    let pending = 0;
+    let failed = 0;
+    for (const item of importJobs) {
+      if (item.status === "pending_confirmation") pending += 1;
+      if (item.status === "failed") failed += 1;
+    }
+    return { pendingCount: pending, failedCount: failed };
+  }, [importJobs]);
   const allTransactions = useMemo(() => data?.transactions ?? [], [data?.transactions]);
   const visibleTransactions = useMemo(
     () =>
@@ -137,7 +338,7 @@ export function RecordsPage() {
     [categoryNames, filters],
   );
 
-  useEffect(() => setSearchText(filters.q), [filters.q]);
+  useEffect(() => dispatchPage({ type: "sync-search", value: filters.q }), [filters.q]);
   useEffect(() => {
     const ids = activeImports.map((job) => job.id);
     if (!ids.length) return undefined;
@@ -148,7 +349,7 @@ export function RecordsPage() {
       },
       { onDone: () => void reloadImports() },
     );
-  }, [activeImports.map((job) => `${job.id}:${job.status}`).join(","), reloadImports]);
+  }, [activeImportWatchKey, activeImports, reloadImports]);
 
   const submitSearch = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -165,7 +366,7 @@ export function RecordsPage() {
       toast.error("请先选择账本", { duration: 3000, closeButton: true });
       return;
     }
-    setAiSearching(true);
+    dispatchPage({ type: "ai-searching", value: true });
     try {
       const result = await searchTransactionsWithAi({
         bookId: book.id,
@@ -177,31 +378,106 @@ export function RecordsPage() {
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : "AI 搜索失败", { duration: 3000, closeButton: true });
     } finally {
-      setAiSearching(false);
+      dispatchPage({ type: "ai-searching", value: false });
     }
   };
   const openFilters = () => {
-    setDraftFilters(filters);
-    setFilterOpen(true);
+    dispatchPage({ type: "open-filters", filters });
   };
   const resetFilters = () => {
-    setSearchText("");
+    dispatchPage({ type: "reset-search" });
     setSearchParams(clearRecordFilterParams(searchParams));
   };
   const applyFilters = () => {
     setSearchParams(writeRecordFilters(searchParams, draftFilters));
-    setFilterOpen(false);
+    dispatchPage({ type: "close-filters" });
   };
   const switchBook = (bookId: string) => {
     setActiveBook(bookId);
-    setBookSwitcherOpen(false);
+    dispatchPage({ type: "close-book-switcher" });
   };
+
+  return {
+    activeFilterChips,
+    activeImports,
+    aiSearching,
+    book,
+    books,
+    bookSwitcherOpen,
+    canUseAiSearch,
+    categoryNames,
+    closeBookSwitcher: () => dispatchPage({ type: "close-book-switcher" }),
+    closeFilters: () => dispatchPage({ type: "close-filters" }),
+    draftFilters,
+    failedCount,
+    filterOpen,
+    filters,
+    groups,
+    hasActiveFilters,
+    hasAnyTransactions,
+    openBookSwitcher: () => dispatchPage({ type: "open-book-switcher" }),
+    openFilters,
+    openSheet,
+    pendingCount,
+    resetFilters,
+    searchParams,
+    searchText,
+    setDraftFilters: (update: RecordFilters | ((current: RecordFilters) => RecordFilters)) => {
+      const filters = typeof update === "function" ? update(draftFilters) : update;
+      dispatchPage({ type: "draft-filters", filters });
+    },
+    setRecordTypeFilter: (type: RecordFilterType) => {
+      setSearchParams(writeRecordFilters(searchParams, { ...filters, type }));
+    },
+    setSearchText: (value: string) => dispatchPage({ type: "search-text", value }),
+    submitSearch,
+    switchBook,
+    transactionsError,
+    transactionsLoading,
+    applyFilters,
+  };
+}
+
+export function RecordsPage() {
+  const {
+    activeFilterChips,
+    activeImports,
+    aiSearching,
+    book,
+    books,
+    bookSwitcherOpen,
+    canUseAiSearch,
+    categoryNames,
+    closeBookSwitcher,
+    closeFilters,
+    draftFilters,
+    failedCount,
+    filterOpen,
+    filters,
+    groups,
+    hasActiveFilters,
+    hasAnyTransactions,
+    openBookSwitcher,
+    openFilters,
+    openSheet,
+    pendingCount,
+    resetFilters,
+    searchText,
+    setDraftFilters,
+    setRecordTypeFilter,
+    setSearchText,
+    submitSearch,
+    switchBook,
+    transactionsError,
+    transactionsLoading,
+    applyFilters,
+  } = useRecordsPageController();
 
   return (
     <IosPage className="ios-records-page">
       <IosTopBar
         book={book}
-        onLedgerClick={() => setBookSwitcherOpen(true)}
+        onLedgerClick={openBookSwitcher}
         action={
           <div className="ios-top-actions">
             <button className={`ios-filter-trigger${hasActiveFilters ? " active" : ""}`} type="button" aria-label="筛选记录" onClick={openFilters}>
@@ -239,7 +515,7 @@ export function RecordsPage() {
             <button
               className={filters.type === option.value ? "active" : ""}
               type="button"
-              onClick={() => setSearchParams(writeRecordFilters(searchParams, { ...filters, type: option.value }))}
+              onClick={() => setRecordTypeFilter(option.value)}
               key={option.value}
             >
               {option.label}
@@ -335,7 +611,7 @@ export function RecordsPage() {
       {filterOpen && (
         <IosSheet
           title="筛选流水"
-          onClose={() => setFilterOpen(false)}
+          onClose={closeFilters}
           footer={
             <div className="ios-sheet-actions">
               <IosButton variant="outline" onClick={resetFilters}>
@@ -363,6 +639,7 @@ export function RecordsPage() {
             <div className="ios-filter-grid">
               <IosField label="开始日期">
                 <input
+                  aria-label="开始日期"
                   type="date"
                   value={draftFilters.start}
                   onChange={(event) => {
@@ -373,6 +650,7 @@ export function RecordsPage() {
               </IosField>
               <IosField label="结束日期">
                 <input
+                  aria-label="结束日期"
                   type="date"
                   value={draftFilters.end}
                   onChange={(event) => {
@@ -383,6 +661,7 @@ export function RecordsPage() {
               </IosField>
               <IosField label="最小金额">
                 <input
+                  aria-label="最小金额"
                   inputMode="decimal"
                   value={draftFilters.min}
                   onChange={(event) => {
@@ -393,6 +672,7 @@ export function RecordsPage() {
               </IosField>
               <IosField label="最大金额">
                 <input
+                  aria-label="最大金额"
                   inputMode="decimal"
                   value={draftFilters.max}
                   onChange={(event) => {
@@ -404,6 +684,7 @@ export function RecordsPage() {
             </div>
             <IosField label="分类关键词">
               <input
+                aria-label="分类关键词"
                 value={draftFilters.category}
                 placeholder="餐饮 / 交通 / 工资"
                 onChange={(event) => {
@@ -420,7 +701,7 @@ export function RecordsPage() {
           books={books}
           currentBookId={book?.id ?? ""}
           onSelect={switchBook}
-          close={() => setBookSwitcherOpen(false)}
+          close={closeBookSwitcher}
         />
       )}
     </IosPage>
@@ -446,36 +727,54 @@ export function TransactionFormSheet({
   const { data: categoriesData } = useApi<{ categories: CategoryOption[] }>(book ? `/books/${book.id}/categories` : undefined);
   const draftKey = getRecordDraftKey(id, book?.id);
   const initialDraft = readRecordDraft(draftKey);
-  const [view, setView] = useState<"form" | "lineItems">("form");
-  const [type, setType] = useState<"income" | "expense">(initialDraft?.type || initialType);
-  const [amount, setAmount] = useState(() => String(initialDraft?.amount ?? "0"));
-  const [categoryId, setCategoryId] = useState(initialDraft?.categoryId ?? "");
-  const [occurredAt, setOccurredAt] = useState(initialDraft?.occurredAt?.slice(0, 10) ?? toDateInputValue(new Date()));
-  const [note, setNote] = useState(initialDraft?.note ?? "");
-  const [items, setItems] = useState<LineItemValue[]>(() => initialDraft?.items ?? []);
-  const [lineRows, setLineRows] = useState<LineItemRow[]>(() => getInitialLineItemRows(initialDraft?.items));
-  const [attachments, setAttachments] = useState<FormAttachment[]>([]);
-  const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
+  const sourceDraft = initialDraft ?? (existing?.transaction ? transactionToRecordDraft(existing.transaction) : undefined);
+  const categories = categoriesData?.categories ?? [];
+
+  if (id && !initialDraft && !existing?.transaction) {
+    return (
+      <IosSheet title="编辑记录" onClose={onClose}>
+        <IosListSkeleton rows={4} />
+      </IosSheet>
+    );
+  }
+
+  return (
+    <TransactionFormEditor
+      key={`${id ?? "new"}:${book?.id ?? ""}:${sourceDraft?.occurredAt ?? ""}:${sourceDraft?.amount ?? ""}`}
+      id={id}
+      book={book}
+      categories={categories}
+      draftKey={draftKey}
+      initialState={createTransactionFormState(sourceDraft, initialType)}
+      onClose={onClose}
+    />
+  );
+}
+
+function TransactionFormEditor({
+  book,
+  categories,
+  draftKey,
+  id,
+  initialState,
+  onClose,
+}: {
+  book: ReturnType<typeof useActiveBook>["book"];
+  categories: CategoryOption[];
+  draftKey: string;
+  id?: string;
+  initialState: TransactionFormState;
+  onClose: () => void;
+}) {
+  const [state, dispatchForm] = useReducer(transactionFormReducer, initialState);
+  const { amount, attachments, categoryId, error, items, lineRows, note, occurredAt, saving, type, view } = state;
   const fileInput = useRef<HTMLInputElement>(null);
   const stopWatchingRef = useRef<(() => void) | undefined>(undefined);
-  const categories = categoriesData?.categories ?? [];
   const amountNumber = Number(amount || 0);
   const selectedCategory = categories.find((category) => category.id === categoryId);
   const assignedLineAmount = lineRows.reduce((sumValue, item) => sumValue + Number(item.amount || 0), 0);
   const lineItemErrors = useMemo(() => getLineItemErrors(lineRows, amountNumber), [lineRows, amountNumber]);
   const hasLineItemErrors = Object.values(lineItemErrors).some(Boolean);
-
-  useEffect(() => {
-    if (!existing?.transaction) return;
-    if (initialDraft) return;
-    setType(existing.transaction.type);
-    setAmount(String(existing.transaction.amount));
-    setCategoryId(existing.transaction.categoryId ?? "");
-    setOccurredAt(existing.transaction.occurredAt.slice(0, 10));
-    setNote(existing.transaction.note ?? "");
-    setItems(existing.transaction.items ?? []);
-  }, [existing?.transaction]);
   useEffect(() => () => {
     stopWatchingRef.current?.();
     attachments.forEach((attachment) => {
@@ -485,11 +784,7 @@ export function TransactionFormSheet({
 
   const close = onClose;
   const appendDigit = (value: string) => {
-    if (value === "del") {
-      setAmount((current) => (current.length > 1 ? current.slice(0, -1) : "0"));
-      return;
-    }
-    setAmount((current) => normalizeAmountInput(current, value));
+    dispatchForm({ type: "append-digit", value });
   };
   const addFiles = (fileList: FileList | null) => {
     const files = Array.from(fileList ?? []);
@@ -503,65 +798,32 @@ export function TransactionFormSheet({
       });
       return;
     }
-    setAttachments((current) => {
-      const merged = [...current, ...files.map(createFormAttachment)].slice(0, maxAttachmentFiles);
-      if (current.length + files.length > maxAttachmentFiles) {
-        toast.warning(`一次最多上传 ${maxAttachmentFiles} 个附件`, { duration: 3000, closeButton: true });
-      }
-      return merged;
-    });
+    const merged = [...attachments, ...files.map(createFormAttachment)].slice(0, maxAttachmentFiles);
+    if (attachments.length + files.length > maxAttachmentFiles) {
+      toast.warning(`一次最多上传 ${maxAttachmentFiles} 个附件`, { duration: 3000, closeButton: true });
+    }
+    dispatchForm({ type: "add-attachments", attachments: merged });
     if (fileInput.current) fileInput.current.value = "";
   };
   const removeAttachment = (idToRemove: string) => {
-    setAttachments((current) => {
-      current.forEach((attachment) => {
-        if (attachment.id === idToRemove && attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
-      });
-      return current.filter((attachment) => attachment.id !== idToRemove);
+    attachments.forEach((attachment) => {
+      if (attachment.id === idToRemove && attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
     });
+    dispatchForm({ type: "remove-attachment", id: idToRemove });
   };
   const uploadAttachments = async () => {
     const pending = attachments.filter((attachment) => attachment.status === "idle" || attachment.status === "failed");
     if (!book || !pending.length) return;
     const pendingIds = new Set(pending.map((item) => item.id));
-    setAttachments((current) => current.map((item) => (pendingIds.has(item.id) ? { ...item, status: "uploading" } : item)));
+    dispatchForm({ type: "mark-attachments-uploading", ids: pendingIds });
     const { jobs } = await uploadImportFiles(book.id, pending.map((item) => item.file));
     const jobMap = new Map(jobs.map((job, index) => [pending[index]?.id, job]));
-    setAttachments((current) =>
-      current.map((item) => {
-        const job = jobMap.get(item.id);
-        return job
-          ? {
-              ...item,
-              status: "processing",
-              jobId: job.id,
-              progress: job.progress,
-              stage: job.stage,
-              currentPage: job.currentPage,
-              totalPages: job.totalPages,
-            }
-          : item;
-      }),
-    );
+    dispatchForm({ type: "sync-attachment-jobs", jobs: jobMap });
     stopWatchingRef.current?.();
     stopWatchingRef.current = watchImportJobs(
       jobs.map((job) => job.id),
       (job) => {
-        setAttachments((current) =>
-          current.map((item) =>
-            item.jobId === job.id
-              ? {
-                  ...item,
-                  status: job.status === "failed" ? "failed" : terminalImportStatuses.has(job.status) ? "completed" : "processing",
-                  errorMessage: job.errorMessage,
-                  progress: job.progress,
-                  stage: job.stage,
-                  currentPage: job.currentPage,
-                  totalPages: job.totalPages,
-                }
-              : item,
-          ),
-        );
+        dispatchForm({ type: "update-attachment-job", job });
       },
       { onError: (message) => toast.warning(message, { duration: 3000, closeButton: true }) },
     );
@@ -571,38 +833,36 @@ export function TransactionFormSheet({
       toast.error("请先输入总金额", { duration: 3000, closeButton: true });
       return;
     }
-    setLineRows(getInitialLineItemRows(items));
-    setView("lineItems");
+    dispatchForm({ type: "prepare-line-items" });
   };
   const updateLineRow = (rowId: string, field: "name" | "amount", value: string) => {
-    setLineRows((current) => current.map((item) => (item.id === rowId ? { ...item, [field]: value } : item)));
+    dispatchForm({ type: "update-line-row", rowId, field, value });
   };
   const addLineRow = () => {
-    setLineRows((current) => [...current, { id: crypto.randomUUID(), name: "", amount: "" }]);
+    dispatchForm({ type: "add-line-row" });
   };
   const removeLineRow = (row: LineItemRow) => {
-    setLineRows((current) => (current.length === 1 ? [{ ...row, name: "", amount: "" }] : current.filter((item) => item.id !== row.id)));
+    dispatchForm({ type: "remove-line-row", row });
   };
   const saveLineRows = () => {
     if (hasLineItemErrors) {
       toast.error("明细金额不能超过剩余金额", { duration: 3000, closeButton: true });
       return;
     }
-    setItems(normalizeLineItemRows(lineRows));
-    setView("form");
+    dispatchForm({ type: "save-line-rows" });
   };
   const save = async (continueAfterSave = false) => {
     if (!book && !id) {
-      setError("请先选择账本");
+      dispatchForm({ type: "set-error", error: "请先选择账本" });
       return;
     }
     if (!hasPositiveNumber(amountNumber)) {
-      setError("金额必须大于 0");
+      dispatchForm({ type: "set-error", error: "金额必须大于 0" });
       return;
     }
     const closeImmediately = !continueAfterSave && attachments.length === 0;
-    if (!closeImmediately) setSaving(true);
-    setError("");
+    if (!closeImmediately) dispatchForm({ type: "set-saving", saving: true });
+    dispatchForm({ type: "set-error", error: "" });
     const payload = {
       type,
       amount: amountNumber,
@@ -631,19 +891,16 @@ export function TransactionFormSheet({
       }
       clearRecordDraft(draftKey);
       if (continueAfterSave && !id) {
-        setAmount("0");
-        setNote("");
-        setItems([]);
-        setAttachments([]);
+        dispatchForm({ type: "reset-after-save" });
       } else if (!closeImmediately) {
         close();
       }
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "保存失败";
       if (closeImmediately) toast.error(message, { duration: 3000, closeButton: true });
-      else setError(message);
+      else dispatchForm({ type: "set-error", error: message });
     } finally {
-      if (!closeImmediately) setSaving(false);
+      if (!closeImmediately) dispatchForm({ type: "set-saving", saving: false });
     }
   };
 
@@ -652,7 +909,7 @@ export function TransactionFormSheet({
       title={view === "lineItems" ? "添加明细" : id ? "编辑记录" : type === "income" ? "记一笔收入" : "记一笔支出"}
       onClose={close}
       back={view === "lineItems"}
-      onBack={() => setView("form")}
+      onBack={() => dispatchForm({ type: "set-view", view: "form" })}
       footer={
         view === "lineItems" ? (
           <IosButton disabled={hasLineItemErrors} onClick={saveLineRows}>
@@ -686,10 +943,7 @@ export function TransactionFormSheet({
       <div className="ios-record-form">
         <IosSegment
           value={type}
-          onChange={(value) => {
-            setType(value);
-            setCategoryId("");
-          }}
+          onChange={(value) => dispatchForm({ type: "set-type", value })}
           options={[
             { value: "expense", label: "支出" },
             { value: "income", label: "收入" },
@@ -709,7 +963,7 @@ export function TransactionFormSheet({
                 aria-label={category.name}
                 className={category.id === categoryId ? "active" : ""}
                 type="button"
-                onClick={() => setCategoryId(category.id)}
+                onClick={() => dispatchForm({ type: "set-category", value: category.id })}
                 key={category.id}
               >
                 <IconTile tint={category.id === categoryId ? categoryColor(category, type) : `${categoryColor(category, type)}18`} color={category.id === categoryId ? "#fff" : categoryColor(category, type)}>
@@ -725,14 +979,14 @@ export function TransactionFormSheet({
         <div className="ios-record-meta-row">
           <label>
             <CalendarBlankIcon size={17} />
-            <input aria-label="日期" type="date" value={occurredAt} onChange={(event) => setOccurredAt(event.currentTarget.value)} />
+            <input aria-label="日期" type="date" value={occurredAt} onChange={(event) => dispatchForm({ type: "set-date", value: event.currentTarget.value })} />
           </label>
           <button type="button" onClick={() => fileInput.current?.click()}>
             <PaperclipIcon size={17} />
             {attachments.length ? `附件 ${attachments.length}` : "附件"}
           </button>
         </div>
-        <input ref={fileInput} className="sr-only" type="file" multiple accept={supportedFileAccept} onChange={(event) => addFiles(event.currentTarget.files)} />
+        <input ref={fileInput} className="sr-only" type="file" multiple aria-label="上传附件" accept={supportedFileAccept} onChange={(event) => addFiles(event.currentTarget.files)} />
 
         {attachments.length > 0 && (
           <div className="ios-form-attachments">
@@ -742,7 +996,7 @@ export function TransactionFormSheet({
           </div>
         )}
 
-        <input className="ios-note-input" value={note} placeholder="添加备注…" onChange={(event) => setNote(event.currentTarget.value)} />
+        <input className="ios-note-input" aria-label="备注" value={note} placeholder="添加备注…" onChange={(event) => dispatchForm({ type: "set-note", value: event.currentTarget.value })} />
         <button className="ios-line-item-link" type="button" onClick={openLineItems}>
           <PlusCircleIcon size={18} weight="bold" />
           添加明细{items.length ? `（${items.length}）` : ""}
@@ -1213,13 +1467,12 @@ function booleanValue(value: unknown): boolean | undefined {
 
 function normalizeChips(value: unknown): string[] {
   if (Array.isArray(value)) {
-    return value
-      .map((item) => {
+    return value.flatMap((item) => {
         if (typeof item === "string") return item.trim();
         const object = objectValue(item);
-        return stringValue(object?.value) ?? stringValue(object?.label) ?? "";
-      })
-      .filter(Boolean);
+        const chip = stringValue(object?.value) ?? stringValue(object?.label) ?? "";
+        return chip ? [chip] : [];
+      });
   }
   if (typeof value === "string") return readChips(value);
   return [];
@@ -1227,11 +1480,17 @@ function normalizeChips(value: unknown): string[] {
 
 function readChips(value: string | null) {
   if (!value) return [];
-  return value.split("|").map((item) => item.trim()).filter(Boolean);
+  return value.split("|").flatMap((item) => {
+    const chip = item.trim();
+    return chip ? [chip] : [];
+  });
 }
 
 function writeChips(chips: string[]) {
-  return chips.map((item) => item.trim()).filter(Boolean).join("|");
+  return chips.flatMap((item) => {
+    const chip = item.trim();
+    return chip ? [chip] : [];
+  }).join("|");
 }
 
 function getClientTimeZone() {

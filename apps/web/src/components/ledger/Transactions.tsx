@@ -1,5 +1,5 @@
-import { yuan } from "../ios/IosDesign";
 import { useAppSheetActions } from "../../features/sheets/SheetContext";
+import { yuan } from "../../features/formatting/money";
 
 export type LedgerTransaction = {
   id: string;
@@ -12,28 +12,6 @@ export type LedgerTransaction = {
   memberId?: string;
   items?: Array<{ id?: string; name: string; amount: number; categoryId?: string; note?: string }>;
 };
-export function TransactionList({
-  transactions,
-  compact = false,
-  categoryNames,
-  currency,
-}: {
-  transactions: LedgerTransaction[];
-  compact?: boolean;
-  categoryNames?: Record<string, string>;
-  currency?: string;
-}) {
-  const shown = compact ? transactions.slice(0, 3) : transactions;
-  if (!shown.length) return <p className="muted">还没有记录，记下第一笔吧。</p>;
-  return (
-    <div className="transaction-list">
-      {shown.map((transaction) => (
-        <IosTransactionRow transaction={transaction} categoryNames={categoryNames} currency={currency} key={transaction.id} />
-      ))}
-    </div>
-  );
-}
-
 export function IosTransactionRow({
   transaction,
   categoryNames,
@@ -66,7 +44,7 @@ export function IosTransactionRow({
   );
 }
 
-export function getCategoryLabel(transaction: LedgerTransaction, categoryNames?: Record<string, string>) {
+function getCategoryLabel(transaction: LedgerTransaction, categoryNames?: Record<string, string>) {
   if (transaction.categoryName) return transaction.categoryName;
   if (transaction.categoryId && categoryNames?.[transaction.categoryId]) return categoryNames[transaction.categoryId];
   return transaction.categoryId ?? "未分类";

@@ -5,7 +5,7 @@ import { api } from "../lib";
 
 export function useApi<T>(path: string | undefined) {
   const shouldCacheBooks = path === "/books" && import.meta.env.MODE !== "test";
-  const query = useQuery({
+  const { data, error: queryError, isFetching, isLoading, refetch } = useQuery({
     queryKey: apiQueryKey(path),
     queryFn: () => api<T>(path ?? ""),
     enabled: Boolean(path),
@@ -13,7 +13,6 @@ export function useApi<T>(path: string | undefined) {
     staleTime: shouldCacheBooks ? 5 * 60 * 1000 : undefined,
     refetchOnMount: shouldCacheBooks ? false : undefined,
   });
-  const { data, error: queryError, isFetching, isLoading, refetch } = query;
   const reload = useCallback(async () => {
     if (!path) return;
     await refetch();

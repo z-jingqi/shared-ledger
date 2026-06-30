@@ -13,7 +13,7 @@ import {
   XIcon,
 } from "@phosphor-icons/react";
 import { Button, Textarea } from "@shared-ledger/ui";
-import { forwardRef, type FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
+import { type FormEvent, type ReactNode, type Ref, useEffect, useEffectEvent, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Streamdown } from "streamdown";
 import { useAppSheetActions } from "../../features/sheets/SheetContext";
@@ -32,8 +32,17 @@ import type {
 import type { ImportAttachmentView } from "../imports/ImportAttachmentCards";
 import { ImportAttachmentCards } from "../imports/ImportAttachmentCards";
 
-export const AiConversation = forwardRef<HTMLDivElement, { children: ReactNode; onScroll?: () => void; onUserScrollIntent?: () => void }>(
-  function AiConversation({ children, onScroll, onUserScrollIntent }, ref) {
+export function AiConversation({
+  children,
+  onScroll,
+  onUserScrollIntent,
+  ref,
+}: {
+  children: ReactNode;
+  onScroll?: () => void;
+  onUserScrollIntent?: () => void;
+  ref?: Ref<HTMLDivElement>;
+}) {
   return (
     <div
       className="ai-messages"
@@ -47,12 +56,19 @@ export const AiConversation = forwardRef<HTMLDivElement, { children: ReactNode; 
       {children}
     </div>
   );
-  },
-);
+}
 
-export function AiMessage({ role, children, messageId }: { role: "user" | "assistant"; children: ReactNode; messageId?: string }) {
+export function AiMessage({
+  messageRole,
+  children,
+  messageId,
+}: {
+  messageRole: "user" | "assistant";
+  children: ReactNode;
+  messageId?: string;
+}) {
   return (
-    <article className={`ai-message ${role === "user" ? "ai-user" : "ai-assistant"}`} data-ai-message-id={messageId}>
+    <article className={`ai-message ${messageRole === "user" ? "ai-user" : "ai-assistant"}`} data-ai-message-id={messageId}>
       {children}
     </article>
   );
@@ -60,7 +76,7 @@ export function AiMessage({ role, children, messageId }: { role: "user" | "assis
 
 export function AiThinkingMessage() {
   return (
-    <AiMessage role="assistant">
+    <AiMessage messageRole="assistant">
       <div className="ai-thinking" aria-live="polite">
         <span>思考中...</span>
       </div>
@@ -133,6 +149,7 @@ export function AiPromptInput({
         className="sr-only"
         type="file"
         multiple
+        aria-label="上传附件"
         accept={accept}
         onChange={(event) => onAddAttachments(event.currentTarget.files)}
       />
@@ -193,6 +210,7 @@ export function AiPendingConfirmationBar({
   onConfirm: () => void;
 }) {
   const [now, setNow] = useState(() => Date.now());
+  const cancelWhenExpired = useEffectEvent(onCancel);
   const createdAt = useMemo(() => Math.max(Date.now(), expiresAt - progressDurationMs), [expiresAt, progressDurationMs]);
   const remaining = Math.max(0, expiresAt - now);
   const progress = Math.max(0, Math.min(1, remaining / Math.max(1, expiresAt - createdAt)));
@@ -200,12 +218,19 @@ export function AiPendingConfirmationBar({
 
   useEffect(() => {
     if (remaining <= 0) {
-      onCancel();
+      cancelWhenExpired();
       return undefined;
     }
-    const interval = window.setInterval(() => setNow(Date.now()), 250);
-    return () => window.clearInterval(interval);
-  }, [onCancel, remaining]);
+    const tickTimer = window.setTimeout(() => setNow(Date.now()), Math.min(250, remaining));
+    const expiryTimer = window.setTimeout(() => {
+      setNow(Date.now());
+      cancelWhenExpired();
+    }, remaining);
+    return () => {
+      window.clearTimeout(tickTimer);
+      window.clearTimeout(expiryTimer);
+    };
+  });
 
   return (
     <section className="ai-pending-confirmation" aria-label={attachments?.length ? "附件保存确认" : "AI 操作确认"}>
