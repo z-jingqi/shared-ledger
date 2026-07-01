@@ -28,7 +28,7 @@ pnpm install
 pnpm dev
 ```
 
-网页默认位于 `http://localhost:5173`，Worker 位于 `http://localhost:8787`。复制 `.env.example` 为 `.env` 后可设置 `VITE_API_URL`。
+网页默认位于 `http://localhost:5175`，Worker 位于 `http://localhost:8789`。Web 默认通过同源 `/api` 调用 API，本地由 Vite proxy 转发到 Worker。
 
 先初始化本地 D1：
 
@@ -77,7 +77,7 @@ node scripts/prepare-wrangler-config.mjs api prod
 pnpm --filter @shared-ledger/api exec wrangler d1 migrations apply shared-ledger-prod --remote --config wrangler.generated-api-prod.json
 ```
 
-迁移位于 `packages/db/migrations`。Web 与 API 分开部署：Web 使用 Worker static assets，API 使用 Hono Worker。自定义域名已作为模板配置：生产为 `leger.aleph-cat.com` 与 `api.leger.aleph-cat.com`，preview 为 `dev.leger.aleph-cat.com` 与 `api.dev.leger.aleph-cat.com`。Cloudflare zone 必须已托管 `aleph-cat.com`，首次部署需具备编辑 DNS/Workers routes 的 API token 权限。
+迁移位于 `packages/db/migrations`。Web 与 API 分开部署：Web 使用 Worker static assets，API 使用 Hono Worker。Web 与 API 共用同一个域名，API 挂在 `/api/*`：生产为 `leger.aleph-cat.com` 与 `leger.aleph-cat.com/api/*`，preview 为 `dev.leger.aleph-cat.com` 与 `dev.leger.aleph-cat.com/api/*`。Cloudflare zone 必须已托管 `aleph-cat.com`，首次部署需具备编辑 DNS/Workers routes 的 API token 权限。
 
 ## 身份与订阅
 
@@ -85,7 +85,7 @@ pnpm --filter @shared-ledger/api exec wrangler d1 migrations apply shared-ledger
 
 ## 图片导入、OCR 与 AI
 
-shared-ledger 现在只支持图片导入：jpg/jpeg/png/gif/webp/tif/tiff/bmp/raw/dng/heic/heif。非图片不会进入上传导入流程。原图先进入 shared-ledger R2，然后 API Worker 通过 `ALEPH_TOOLS` service binding 调用 Aleph Tools 最新 `POST /v1/tools/ocr`；multipart 只发送 `file`、`callbackUrl`、`metadata`。OCR ready 后读取 `/v1/jobs/:id/result` 的 `plainText`/`markdown`，再交给 AI 结构化。AI 输出会经过 Zod 校验，只生成待确认记录，确认后才创建 Transaction。
+shared-ledger 现在只支持图片导入：jpg/jpeg/png/gif/webp/tif/tiff/bmp/raw/dng/heic/heif。非图片不会进入上传导入流程。原图先进入 shared-ledger R2，然后 API Worker 通过 `ALEPH_TOOLS` service binding 调用 Aleph Tools 最新 `POST /v1/tools/ocr`；multipart 只发送 `file`、`callbackUrl`、`metadata`。OCR webhook 使用同源 API 地址，例如 preview 为 `https://dev.leger.aleph-cat.com/api/imports/aleph-webhook`。OCR ready 后读取 `/v1/jobs/:id/result` 的 `plainText`/`markdown`，再交给 AI 结构化。AI 输出会经过 Zod 校验，只生成待确认记录，确认后才创建 Transaction。
 
 图片识别有套餐限制：
 

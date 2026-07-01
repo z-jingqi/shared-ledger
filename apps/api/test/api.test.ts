@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AlephAIError, type AlephAIClient, type InvokeRequest } from "@shared-ledger/ai";
 import { structureForConfirmation } from "@shared-ledger/import";
-import { createApp } from "../src/index";
+import worker, { createApp } from "../src/index";
 import { runtimeAiProvider } from "../src/services/ai";
 import { MemoryLedgerStore } from "../src/store";
 
@@ -137,6 +137,14 @@ async function readSse(response: Response) {
 }
 
 describe("Hono REST API", () => {
+  it("strips the /api prefix at the worker edge", async () => {
+    const response = await worker.fetch(new Request("https://dev.leger.aleph-cat.com/api/health") as any, { APP_ENV: "test" } as any, {} as any);
+    const body = await response.json<any>();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ ok: true, environment: "test" });
+  });
+
   it("creates a book and validates transaction line-item totals", async () => {
     const created = await request("/books", {
       method: "POST",

@@ -53,7 +53,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @shared-ledger/web build
         env:
-          VITE_API_URL: ${{ github.ref_name == 'main' && 'https://api.leger.aleph-cat.com' || 'https://api.dev.leger.aleph-cat.com' }}
+          VITE_API_URL: /api
       - run: node ../../scripts/prepare-wrangler-config.mjs web ${{ github.ref_name == 'main' && 'prod' || 'preview' }} && ../../apps/api/node_modules/.bin/wrangler deploy --config wrangler.generated-web-${{ github.ref_name == 'main' && 'prod' || 'preview' }}.json
         working-directory: apps/web
         env:
@@ -96,7 +96,7 @@ jobs:
         working-directory: apps/api
         env:
           CLOUDFLARE_D1_DATABASE_ID_PROD: ${{ vars.CLOUDFLARE_D1_DATABASE_ID_PROD }}
-          ALEPH_AI_SERVICE_PREVIEW: ${{ vars.ALEPH_AI_SERVICE_PREVIEW || 'aleph-ai-orchestrator' }}
+          ALEPH_AI_SERVICE_PREVIEW: ${{ vars.ALEPH_AI_SERVICE_PREVIEW || 'aleph-ai-orchestrator-preview' }}
           ALEPH_AI_SERVICE_PROD: ${{ vars.ALEPH_AI_SERVICE_PROD || 'aleph-ai-orchestrator' }}
           ALEPH_AI_ENV_PREVIEW: ${{ vars.ALEPH_AI_ENV_PREVIEW || 'preview' }}
           ALEPH_AI_ENV_PROD: ${{ vars.ALEPH_AI_ENV_PROD || 'prod' }}

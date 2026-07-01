@@ -15,11 +15,14 @@ const defaultD1DatabaseIds = {
   preview: "58bdce1d-afd3-4d89-9ad7-330a685d0a26",
   prod: undefined,
 };
+const webDomain = isProd ? "leger.aleph-cat.com" : "dev.leger.aleph-cat.com";
+const webOrigin = `https://${webDomain}`;
 const values = {
   __ENV__: environment,
-  __WEB_DOMAIN__: isProd ? "leger.aleph-cat.com" : "dev.leger.aleph-cat.com",
-  __API_DOMAIN__: isProd ? "api.leger.aleph-cat.com" : "api.dev.leger.aleph-cat.com",
-  __WEB_ORIGIN__: isProd ? "https://leger.aleph-cat.com" : "https://dev.leger.aleph-cat.com",
+  __WEB_DOMAIN__: webDomain,
+  __WEB_ORIGIN__: webOrigin,
+  __API_PUBLIC_ORIGIN__: `${webOrigin}/api`,
+  __ZONE_NAME__: "aleph-cat.com",
   __ALEPH_AI_ENV__: process.env[`ALEPH_AI_ENV_${suffix}`] ?? (isProd ? "prod" : "preview"),
   __ALEPH_AI_SERVICE__:
     process.env[`ALEPH_AI_SERVICE_${suffix}`] ?? (isProd ? "aleph-ai-orchestrator" : "aleph-ai-orchestrator-preview"),

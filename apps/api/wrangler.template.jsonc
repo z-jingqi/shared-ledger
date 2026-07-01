@@ -8,7 +8,7 @@
   "vars": {
     "APP_ENV": "__ENV__",
     "WEB_ORIGIN": "__WEB_ORIGIN__",
-    "API_PUBLIC_ORIGIN": "https://__API_DOMAIN__",
+    "API_PUBLIC_ORIGIN": "__API_PUBLIC_ORIGIN__",
     "ALEPH_AI_ENV": "__ALEPH_AI_ENV__",
   },
   "services": [
@@ -30,5 +30,5 @@
     },
   ],
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "__R2_BUCKET__" }],
-  "routes": [{ "pattern": "__API_DOMAIN__", "custom_domain": true }],
+  "routes": [{ "pattern": "__WEB_DOMAIN__/api/*", "zone_name": "__ZONE_NAME__" }],
 }
