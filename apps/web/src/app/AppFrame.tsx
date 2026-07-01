@@ -46,6 +46,7 @@ function AppFrameInner({ children }: { children: ReactNode }) {
   const showBottomNav = Boolean(
     user && bottomNavTab && !isAuthPage && !isCreateBookPage && shellPathname !== "/ai",
   );
+  const canUseImageRecognition = user?.plan === "pro";
   const bookQuery = book?.id ? `?bookId=${encodeURIComponent(book.id)}` : "";
 
   useEffect(() => {
@@ -94,14 +95,17 @@ function AppFrameInner({ children }: { children: ReactNode }) {
               ))}
             </div>
           </nav>
-          <ImportFileUploadInput
-            ref={uploadInputRef}
-            bookId={book?.id}
-            onUploadingChange={setUploading}
-            onUploaded={() => openSheet({ type: "imports" })}
-          />
+          {canUseImageRecognition ? (
+            <ImportFileUploadInput
+              ref={uploadInputRef}
+              bookId={book?.id}
+              onUploadingChange={setUploading}
+              onUploaded={() => openSheet({ type: "imports" })}
+            />
+          ) : null}
           <AddActionMenu
             open={addMenuOpen}
+            showUpload={canUseImageRecognition}
             uploading={uploading}
             onManualAdd={goToManualAdd}
             onOpenChange={setAddMenuOpen}

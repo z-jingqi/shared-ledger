@@ -52,7 +52,7 @@ const initialPasswordState: PasswordState = {
 const subscriptionFeatures = [
   ["AI 自然语言记账", "“记一笔昨天午餐 38” 即可入账"],
   ["AI 智能查账与分析", "用一句话查询、统计、生成报告"],
-  ["文件批量识别", "小票、账单、Excel 一次处理多份"],
+  ["图片批量识别", "小票、账单图片一次处理多份"],
   ["高级分析与异常提醒", "趋势、成员贡献、大额预警"],
 ] as const;
 

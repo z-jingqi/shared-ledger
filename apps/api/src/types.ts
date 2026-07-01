@@ -1,14 +1,17 @@
 import type { AlephAIClient } from "@shared-ledger/ai";
 
+export type WorkerServiceBinding = {
+  fetch(request: Request): Promise<Response>;
+};
+
 export type Env = {
   DB?: D1Database;
   FILES?: R2Bucket;
-  IMPORT_QUEUE?: Queue;
-  ALEPH_AI_BASE_URL?: string;
-  ALEPH_AI_SERVICE_TOKEN?: string;
+  AI_ORCHESTRATOR?: WorkerServiceBinding;
   ALEPH_AI_ENV?: string;
+  ALEPH_AI_SERVICE_TOKEN?: string;
   ALEPH_AI_TEST_CLIENT?: AlephAIClient;
-  ALEPH_TOOLS_BASE_URL?: string;
+  ALEPH_TOOLS?: WorkerServiceBinding;
   ALEPH_TOOLS_API_KEY?: string;
   ALEPH_TOOLS_WEBHOOK_SECRET?: string;
   API_PUBLIC_ORIGIN?: string;
@@ -46,10 +49,10 @@ export type Transaction = {
   type: "income" | "expense";
   amount: number;
   categoryId?: string;
+  categoryName?: string;
   memberId?: string;
   createdByUserId: string;
   note?: string;
   occurredAt: string;
-  tagIds: string[];
   items: Array<{ id: string; name: string; amount: number; categoryId?: string; note?: string }>;
 };

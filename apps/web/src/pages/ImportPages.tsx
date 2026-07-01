@@ -1,8 +1,6 @@
 import {
   CheckCircleIcon,
   CircleNotchIcon,
-  FileCsvIcon,
-  FilePdfIcon,
   ImageSquareIcon,
   ShoppingCartIcon,
   XCircleIcon,
@@ -200,7 +198,7 @@ export function PendingImportsSheet({ onClose }: { onClose: () => void }) {
         }
       >
         <div className="ios-pending-sheet">
-          <p className="ios-sheet-note">以下记录由文件识别或 AI 生成，确认后才会正式入账。低置信度字段已标记，请核对。</p>
+          <p className="ios-sheet-note">以下记录由图片识别或 AI 生成，确认后才会正式入账。低置信度字段已标记，请核对。</p>
           {error && <p className="field-error">{error}</p>}
           {!records.length && (
             <div className="ios-empty">
@@ -311,7 +309,7 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
       <div className="ios-import-sheet">
         <section className="ios-import-hero">
           <p>
-            文件会在后台异步识别，完成后进入「待确认」，不会直接入账。这里只保留最近 {data?.retentionDays ?? 7} 天任务。
+            图片会在后台异步识别，完成后进入「待确认」，不会直接入账。这里只保留最近 {data?.retentionDays ?? 7} 天任务。
           </p>
           <div className="ios-import-stats" aria-label="识别任务统计">
             <span>
@@ -361,8 +359,8 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
           ))}
           {!imports.length && (
             <div className="ios-empty">
-              <b>还没有导入记录</b>
-              <p>从底部加号上传图片、PDF、Excel 或 CSV 后会显示识别进度。</p>
+              <b>还没有图片识别记录</b>
+              <p>从底部加号上传图片后会显示识别进度。</p>
             </div>
           )}
           {imports.length > 0 && !filteredImports.length && (
@@ -493,7 +491,7 @@ function ImportJobCard({
   onCancel: () => void;
 }) {
   const tone = job.status === "failed" ? "failed" : terminalImportStatuses.has(job.status) ? "done" : "processing";
-  const Icon = getJobIcon(job);
+  const Icon = getJobIcon();
   const statusText = formatJobStatus(job);
   return (
     <IosCard className={`ios-import-job ${tone}`}>
@@ -637,10 +635,7 @@ function ImageJobThumbnail({
   );
 }
 
-function getJobIcon(job: Job) {
-  const type = `${job.fileType ?? ""} ${job.fileName ?? ""}`.toLowerCase();
-  if (type.includes("pdf")) return FilePdfIcon;
-  if (type.includes("csv") || type.includes("excel") || type.includes("sheet") || type.includes(".xls")) return FileCsvIcon;
+function getJobIcon() {
   return ImageSquareIcon;
 }
 
@@ -650,13 +645,10 @@ function formatJobStatus(job: Job) {
   if (job.status === "failed") return "处理失败";
   if (job.status === "ai_processing") return "AI 正在结构化…";
   if (job.status === "ocr_processing") return formatOcrProgress(job);
-  if (job.status === "parsing") return "正在解析文件…";
   return job.stage || "正在排队…";
 }
 
 function formatOcrProgress(job: Job) {
-  if (job.stage === "converting") return "正在转换图片…";
-  if (job.stage === "compressing") return "正在压缩图片…";
   if (job.stage === "storing_result") return "正在保存识别结果…";
   if (typeof job.currentPage === "number" && typeof job.totalPages === "number") return `OCR 第 ${job.currentPage}/${job.totalPages} 页`;
   if (typeof job.progress === "number") return `OCR ${job.progress}%`;

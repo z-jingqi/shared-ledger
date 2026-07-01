@@ -4,7 +4,7 @@ import {
   isSupportedAttachment,
   maxAttachmentFiles,
   supportedFileAccept,
-  supportedFileDescription,
+  unsupportedFileMessage,
 } from "../../features/imports/files";
 import { uploadImportFiles, type ImportBatchJob } from "../../features/imports/upload";
 
@@ -62,8 +62,8 @@ export function ImportFileUploadInput({
       }
       const unsupported = files.find((file) => !isSupportedAttachment(file));
       if (unsupported) {
-        toast.error("文件格式暂不支持", {
-          description: `${unsupported.name} 不是支持的 ${supportedFileDescription} 格式。`,
+        toast.error(unsupportedFileMessage, {
+          description: unsupported.name,
           duration: 3000,
           closeButton: true,
         });
@@ -78,7 +78,7 @@ export function ImportFileUploadInput({
       setUploadingState(true);
       try {
         const { jobs } = await uploadImportFiles(bookId, selectedFiles);
-        toast.success("文件已上传", {
+        toast.success("图片已上传", {
           description: "识别会在后台继续，完成后进入待确认。",
           duration: 3000,
           closeButton: true,
@@ -98,7 +98,7 @@ export function ImportFileUploadInput({
       className="sr-only"
       type="file"
       multiple
-      aria-label="上传文件"
+      aria-label="上传图片"
       accept={supportedFileAccept}
       disabled={disabled || uploading}
       onChange={(event) => void upload(event.currentTarget.files)}

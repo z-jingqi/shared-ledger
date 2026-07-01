@@ -42,8 +42,6 @@ export type ImportJob = {
   ocrTotalPages?: number;
   ocrCompletedAt?: string;
   ocrEventSequence?: number;
-  processedR2Key?: string;
-  processedFileType?: string;
   createdAt: string;
   updatedAt: string;
   deletedAt?: string;
@@ -59,11 +57,10 @@ export type ImportedRecord = {
 };
 export type SimpleEntity = {
   id: string;
-  bookId: string;
+  userId: string;
   name: string;
   type?: string;
   icon?: string;
-  color?: string;
   sortOrder?: number;
 };
 export type AiConfirmationAction =
@@ -120,7 +117,6 @@ export class MemoryLedgerStore {
       memberId: "member_demo",
       note: "超市购物",
       occurredAt: "2026-06-20T10:00:00.000Z",
-      tagIds: ["tag_daily"],
       items: [],
     },
     {
@@ -133,7 +129,6 @@ export class MemoryLedgerStore {
       memberId: "member_demo",
       note: "工资收入",
       occurredAt: "2026-06-18T09:00:00.000Z",
-      tagIds: [],
       items: [],
     },
   ];
@@ -142,10 +137,9 @@ export class MemoryLedgerStore {
   records: ImportedRecord[] = [];
   aiConfirmations: AiConfirmation[] = [];
   categories: SimpleEntity[] = [
-    { id: "cat_food", bookId: "book_home", name: "餐饮", type: "expense", icon: "fork-knife", sortOrder: 1 },
-    { id: "cat_salary", bookId: "book_home", name: "工资", type: "income", icon: "wallet", sortOrder: 1 },
+    { id: "cat_food", userId: "user_demo", name: "餐饮", type: "expense", icon: "fork-knife", sortOrder: 1 },
+    { id: "cat_salary", userId: "user_demo", name: "工资", type: "income", icon: "wallet", sortOrder: 1 },
   ];
-  tags: SimpleEntity[] = [{ id: "tag_daily", bookId: "book_home", name: "日常", color: "#ff6b1a" }];
   createUser(name: string, email: string, plan: LedgerUser["plan"] = "free") {
     const user = { id: id("user"), name, email, plan };
     this.users.push(user);
@@ -189,13 +183,15 @@ export class MemoryLedgerStore {
     this.transactions.unshift(tx);
     return tx;
   }
-  createSimple(kind: "categories" | "tags", bookId: string, data: Omit<SimpleEntity, "id" | "bookId">) {
-    const value = { ...data, id: id(kind.slice(0, 3)), bookId };
-    this[kind].push(value);
+  createCategory(userId: string, data: Omit<SimpleEntity, "id" | "userId">) {
+    const value = { ...data, id: id("cat"), userId };
+    this.categories.push(value);
     return value;
   }
-  findCategoryByName(bookId: string, name?: string) {
-    return name ? this.categories.find((category) => category.bookId === bookId && category.name === name) : undefined;
+  findCategoryByName(userId: string, name?: string, type?: string) {
+    return name
+      ? this.categories.find((category) => category.userId === userId && category.name === name && (!type || category.type === type))
+      : undefined;
   }
   findMember(bookId: string, userId: string) {
     return this.members.find((member) => member.bookId === bookId && member.userId === userId);

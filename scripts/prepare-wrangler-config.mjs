@@ -20,17 +20,14 @@ const values = {
   __WEB_DOMAIN__: isProd ? "leger.aleph-cat.com" : "dev.leger.aleph-cat.com",
   __API_DOMAIN__: isProd ? "api.leger.aleph-cat.com" : "api.dev.leger.aleph-cat.com",
   __WEB_ORIGIN__: isProd ? "https://leger.aleph-cat.com" : "https://dev.leger.aleph-cat.com",
-  __ALEPH_AI_BASE_URL__:
-    process.env[`ALEPH_AI_BASE_URL_${suffix}`] ??
-    (isProd ? "https://ai.aleph-cat.com" : "https://ai-platform-preview.aleph-cat.com"),
-  __ALEPH_AI_ENV__: process.env[`ALEPH_AI_ENV_${suffix}`] ?? "prod",
-  __ALEPH_TOOLS_BASE_URL__:
-    process.env[`ALEPH_TOOLS_BASE_URL_${suffix}`] ??
-    (isProd ? "https://ocr.aleph-cat.com" : "https://ocr.dev.aleph-cat.com"),
+  __ALEPH_AI_ENV__: process.env[`ALEPH_AI_ENV_${suffix}`] ?? (isProd ? "prod" : "preview"),
+  __ALEPH_AI_SERVICE__: process.env[`ALEPH_AI_SERVICE_${suffix}`] ?? "aleph-ai-orchestrator",
+  __ALEPH_AI_SERVICE_ENVIRONMENT__: process.env[`ALEPH_AI_SERVICE_ENVIRONMENT_${suffix}`] ?? (isProd ? "production" : "preview"),
+  __ALEPH_TOOLS_SERVICE__:
+    process.env[`ALEPH_TOOLS_SERVICE_${suffix}`] ?? (isProd ? "aleph-tools-gateway-prod" : "aleph-tools-gateway-preview"),
   __D1_DATABASE_ID__:
     process.env[`CLOUDFLARE_D1_DATABASE_ID_${suffix}`] ?? defaultD1DatabaseIds[environment] ?? "__D1_DATABASE_ID__",
   __R2_BUCKET__: process.env[`CLOUDFLARE_R2_BUCKET_${suffix}`] ?? `shared-ledger-files-${environment}`,
-  __QUEUE__: process.env[`CLOUDFLARE_QUEUE_${suffix}`] ?? `shared-ledger-imports-${environment}`,
 };
 if (target.startsWith("api") && values.__D1_DATABASE_ID__ === "__D1_DATABASE_ID__") {
   throw new Error(`CLOUDFLARE_D1_DATABASE_ID_${suffix} is required to deploy the API.`);

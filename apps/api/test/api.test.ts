@@ -40,7 +40,7 @@ function recordingAlephClient(options?: {
       const output =
         typeof options?.invokeOutput === "function"
           ? options.invokeOutput(request)
-          : (options?.invokeOutput ?? { toolName: "chat", args: {}, userMessage: "ok", confidence: 1, requiresConfirmation: false });
+          : (options?.invokeOutput ?? defaultAiInvokeOutput(request));
       return {
         requestId: "test-invoke",
         status: "ok",
@@ -80,6 +80,17 @@ function recordingAlephClient(options?: {
   return { client, requests };
 }
 
+function defaultAiInvokeOutput(request: InvokeRequest) {
+  const name = responseFormatName(request);
+  if (name === "ledger_skill_selection") return { skillName: "general.chat", confidence: 1 };
+  if (name === "ledger_skill_step") return { skillName: "general.chat", toolName: "chat", args: {}, userMessage: "ok", confidence: 1, requiresConfirmation: false };
+  return { records: [] };
+}
+
+function responseFormatName(request: InvokeRequest) {
+  return (request.input.response_format as { json_schema?: { name?: string } } | undefined)?.json_schema?.name;
+}
+
 async function createAiSession(app: ReturnType<typeof createApp>, bookId = "book_home") {
   const response = await app.request(
     "/ai/sessions",
@@ -98,6 +109,15 @@ async function sendAiMessage(app: ReturnType<typeof createApp>, sessionId: strin
   );
   expect(response.status).toBe(200);
   return response.json<any>();
+}
+
+async function searchWithAgent(app: ReturnType<typeof createApp>, query: string, env: Record<string, unknown> = { APP_ENV: "test" }) {
+  const session = await createAiSession(app);
+  return app.request(
+    `/ai/sessions/${session.id}/messages`,
+    { method: "POST", body: JSON.stringify({ bookId: "book_home", message: query, page: "records" }), headers: aiHeaders },
+    env,
+  );
 }
 
 async function readSse(response: Response) {
@@ -279,26 +299,19 @@ describe("Hono REST API", () => {
       memberId: "member_demo",
       note: "早餐",
       occurredAt: "2026-06-21T08:00:00.000Z",
-      tagIds: [],
       items: [],
     });
-    const search = await app.request(
-      "/ai/search/transactions",
-      {
-        method: "POST",
-        body: JSON.stringify({ bookId: "book_home", query: "金额小于30的数据", baseFilters: { sort: "latest" } }),
-        headers: aiHeaders,
-      },
-      { APP_ENV: "test" },
-    );
+    const search = await searchWithAgent(app, "金额小于30的数据");
     const searchBody = await search.json<any>();
     expect(search.status).toBe(200);
-    expect(searchBody.filters).toMatchObject({ maxAmount: 30, maxStrict: true, sort: "date_desc" });
-    expect(searchBody.results.map((item: any) => item.id)).toEqual(["tx_small_expense"]);
+    const filterPart = searchBody.parts.find((part: any) => part.type === "filter-result");
+    const resultPart = searchBody.parts.find((part: any) => part.type === "search-result-card");
+    expect(filterPart.filters).toMatchObject({ maxAmount: 30, maxStrict: true, sort: "date_desc" });
+    expect(resultPart.results.map((item: any) => item.id)).toEqual(["tx_small_expense"]);
 
     const analysis = await sendAiMessage(app, session.id, "在你看来有什么不合理的支出吗？");
     expect(analysis.parts.some((part: any) => part.type === "analysis-card")).toBe(true);
-    expect(JSON.stringify(analysis.parts)).not.toContain("我可以帮你记账、搜索、分析或邀请成员");
+    expect(JSON.stringify(analysis.parts)).not.toContain("请告诉我你想做什么");
 
     const category = await sendAiMessage(app, session.id, "创建一个支出分类 医疗");
     expect(store.categories.some((item) => item.name === "医疗")).toBe(true);
@@ -351,7 +364,7 @@ describe("Hono REST API", () => {
         expect(chunk.done).toBe(false);
         output += decodeStreamChunk(chunk.value);
       }
-      expect(output).toContain("event: tool_call");
+      expect(output).toContain("event: skill_selected");
       expect(output).toContain("event: message_delta");
       expect(output).toContain("event: done");
     } finally {
@@ -359,7 +372,7 @@ describe("Hono REST API", () => {
     }
   });
 
-  it("routes chat streams through Aleph ledger.chat after object planning", async () => {
+  it("routes chat streams through Aleph ledger.chat after skill selection", async () => {
     const store = new MemoryLedgerStore();
     const app = createApp(store);
     const { client, requests } = recordingAlephClient({ streamText: "来自 Aleph" });
@@ -382,13 +395,13 @@ describe("Hono REST API", () => {
       env,
     );
     const output = await readSse(response);
-    const objectRequest = requests.find((item) => item.task === "ledger.tool_plan");
+    const objectRequest = requests.find((item) => item.task === "ledger.skill_select");
     const streamRequest = requests.find((item) => item.task === "ledger.chat");
 
     expect(response.status).toBe(200);
     expect(output).toContain("event: message_delta");
     expect(output).toContain("来自");
-    expect(objectRequest).toMatchObject({ project: "shared-ledger", env: "test", task: "ledger.tool_plan", mode: "object" });
+    expect(objectRequest).toMatchObject({ project: "shared-ledger", env: "test", task: "ledger.skill_select", mode: "object" });
     expect(streamRequest).toMatchObject({ project: "shared-ledger", env: "test", task: "ledger.chat", mode: "stream" });
     expect(JSON.stringify(requests)).not.toContain("legacy-model");
     expect(JSON.stringify(requests)).not.toContain("openrouter");
@@ -396,7 +409,7 @@ describe("Hono REST API", () => {
     expect(streamRequest.input.model).toBeUndefined();
   });
 
-  it("routes record AI search through Aleph object planning", async () => {
+  it("routes record AI search through skill selection and skill step planning", async () => {
     const store = new MemoryLedgerStore();
     store.transactions.push({
       id: "tx_small_expense",
@@ -408,31 +421,34 @@ describe("Hono REST API", () => {
       memberId: "member_demo",
       note: "早餐",
       occurredAt: "2026-06-21T08:00:00.000Z",
-      tagIds: [],
       items: [],
     });
     const app = createApp(store);
     const { client, requests } = recordingAlephClient({
-      invokeOutput: { toolName: "search-records", args: { maxAmount: 30, maxStrict: true, sort: "date_desc" }, confidence: 1, requiresConfirmation: false },
+      invokeOutput: (request: InvokeRequest) =>
+        responseFormatName(request) === "ledger_skill_selection"
+          ? { skillName: "ledger.search", confidence: 1 }
+          : {
+              skillName: "ledger.search",
+              toolName: "search-records",
+              args: { maxAmount: 30, maxStrict: true, sort: "date_desc" },
+              confidence: 1,
+              requiresConfirmation: false,
+            },
     });
-    const response = await app.request(
-      "/ai/search/transactions",
-      {
-        method: "POST",
-        body: JSON.stringify({ bookId: "book_home", query: "金额小于30的数据", baseFilters: { sort: "latest" } }),
-        headers: aiHeaders,
-      },
-      { APP_ENV: "test", ALEPH_AI_TEST_CLIENT: client },
-    );
-    const request = requests[0];
+    const response = await searchWithAgent(app, "金额小于30的数据", { APP_ENV: "test", ALEPH_AI_TEST_CLIENT: client });
+    const selectRequest = requests.find((item) => item.task === "ledger.skill_select");
+    const stepRequest = requests.find((item) => item.task === "ledger.skill_step");
     const body = await response.json<any>();
+    const filterPart = body.parts.find((part: any) => part.type === "filter-result");
 
     expect(response.status).toBe(200);
-    expect(body.filters).toMatchObject({ maxAmount: 30, maxStrict: true, sort: "date_desc" });
-    expect(request).toMatchObject({ project: "shared-ledger", task: "ledger.tool_plan", mode: "object" });
-    expect(request.input.response_format.json_schema.name).toBe("ledger_tool_plan");
-    expect(request.input.model).toBeUndefined();
-    expect(request.input.metadata).toBeUndefined();
+    expect(filterPart.filters).toMatchObject({ maxAmount: 30, maxStrict: true, sort: "date_desc" });
+    expect(selectRequest).toMatchObject({ project: "shared-ledger", task: "ledger.skill_select", mode: "object" });
+    expect(stepRequest).toMatchObject({ project: "shared-ledger", task: "ledger.skill_step", mode: "object" });
+    expect(responseFormatName(stepRequest)).toBe("ledger_skill_step");
+    expect(stepRequest.input.model).toBeUndefined();
+    expect(stepRequest.input.metadata).toBeUndefined();
   });
 
   it("returns Aleph usage from the current user usage endpoint", async () => {
@@ -460,22 +476,22 @@ describe("Hono REST API", () => {
     const quotaError = new AlephAIError("quota_exceeded", "额度已用完", { requestId: "aleph_quota_1" });
     const { client } = recordingAlephClient({ invokeError: quotaError });
     const env = { APP_ENV: "test", ALEPH_AI_TEST_CLIENT: client };
-    const search = await app.request(
-      "/ai/search/transactions",
-      { method: "POST", body: JSON.stringify({ bookId: "book_home", query: "查一下" }), headers: aiHeaders },
+    const session = await createAiSession(app);
+    const json = await app.request(
+      `/ai/sessions/${session.id}/messages`,
+      { method: "POST", body: JSON.stringify({ bookId: "book_home", message: "查一下" }), headers: aiHeaders },
       env,
     );
-    const session = await createAiSession(app);
     const stream = await app.request(
       `/ai/sessions/${session.id}/messages/stream`,
       { method: "POST", body: JSON.stringify({ bookId: "book_home", message: "讲个笑话" }), headers: aiHeaders },
       env,
     );
-    const searchBody = await search.json<any>();
+    const jsonBody = await json.json<any>();
     const output = await readSse(stream);
 
-    expect(search.status).toBe(429);
-    expect(searchBody).toMatchObject({ error: "额度已用完", code: "quota_exceeded", requestId: "aleph_quota_1" });
+    expect(json.status).toBe(429);
+    expect(jsonBody).toMatchObject({ error: "额度已用完", code: "quota_exceeded", requestId: "aleph_quota_1" });
     expect(output).toContain("event: error");
     expect(output).toContain("quota_exceeded");
     expect(output).toContain("aleph_quota_1");
@@ -497,8 +513,8 @@ describe("Hono REST API", () => {
     const request = requests[0];
 
     expect(records[0]).toMatchObject({ type: "expense", amount: 12, warnings: ["OCR 置信度较低"] });
-    expect(request).toMatchObject({ project: "shared-ledger", task: "ledger.tool_plan", mode: "object", user: { id: "user_demo", plan: "pro" } });
-    expect(request.input.response_format.json_schema.name).toBe("ledger_import_records");
+    expect(request).toMatchObject({ project: "shared-ledger", task: "ledger.skill_step", mode: "object", user: { id: "user_demo", plan: "pro" } });
+    expect(responseFormatName(request)).toBe("ledger_import_records");
     expect(request.input.model).toBeUndefined();
   });
 });

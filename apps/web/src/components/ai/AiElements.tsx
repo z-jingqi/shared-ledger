@@ -112,6 +112,7 @@ export function AiPromptInput({
   attachmentError,
   busy,
   canAttach,
+  showAttachmentButton = true,
   accept,
   input,
   textareaRef,
@@ -127,6 +128,7 @@ export function AiPromptInput({
   attachmentError?: string;
   busy: boolean;
   canAttach: boolean;
+  showAttachmentButton?: boolean;
   accept: string;
   input: string;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -141,29 +143,33 @@ export function AiPromptInput({
   const hasContent = input.trim().length > 0 || attachments.length > 0;
   const expanded = attachments.length > 0 || input.includes("\n");
   return (
-    <form className={`ai-composer ${hasContent ? "has-content" : ""} ${expanded ? "expanded" : ""}`} onSubmit={onSubmit}>
+    <form className={`ai-composer ${hasContent ? "has-content" : ""} ${expanded ? "expanded" : ""} ${showAttachmentButton ? "" : "no-attach"}`} onSubmit={onSubmit}>
       <ImportAttachmentCards attachments={attachments} onRemove={onClearAttachment} />
       {attachmentError && <p className="ai-composer-notice">{attachmentError}</p>}
-      <input
-        ref={fileInputRef}
-        className="sr-only"
-        type="file"
-        multiple
-        aria-label="上传附件"
-        accept={accept}
-        onChange={(event) => onAddAttachments(event.currentTarget.files)}
-      />
-      <Button
-        aria-label="添加附件"
-        className="ai-composer-attach"
-        type="button"
-        variant="ghost"
-        size="icon"
-        onClick={() => fileInputRef.current?.click()}
-        disabled={busy || !canAttach}
-      >
-        <PlusIcon />
-      </Button>
+      {showAttachmentButton ? (
+        <>
+          <input
+            ref={fileInputRef}
+            className="sr-only"
+            type="file"
+            multiple
+            aria-label="上传图片"
+            accept={accept}
+            onChange={(event) => onAddAttachments(event.currentTarget.files)}
+          />
+          <Button
+            aria-label="添加附件"
+            className="ai-composer-attach"
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={busy || !canAttach}
+          >
+            <PlusIcon />
+          </Button>
+        </>
+      ) : null}
       <Textarea
         ref={textareaRef}
         className="ai-composer-textarea"

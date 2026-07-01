@@ -4,8 +4,9 @@ import type { ImportAttachmentView } from "../imports/ImportAttachmentCards";
 import { AiPendingConfirmationBar, AiPromptInput } from "./AiElements";
 import { AiMessageList, type AiMessageIndexItem } from "./AiMessageList";
 import { maximumAttachmentFiles, supportedImportAccept } from "../../features/imports/upload";
-import { isSupportedAttachment, supportedFileDescription } from "../../features/imports/files";
+import { isSupportedAttachment, unsupportedFileMessage } from "../../features/imports/files";
 import { normalizeAiPart, type AiRenderableMessage, type AiStructuredPart } from "../../features/ai/types";
+import { useAuth } from "../../features/auth/AuthProvider";
 import { api, apiFetchWithRefresh } from "../../lib";
 import { invalidateLedgerData } from "../../features/data/invalidations";
 
@@ -197,6 +198,7 @@ function useAiChatController({
   onSessionActivity,
 }: Omit<AiChatProps, "compact">) {
   const [state, dispatch] = useReducer(aiChatReducer, sessionId, initialAiChatState);
+  const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
@@ -221,6 +223,7 @@ function useAiChatController({
     thinkingAssistantId,
   } = state;
   const busy = isStreaming || loadingSession;
+  const canUseImageRecognition = user?.plan === "pro";
 
   const userMessageIndex = useMemo<AiMessageIndexItem[]>(
     () => {
@@ -340,13 +343,14 @@ function useAiChatController({
   };
 
   const addAttachments = (files: FileList | null) => {
+    if (!canUseImageRecognition) return;
     if (!files?.length) return;
     const incoming = Array.from(files);
     const unsupported = incoming.find((file) => !isSupportedAttachment(file));
     if (unsupported) {
-      const message = `${unsupported.name} 不是支持的 ${supportedFileDescription} 格式。`;
+      const message = unsupportedFileMessage;
       dispatch({ type: "attachment-error", error: message });
-      toast.error("附件格式暂不支持", { description: message, duration: 3000, closeButton: true });
+      toast.error(message, { description: unsupported.name, duration: 3000, closeButton: true });
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
@@ -455,6 +459,7 @@ function useAiChatController({
     attachments,
     busy,
     cancelPendingAiAction,
+    canUseImageRecognition,
     clearAttachments,
     confirmPendingAiAction,
     fileInputRef,
@@ -517,6 +522,7 @@ export function AiChat({ compact = false, ...controllerProps }: AiChatProps) {
         attachmentError={controller.attachmentError}
         busy={controller.busy}
         canAttach={controller.attachments.length < maximumAttachmentFiles}
+        showAttachmentButton={controller.canUseImageRecognition}
         accept={supportedImportAccept}
         input={controller.input}
         textareaRef={controller.textareaRef}

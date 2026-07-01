@@ -44,7 +44,6 @@ export function AppRoutes() {
         <Route path="/invitations/received" element={<Protected element={<ReceivedInvitationsPage />} />} />
         <Route path="/invitations/sent" element={<Protected element={<SentInvitationsPage />} />} />
         <Route path="/settings" element={<Protected element={<SettingsPage />} />} />
-        <Route path="/settings/tags" element={<Navigate to="/settings" replace />} />
         <Route path="/settings/privacy" element={<Navigate to="/settings" replace />} />
         <Route path="/settings/notifications" element={<Navigate to="/settings" replace />} />
         <Route path="/settings/:tab" element={<Protected element={<ManagementSettingsPage />} />} />

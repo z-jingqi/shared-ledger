@@ -26,9 +26,18 @@ export function registerTransactionRoutes(app: Hono<{ Bindings: Env }>, store?: 
     if (denied) return denied;
     const body = await parseJson(context, createTransactionSchema);
     if (!body) return jsonError(context, "记录数据不合法，检查金额与明细总额");
-    const transaction = context.env.DB
-      ? await new D1LedgerRepository(context.env.DB).createTransaction(bookId, user.id, body as any)
-      : store?.createTransaction(bookId, user.id, body as any);
+    if (!context.env.DB && store && !memoryCategoriesBelongToUser(store, user.id, body as any)) {
+      return jsonError(context, "分类不存在或不属于当前用户", 400);
+    }
+    let transaction;
+    try {
+      transaction = context.env.DB
+        ? await new D1LedgerRepository(context.env.DB).createTransaction(bookId, user.id, body as any)
+        : store?.createTransaction(bookId, user.id, body as any);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("分类不存在")) return jsonError(context, error.message, 400);
+      throw error;
+    }
     return transaction ? context.json({ transaction }, 201) : jsonError(context, "D1 运行时不可用", 503);
   });
 
@@ -55,9 +64,18 @@ export function registerTransactionRoutes(app: Hono<{ Bindings: Env }>, store?: 
     const body = await context.req.json<Record<string, unknown>>();
     const candidate = createTransactionSchema.safeParse({ ...transaction, ...body });
     if (!candidate.success) return jsonError(context, "记录数据不合法，检查金额与明细总额");
-    const updated = repository
-      ? await repository.updateTransaction(transaction.id, candidate.data as any, user.id)
-      : Object.assign(transaction, candidate.data);
+    if (!repository && store && !memoryCategoriesBelongToUser(store, user.id, candidate.data as any)) {
+      return jsonError(context, "分类不存在或不属于当前用户", 400);
+    }
+    let updated;
+    try {
+      updated = repository
+        ? await repository.updateTransaction(transaction.id, candidate.data as any, user.id)
+        : Object.assign(transaction, candidate.data);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("分类不存在")) return jsonError(context, error.message, 400);
+      throw error;
+    }
     return context.json({ transaction: updated });
   });
 
@@ -75,4 +93,10 @@ export function registerTransactionRoutes(app: Hono<{ Bindings: Env }>, store?: 
     else if (store) store.transactions = store.transactions.filter((item) => item.id !== transaction.id);
     return context.body(null, 204);
   });
+}
+
+function memoryCategoriesBelongToUser(store: MemoryLedgerStore, userId: string, input: { categoryId?: string; items?: Array<{ categoryId?: string }> }) {
+  const categoryIds = new Set([input.categoryId, ...(input.items ?? []).map((item) => item.categoryId)].filter((value): value is string => Boolean(value)));
+  if (!categoryIds.size) return true;
+  return [...categoryIds].every((categoryId) => store.categories.some((category) => category.id === categoryId && category.userId === userId));
 }

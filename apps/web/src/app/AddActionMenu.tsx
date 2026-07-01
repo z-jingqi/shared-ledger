@@ -3,13 +3,14 @@ import { IconTile } from "../components/ios/IosDesign";
 
 type AddActionMenuProps = {
   open: boolean;
+  showUpload: boolean;
   uploading: boolean;
   onManualAdd: () => void;
   onOpenChange: (open: boolean) => void;
   onUploadFile: () => void;
 };
 
-export function AddActionMenu({ open, uploading, onManualAdd, onOpenChange, onUploadFile }: AddActionMenuProps) {
+export function AddActionMenu({ open, showUpload, uploading, onManualAdd, onOpenChange, onUploadFile }: AddActionMenuProps) {
   return (
     <>
       {open ? (
@@ -31,15 +32,17 @@ export function AddActionMenu({ open, uploading, onManualAdd, onOpenChange, onUp
               <small>进入记一笔表单</small>
             </span>
           </button>
-          <button type="button" role="menuitem" disabled={uploading} onClick={onUploadFile}>
-            <IconTile tint="#eaf1ff" color="#4c8dff">
-              <FileArrowUpIcon size={20} weight="bold" />
-            </IconTile>
-            <span>
-              <b>{uploading ? "上传中…" : "上传文件"}</b>
-              <small>图片、PDF、Excel、CSV</small>
-            </span>
-          </button>
+          {showUpload ? (
+            <button type="button" role="menuitem" disabled={uploading} onClick={onUploadFile}>
+              <IconTile tint="#eaf1ff" color="#4c8dff">
+                <FileArrowUpIcon size={20} weight="bold" />
+              </IconTile>
+              <span>
+                <b>{uploading ? "上传中…" : "上传图片"}</b>
+                <small>图片识别 · Pro 可用</small>
+              </span>
+            </button>
+          ) : null}
         </div>
       ) : null}
       <button

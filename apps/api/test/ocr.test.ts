@@ -1,17 +1,21 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { verifyAlephWebhookSignature } from "../src/routes/imports";
+import { assertImageImportFile, assertImageOcrQuota, maximumImageImportFileBytes } from "../src/services/import-validation";
 import { AlephToolsClient, AlephToolsError, ocrConfidence } from "../src/services/ocr";
+import type { D1LedgerRepository } from "../src/repository";
+import type { WorkerServiceBinding } from "../src/types";
 
 describe("Aleph Tools client", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  it("calls Aleph Tools through service binding and sends only supported OCR multipart fields", async () => {
+    const requests: Request[] = [];
+    const service: WorkerServiceBinding = {
+      fetch: vi.fn(async (request: Request) => {
+        requests.push(request);
+        return Response.json({ success: true, data: { jobId: "ocr_1", status: "queued" } });
+      }),
+    };
 
-  it("sends bearer auth and unwraps successful responses", async () => {
-    const fetchMock = vi.fn<typeof globalThis.fetch>(async () =>
-      Response.json({ success: true, data: { jobId: "ocr_1", status: "queued" } }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    const job = await new AlephToolsClient("https://tools.example.com/", "secret").createOcrJob(
+    const job = await new AlephToolsClient(service, "secret").createOcrJob(
       {
         bytes: new TextEncoder().encode("image").buffer,
         filename: "receipt.png",
@@ -19,102 +23,51 @@ describe("Aleph Tools client", () => {
       },
       {
         callbackUrl: "https://api.example.com/imports/aleph-webhook",
-        metadata: { importJobId: "import_1" },
-        idempotencyKey: "import_1",
+        metadata: { importJobId: "import_1", phase: "ocr" },
+        idempotencyKey: "ocr:import_1:0",
       },
     );
 
     expect(job).toEqual({ jobId: "ocr_1", status: "queued" });
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://tools.example.com/v1/tools/ocr",
-      expect.objectContaining({
-        method: "POST",
-        headers: expect.objectContaining({ authorization: "Bearer secret", "Idempotency-Key": "import_1" }),
-      }),
-    );
-    const body = (fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.body as FormData;
-    expect(body.get("ocrMode")).toBe("small");
+    expect(requests[0]?.url).toBe("https://aleph-tools.internal/v1/tools/ocr");
+    expect(requests[0]?.method).toBe("POST");
+    expect(requests[0]?.headers.get("Authorization")).toBe("Bearer secret");
+    expect(requests[0]?.headers.get("Idempotency-Key")).toBe("ocr:import_1:0");
+    const body = await requests[0]!.formData();
+    expect([...body.keys()].sort()).toEqual(["callbackUrl", "file", "metadata"]);
+    expect(body.get("file")).toBeInstanceOf(File);
     expect(body.get("callbackUrl")).toBe("https://api.example.com/imports/aleph-webhook");
-    expect(JSON.parse(String(body.get("metadata")))).toEqual({ importJobId: "import_1" });
+    expect(JSON.parse(String(body.get("metadata")))).toEqual({ importJobId: "import_1", phase: "ocr" });
   });
 
-  it("requests Aleph Tools job cancellation", async () => {
-    const fetchMock = vi.fn<typeof globalThis.fetch>(async () =>
-      Response.json({ success: true, data: { jobId: "ocr_1", status: "cancel_requested" } }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
+  it("requests Aleph Tools job cancellation through service binding", async () => {
+    const requests: Request[] = [];
+    const service: WorkerServiceBinding = {
+      fetch: vi.fn(async (request: Request) => {
+        requests.push(request);
+        return Response.json({ success: true, data: { jobId: "ocr_1", status: "cancel_requested" } });
+      }),
+    };
 
-    const job = await new AlephToolsClient("https://tools.example.com/", "secret").cancelJob("ocr_1");
+    const job = await new AlephToolsClient(service, "secret").cancelJob("ocr_1");
 
     expect(job).toEqual({ jobId: "ocr_1", status: "cancel_requested" });
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://tools.example.com/v1/jobs/ocr_1/cancel",
-      expect.objectContaining({
-        method: "POST",
-        headers: expect.objectContaining({ authorization: "Bearer secret" }),
-      }),
-    );
-  });
-
-  it("creates async image pipeline jobs with fixed preprocessing and OCR options", async () => {
-    const fetchMock = vi.fn<typeof globalThis.fetch>(async () =>
-      Response.json({ success: true, data: { jobId: "pipeline_1", status: "queued", operation: "image.pipeline" } }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    const job = await new AlephToolsClient("https://tools.example.com/", "secret").createImagePipelineJob(
-      {
-        bytes: new TextEncoder().encode("heic").buffer,
-        filename: "receipt.heic",
-        mimeType: "image/heic",
-      },
-      {
-        callbackUrl: "https://api.example.com/imports/aleph-webhook",
-        metadata: { importJobId: "import_1", phase: "pipeline" },
-        idempotencyKey: "pipeline:import_1:0",
-      },
-    );
-
-    expect(job).toEqual({ jobId: "pipeline_1", status: "queued", operation: "image.pipeline" });
-    const body = (fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.body as FormData;
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://tools.example.com/v1/tools/image/pipeline",
-      expect.objectContaining({
-        method: "POST",
-        headers: expect.objectContaining({
-          authorization: "Bearer secret",
-          "Idempotency-Key": "pipeline:import_1:0",
-        }),
-      }),
-    );
-    const pipeline = JSON.parse(String(body.get("pipeline")));
-    expect(pipeline).toEqual({
-      convert: { targetFormat: "webp", width: 1600, fit: "inside" },
-      compress: {
-        outputFormat: "jpeg",
-        targetSizeBytes: 900000,
-        maxWidth: 1600,
-        maxHeight: 1600,
-        minQuality: 45,
-        maxQuality: 85,
-      },
-      ocr: { ocrMode: "small" },
-    });
-    expect(JSON.parse(String(body.get("metadata")))).toEqual({ importJobId: "import_1", phase: "pipeline" });
+    expect(requests[0]?.url).toBe("https://aleph-tools.internal/v1/jobs/ocr_1/cancel");
+    expect(requests[0]?.method).toBe("POST");
+    expect(requests[0]?.headers.get("Authorization")).toBe("Bearer secret");
   });
 
   it("surfaces Aleph Tools API errors", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ success: false, error: "Unauthorized" }, { status: 401 })));
+    const service: WorkerServiceBinding = {
+      fetch: vi.fn(async () => Response.json({ success: false, error: "Unauthorized" }, { status: 401 })),
+    };
 
-    await expect(new AlephToolsClient("https://tools.example.com", "bad").getJob("ocr_1")).rejects.toThrow(
-      "Unauthorized",
-    );
+    await expect(new AlephToolsClient(service, "bad").getJob("ocr_1")).rejects.toThrow("Unauthorized");
   });
 
   it("preserves structured Aleph Tools error fields", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
+    const service: WorkerServiceBinding = {
+      fetch: vi.fn(async () =>
         Response.json(
           {
             success: false,
@@ -132,9 +85,9 @@ describe("Aleph Tools client", () => {
           { status: 429 },
         ),
       ),
-    );
+    };
 
-    await expect(new AlephToolsClient("https://tools.example.com", "bad").getJob("ocr_1")).rejects.toMatchObject({
+    await expect(new AlephToolsClient(service, "bad").getJob("ocr_1")).rejects.toMatchObject({
       name: "AlephToolsError",
       code: "RATE_LIMITED",
       requestId: "req_1",
@@ -155,7 +108,31 @@ describe("Aleph Tools client", () => {
       }),
     ).toBeCloseTo(0.8);
     expect(ocrConfidence({ plainText: "text", markdown: "text", pages: [{ text: "a" }] })).toBe(1);
-    expect(ocrConfidence({ ocr: { plainText: "text", markdown: "text", pages: [{ text: "a", confidence: 0.6 }] } })).toBe(0.6);
+  });
+
+  it("rejects oversized image imports before creating OCR jobs", () => {
+    const file = new File([new Uint8Array(maximumImageImportFileBytes + 1)], "huge.jpg", { type: "image/jpeg" });
+
+    expect(() => assertImageImportFile(file)).toThrow("文件大小必须在 1 B 到 10 MB 之间");
+  });
+
+  it("preflights batch OCR quota with the requested file count", async () => {
+    const repository = {
+      async getUserPlan() {
+        return "pro" as const;
+      },
+      async countDailyImageOcrUsage() {
+        return 9;
+      },
+      async countActiveImageOcrJobs() {
+        return 0;
+      },
+    } as unknown as D1LedgerRepository;
+
+    await expect(assertImageOcrQuota(repository, "user_1", 2)).rejects.toMatchObject({
+      status: 429,
+      message: "今日图片识别额度已用完",
+    });
   });
 
   it("verifies Aleph Tools webhook HMAC signatures", async () => {

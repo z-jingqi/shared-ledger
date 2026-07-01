@@ -5,7 +5,7 @@
 ## 技术栈
 
 - Web：React、TypeScript、Vite、Tailwind CSS v4、React Router、React Hook Form、Zod、Recharts。
-- API：Hono on Cloudflare Workers、D1、R2、Queues、Drizzle；AI 通过 Aleph AI Platform，图片/PDF OCR 通过 Aleph Tools。
+- API：Hono on Cloudflare Workers、D1、R2、Drizzle；AI 通过 Aleph AI Platform service binding，图片 OCR 通过 Aleph Tools service binding。
 - 工程：pnpm monorepo、Vitest、Testing Library、Playwright、MSW。
 
 ## 目录
@@ -16,7 +16,7 @@ apps/api       Hono Worker API 与队列消费者
 packages/shared 权限、类型、Zod schema
 packages/db     Drizzle schema 与 D1 migrations
 packages/ai     Aleph AI Platform adapter
-packages/import 文件解析、OCR 与导入编排
+packages/import 图片 OCR 文本结构化与导入 schema
 packages/ui     复用 UI 原子组件
 ```
 
@@ -45,11 +45,12 @@ pnpm db:setup:local
 
 `db:seed:local` 会可重复地创建本地测试账号 `SoundOnly / 123456`、默认账本 `SoundOnly` 和 creator 成员关系。执行 destructive migration 后旧数据会被清空，如果浏览器还带着旧 `bookId`，前端会自动落到有效账本或空账本状态。
 
-`pnpm --filter @shared-ledger/api dev` 使用本地 D1、R2、Queue 模拟，认证、账本与 CSV/Excel 导入均可本地验证。AI 调用必须经过 shared-ledger API 再到 Aleph AI Platform；图片和 PDF 的 OCR 需要可访问的 Aleph Tools 服务。Aleph Tools 本地默认指向 `http://127.0.0.1:8787`，API key 写入 `apps/api/.dev.vars`：
+`pnpm --filter @shared-ledger/api dev` 使用本地 D1、R2 模拟。AI 调用必须经过 shared-ledger API，再通过 `AI_ORCHESTRATOR` service binding 调用 Aleph AI Platform；图片 OCR 通过 `ALEPH_TOOLS` service binding 调用 Aleph Tools。Aleph AI Platform 与 Aleph Tools 的 `/v1/*` 均要求 secret/API key，写入 `apps/api/.dev.vars`：
 
 ```bash
-ALEPH_AI_SERVICE_TOKEN=...
+ALEPH_AI_SERVICE_TOKEN=<local-ai-service-token>
 ALEPH_TOOLS_API_KEY=dev-key
+ALEPH_TOOLS_WEBHOOK_SECRET=aleph-tools-local-webhook-secret
 pnpm --filter @shared-ledger/api dev
 ```
 
@@ -66,12 +67,11 @@ pnpm build
 
 ## Cloudflare 资源
 
-每个环境各自拥有 D1、R2 和 Queue：`shared-ledger-{preview|prod}`。preview 资源已由 wrangler 创建，prod 需要先创建资源并把 D1 id 写入环境变量，再生成配置：
+每个环境各自拥有 D1 和 R2：`shared-ledger-{preview|prod}`。preview 资源已由 wrangler 创建，prod 需要先创建资源并把 D1 id 写入环境变量，再生成配置：
 
 ```bash
 wrangler d1 create shared-ledger-prod
 wrangler r2 bucket create shared-ledger-files-prod
-wrangler queues create shared-ledger-imports-prod
 $env:CLOUDFLARE_D1_DATABASE_ID_PROD = "<D1 id>"
 node scripts/prepare-wrangler-config.mjs api prod
 pnpm --filter @shared-ledger/api exec wrangler d1 migrations apply shared-ledger-prod --remote --config wrangler.generated-api-prod.json
@@ -83,20 +83,29 @@ pnpm --filter @shared-ledger/api exec wrangler d1 migrations apply shared-ledger
 
 密码账号注册时只要求昵称和至少 10 位密码，邮箱、手机号均可选。账号在开通 Pro 前必须补充至少一个可恢复身份的信息（邮箱或手机号）。会话和 refresh token 都保存在 D1，并只在浏览器中以 `HttpOnly` session cookie 传递。
 
-## 文件导入、OCR 与 AI
+## 图片导入、OCR 与 AI
 
-原文件先进入 R2，再通过 Queue 处理；CSV 和 Excel 在 Worker 中解析。图片或 PDF 通过公共 Aleph Tools v6 工具接口处理：图片先按需调用 `image.convert`，随后统一调用 `image.compress`，最后将压缩后的图片提交给 `ocr`；PDF 直接提交给 `ocr`。OCR ready 后再交给 AI 结构化。AI 输出会经过 Zod 校验，只生成待确认记录，确认后才创建 Transaction。测试用 mock 仅位于测试目录，运行时代码不会回退到 mock 或本地 OCR。
+shared-ledger 现在只支持图片导入：jpg/jpeg/png/gif/webp/tif/tiff/bmp/raw/dng/heic/heif。非图片不会进入上传导入流程。原图先进入 shared-ledger R2，然后 API Worker 通过 `ALEPH_TOOLS` service binding 调用 Aleph Tools 最新 `POST /v1/tools/ocr`；multipart 只发送 `file`、`callbackUrl`、`metadata`。OCR ready 后读取 `/v1/jobs/:id/result` 的 `plainText`/`markdown`，再交给 AI 结构化。AI 输出会经过 Zod 校验，只生成待确认记录，确认后才创建 Transaction。
+
+图片识别有套餐限制：
+
+- free：不显示图片识别入口；直接调用上传接口会被拒绝。
+- pro：每天最多 10 张成功生成导入数据的图片。
+- 上传后取消、OCR 失败、AI 结构化失败或没有生成记录时，不计入 shared-ledger 图片识别额度。
 
 生产环境需要为 API Worker 配置：
 
-- 普通变量：`ALEPH_TOOLS_BASE_URL`，默认模板为 preview `https://ocr.dev.aleph-cat.com`、prod `https://ocr.aleph-cat.com`
+- Service binding：`AI_ORCHESTRATOR`，preview 指向 `aleph-ai-orchestrator preview`，prod 指向 `aleph-ai-orchestrator production`
+- Service binding：`ALEPH_TOOLS`，preview 指向 `aleph-tools-gateway-preview`，prod 指向 `aleph-tools-gateway-prod`
+- 普通变量：`ALEPH_AI_ENV`
+- Secret：`ALEPH_AI_SERVICE_TOKEN`
 - Secret：`ALEPH_TOOLS_API_KEY`
 - Secret：`ALEPH_TOOLS_WEBHOOK_SECRET`
 
-缺少 `ALEPH_TOOLS_API_KEY` 时，图片/PDF 导入会明确失败；CSV/Excel 不受影响。
+缺少 `AI_ORCHESTRATOR` / `ALEPH_AI_SERVICE_TOKEN` 或 `ALEPH_TOOLS` service binding 时，对应 AI/OCR 功能会明确失败。缺少 `ALEPH_TOOLS_API_KEY` 时，图片导入会明确失败。
 
-免费用户没有 AI 对话入口；Pro 用户可使用全局抽屉与完整对话页。shared-ledger 后端负责业务上下文、prompt、tool schema、用户身份和权限，AI 出入口、provider/model 路由、quota 与 usage 由 Aleph AI Platform 负责。部署时需要 Worker secret `ALEPH_AI_SERVICE_TOKEN`。
+所有已登录用户都可以进入 AI 助手；shared-ledger 后端负责业务上下文、skill/tool schema、用户身份和权限，AI 出入口、provider/model 路由、quota 与 usage 由 Aleph AI Platform 负责，并通过 service binding 调用。
 
 ## CI/CD
 
-`.github/workflows/deploy.yml` 通过 paths filter 判断 web、api、migration、shared 与基础设施的变更；仅部署受影响的层。Actions 不创建或部署 D1/R2/Queue，只在 `packages/db/migrations` 变化时执行 migration，且 migration 会先于 API 部署完成。`main` 部署 prod，`develop` 部署 preview。需要 GitHub secrets：`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`、`ALEPH_AI_SERVICE_TOKEN`、`ALEPH_TOOLS_API_KEY`、`ALEPH_TOOLS_WEBHOOK_SECRET`。prod D1 id 使用 GitHub variable `CLOUDFLARE_D1_DATABASE_ID_PROD`。
+`.github/workflows/deploy.yml` 通过 paths filter 判断 web、api、migration、shared 与基础设施的变更；仅部署受影响的层。Actions 不创建或部署 D1/R2，只在 `packages/db/migrations` 变化时执行 migration，且 migration 会先于 API 部署完成。`main` 部署 prod，`develop` 部署 preview。需要 GitHub secrets：`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`、`ALEPH_AI_SERVICE_TOKEN`、`ALEPH_TOOLS_API_KEY`、`ALEPH_TOOLS_WEBHOOK_SECRET`。prod D1 id 使用 GitHub variable `CLOUDFLARE_D1_DATABASE_ID_PROD`。

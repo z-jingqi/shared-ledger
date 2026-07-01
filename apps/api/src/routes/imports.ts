@@ -1,5 +1,4 @@
-import { supportedFileTypes } from "@shared-ledger/import";
-import { aiImportRecordSchema, supportedFileExtensions } from "@shared-ledger/shared";
+import { aiImportRecordSchema } from "@shared-ledger/shared";
 import type { Context, Hono } from "hono";
 import { jsonError } from "../lib/http";
 import { D1LedgerRepository, importJobRetentionDays, type ImportJobStatusFilter } from "../repository";
@@ -9,55 +8,39 @@ import {
   cancelImportJob,
   failAlephOcrJob,
   finalizeAlephOcrJob,
-  isImageImportFileType,
-  isOcrImportFileType,
   markFailed,
   retryImportJob,
   submitAlephOcrJob,
-  submitAlephPipelineJob,
   updateAlephSnapshot,
 } from "../services/imports";
-import type { ImportQueueMessage } from "../services/imports";
+import {
+  assertImageImportFile,
+  assertImageOcrQuota,
+  imageImportFileType,
+  imageOcrLimitForPlan,
+  ImportUploadError,
+  maximumImageImportBatchFiles,
+  shanghaiDateRange,
+  shanghaiUsageDate,
+} from "../services/import-validation";
 import type { AlephErrorPayload, AlephOcrJob } from "../services/ocr";
+import { runtimeOcrClient } from "../services/ocr";
 import type { ImportJob, MemoryLedgerStore } from "../store";
 import type { Env } from "../types";
 
-const maximumFileBytes = 20 * 1024 * 1024;
-const maximumBatchFiles = 5;
 const terminalImportStatuses = new Set(["completed", "pending_confirmation", "failed", "cancelled"]);
-const isSupportedFile = (type: string): type is (typeof supportedFileTypes)[number] =>
-  (supportedFileTypes as readonly string[]).includes(type);
-const hasSupportedExtension = (name: string) =>
-  supportedFileExtensions.some((extension) => name.toLowerCase().endsWith(extension));
-const fileType = (file: File) => {
-  if (isSupportedFile(file.type)) return file.type;
-  const name = file.name.toLowerCase();
-  if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
-  if (name.endsWith(".png")) return "image/png";
-  if (name.endsWith(".webp")) return "image/webp";
-  if (name.endsWith(".heic")) return "image/heic";
-  if (name.endsWith(".heif")) return "image/heif";
-  if (name.endsWith(".tif") || name.endsWith(".tiff")) return "image/tiff";
-  if (name.endsWith(".bmp")) return "image/bmp";
-  if (name.endsWith(".pdf")) return "application/pdf";
-  if (name.endsWith(".csv")) return "text/csv";
-  if (name.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-  if (name.endsWith(".xls")) return "application/vnd.ms-excel";
-  return file.type;
-};
 type ImportRouteContext = Context<{ Bindings: Env }>;
 
 export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryLedgerStore) {
   const createJob = async (
     context: ImportRouteContext,
-    input: { bookId: string; userId: string; file: File; repository: D1LedgerRepository; autoConfirm?: boolean },
+    input: { bookId: string; userId: string; file: File; repository: D1LedgerRepository; autoConfirm?: boolean; skipQuotaCheck?: boolean },
   ) => {
     const files = context.env.FILES;
-    const queue = context.env.IMPORT_QUEUE;
     if (!files) throw new Error("导入功能需要 R2 绑定");
-    const resolvedFileType = fileType(input.file);
-    const needsOcr = isOcrImportFileType(resolvedFileType);
-    if (!needsOcr && !queue) throw new Error("CSV/Excel 导入功能需要 Queue 绑定");
+    assertImageImportFile(input.file);
+    const resolvedFileType = imageImportFileType(input.file);
+    if (!input.skipQuotaCheck) await assertImageOcrQuota(input.repository, input.userId);
     const suffix = input.file.name.replaceAll(/[^a-zA-Z0-9._-]/g, "_");
     const job = await input.repository.createImportJob({
       bookId: input.bookId,
@@ -73,43 +56,34 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
         httpMetadata: { contentType: resolvedFileType },
         customMetadata: { importJobId: job.id, bookId: input.bookId, uploadedBy: input.userId },
       });
-      if (needsOcr) {
-        if (isImageImportFileType(resolvedFileType)) {
-          return await submitAlephPipelineJob(
-            context.env,
-            input.repository,
-            job,
-            bytes,
-            new URL(context.req.url).origin,
-          );
-        }
-        return await submitAlephOcrJob(
-          context.env,
-          input.repository,
-          job,
-          bytes,
-          new URL(context.req.url).origin,
-        );
-      }
-      await queue?.send({ jobId: job.id } satisfies ImportQueueMessage);
-      return (await input.repository.getImportJob(job.id)) ?? job;
+      return await submitAlephOcrJob(context.env, input.repository, job, bytes, new URL(context.req.url).origin);
     } catch (error) {
-      if (needsOcr) {
-        await markFailed(input.repository, job.id, error, isImageImportFileType(resolvedFileType) ? "pipeline" : "ocr");
-      } else {
-        await files.delete(job.r2Key);
-        await input.repository.updateImportJob(job.id, "failed", error instanceof Error ? error.message : "上传失败");
-      }
+      await markFailed(input.repository, job.id, error, "ocr");
       throw error;
     }
   };
 
-  const validateFile = (file: FormDataEntryValue): file is File =>
-    file instanceof File &&
-    Boolean(file.name) &&
-    (isSupportedFile(file.type) || hasSupportedExtension(file.name)) &&
-    file.size > 0 &&
-    file.size <= maximumFileBytes;
+  app.get("/me/import-usage", async (context) => {
+    const user = await requireUser(context, store);
+    if (user instanceof Response) return user;
+    if (!context.env.DB) return jsonError(context, "D1 运行时不可用", 503);
+    const repository = new D1LedgerRepository(context.env.DB);
+    const date = shanghaiUsageDate();
+    const [used, active] = await Promise.all([
+      repository.countDailyImageOcrUsage(user.id, date),
+      repository.countActiveImageOcrJobs(user.id, shanghaiDateRange(date)),
+    ]);
+    const limit = imageOcrLimitForPlan(user.plan);
+    return context.json({
+      date,
+      imageOcr: {
+        used,
+        active,
+        limit,
+        remaining: Math.max(0, limit - used - active),
+      },
+    });
+  });
 
   app.post("/books/:bookId/imports", async (context) => {
     const bookId = context.req.param("bookId");
@@ -121,16 +95,14 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     const form = await context.req.formData();
     const file = form.get("file");
     const autoConfirm = form.get("autoConfirm") === "true";
-    if (!(file instanceof File) || !file.name || (!isSupportedFile(file.type) && !hasSupportedExtension(file.name)))
-      return jsonError(context, "请选择 CSV、Excel、PDF 或支持的图片文件");
-    if (file.size <= 0 || file.size > maximumFileBytes)
-      return jsonError(context, "文件大小必须在 1 B 到 20 MB 之间");
     const repository = new D1LedgerRepository(context.env.DB);
     try {
+      assertImageImportFile(file);
       const job = await createJob(context, { bookId, userId: user.id, file, repository, autoConfirm });
       return context.json({ job }, 202);
-    } catch {
-      return jsonError(context, "文件上传或任务提交失败", 502);
+    } catch (error) {
+      if (error instanceof ImportUploadError) return jsonError(context, error.message, error.status);
+      return jsonError(context, error instanceof Error ? error.message : "文件上传或任务提交失败", 502);
     }
   });
 
@@ -147,19 +119,20 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     const entries = [...form.getAll("files"), ...form.getAll("file")];
     const files = entries.filter((entry): entry is File => entry instanceof File && Boolean(entry.name));
     if (!files.length) return jsonError(context, "请选择要导入的文件");
-    if (files.length > maximumBatchFiles) return jsonError(context, `一次最多上传 ${maximumBatchFiles} 个文件`);
-    const invalid = files.find((file) => !validateFile(file));
-    if (invalid) return jsonError(context, "文件必须是 CSV、Excel、PDF 或支持的图片，且大小在 1 B 到 20 MB 之间");
+    if (files.length > maximumImageImportBatchFiles) return jsonError(context, `一次最多上传 ${maximumImageImportBatchFiles} 个文件`);
 
     const repository = new D1LedgerRepository(context.env.DB);
     try {
+      for (const file of files) assertImageImportFile(file);
+      await assertImageOcrQuota(repository, user.id, files.length);
       const jobs = [];
       for (const file of files) {
-        jobs.push(await createJob(context, { bookId, userId: user.id, file, repository, autoConfirm }));
+        jobs.push(await createJob(context, { bookId, userId: user.id, file, repository, autoConfirm, skipQuotaCheck: true }));
       }
       return context.json({ jobs }, 202);
-    } catch {
-      return jsonError(context, "文件上传或任务提交失败", 502);
+    } catch (error) {
+      if (error instanceof ImportUploadError) return jsonError(context, error.message, error.status);
+      return jsonError(context, error instanceof Error ? error.message : "文件上传或任务提交失败", 502);
     }
   });
 
@@ -423,7 +396,7 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     if (denied) return { response: denied };
     const suggested = aiImportRecordSchema.parse(record.suggestedTransaction);
     const [category, member] = await Promise.all([
-      repository.findCategoryByName(job.bookId, suggested.categoryName),
+      repository.findCategoryByName(job.userId, suggested.categoryName, suggested.type),
       repository.findMember(job.bookId, job.userId),
     ]);
     const transaction = await repository.createTransaction(job.bookId, job.userId, {
@@ -433,7 +406,6 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
       memberId: member?.id,
       note: suggested.note,
       occurredAt: suggested.occurredAt,
-      tagIds: [],
       items: [],
     } as any);
     const updated = await repository.updateImportedRecord(record.id, record.suggestedTransaction, "confirmed", user.id);
@@ -494,7 +466,7 @@ type AlephWebhookPayload = {
   resultUrl?: string;
   outputUrl?: string;
   error?: string | AlephErrorPayload;
-  metadata?: { importJobId?: string; phase?: "pipeline" | "ocr" };
+  metadata?: { importJobId?: string; phase?: "ocr" };
   createdAt?: string;
 };
 
@@ -504,10 +476,9 @@ type AlephSseMessage = {
   data?: string;
 };
 
-function resolveAlephPhase(job: ImportJob, payload: AlephWebhookPayload): "pipeline" | "ocr" | undefined {
-  if (payload.metadata?.phase === "pipeline" && job.ocrJobId === payload.jobId) return "pipeline";
+function resolveAlephPhase(job: ImportJob, payload: AlephWebhookPayload): "ocr" | undefined {
   if (payload.metadata?.phase === "ocr" && job.ocrJobId === payload.jobId) return "ocr";
-  if (job.ocrJobId === payload.jobId) return job.alephTool === "image.pipeline" ? "pipeline" : "ocr";
+  if (job.ocrJobId === payload.jobId) return "ocr";
   return undefined;
 }
 
@@ -532,23 +503,12 @@ async function proxyAlephEvents(
   job: ImportJob,
   onJob: (job: ImportJob) => Promise<void> | void,
 ) {
-  const phase: "pipeline" | "ocr" = job.alephTool === "image.pipeline" ? "pipeline" : "ocr";
+  const phase = "ocr" as const;
   const externalJobId = job.ocrJobId;
   if (!externalJobId) return;
-  if (!env.ALEPH_TOOLS_BASE_URL) throw new Error("ALEPH_TOOLS_BASE_URL 未配置，无法订阅 OCR 进度");
-  if (!env.ALEPH_TOOLS_API_KEY) throw new Error("ALEPH_TOOLS_API_KEY 未配置，无法订阅 OCR 进度");
 
-  const url = `${env.ALEPH_TOOLS_BASE_URL.replace(/\/+$/, "")}/v1/jobs/${encodeURIComponent(externalJobId)}/events`;
-  const headers: Record<string, string> = {
-    accept: "text/event-stream",
-    authorization: `Bearer ${env.ALEPH_TOOLS_API_KEY}`,
-  };
-  const lastEventId = job.ocrEventSequence;
-  if (lastEventId && lastEventId > 0) headers["Last-Event-ID"] = String(lastEventId);
-  const response = await fetch(url, { headers });
-  if (!response.ok || !response.body) throw new Error(`Aleph Tools 进度订阅失败 (${response.status})`);
-
-  for await (const message of parseSseStream(response.body)) {
+  const stream = await runtimeOcrClient(env).streamJobEvents(externalJobId, job.ocrEventSequence);
+  for await (const message of parseSseStream(stream)) {
     if (message.event === "ping" || !message.data) continue;
     const payload = safeJson(message.data) as (Partial<AlephOcrJob> & { job?: Partial<AlephOcrJob> }) | null;
     if (!payload) continue;

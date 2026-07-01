@@ -12,12 +12,9 @@
   "dependencies": {
     "@shared-ledger/ai": "workspace:*",
     "@shared-ledger/shared": "workspace:*",
-    "papaparse": "^5.5.2",
-    "xlsx": "^0.18.5",
     "zod": "^3.24.3"
   },
   "devDependencies": {
-    "@types/papaparse": "^5.3.16",
     "eslint": "^9.25.1",
     "typescript": "^5.8.3",
     "vitest": "^3.1.2"

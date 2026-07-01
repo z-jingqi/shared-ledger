@@ -96,12 +96,14 @@ jobs:
         working-directory: apps/api
         env:
           CLOUDFLARE_D1_DATABASE_ID_PROD: ${{ vars.CLOUDFLARE_D1_DATABASE_ID_PROD }}
-          ALEPH_AI_BASE_URL_PREVIEW: ${{ vars.ALEPH_AI_BASE_URL_PREVIEW || 'https://ai-platform-preview.aleph-cat.com' }}
-          ALEPH_AI_BASE_URL_PROD: ${{ vars.ALEPH_AI_BASE_URL_PROD || 'https://ai.aleph-cat.com' }}
-          ALEPH_AI_ENV_PREVIEW: ${{ vars.ALEPH_AI_ENV_PREVIEW || 'prod' }}
+          ALEPH_AI_SERVICE_PREVIEW: ${{ vars.ALEPH_AI_SERVICE_PREVIEW || 'aleph-ai-orchestrator' }}
+          ALEPH_AI_SERVICE_PROD: ${{ vars.ALEPH_AI_SERVICE_PROD || 'aleph-ai-orchestrator' }}
+          ALEPH_AI_SERVICE_ENVIRONMENT_PREVIEW: ${{ vars.ALEPH_AI_SERVICE_ENVIRONMENT_PREVIEW || 'preview' }}
+          ALEPH_AI_SERVICE_ENVIRONMENT_PROD: ${{ vars.ALEPH_AI_SERVICE_ENVIRONMENT_PROD || 'production' }}
+          ALEPH_AI_ENV_PREVIEW: ${{ vars.ALEPH_AI_ENV_PREVIEW || 'preview' }}
           ALEPH_AI_ENV_PROD: ${{ vars.ALEPH_AI_ENV_PROD || 'prod' }}
-          ALEPH_TOOLS_BASE_URL_PREVIEW: ${{ vars.ALEPH_TOOLS_BASE_URL_PREVIEW || 'https://ocr.dev.aleph-cat.com' }}
-          ALEPH_TOOLS_BASE_URL_PROD: ${{ vars.ALEPH_TOOLS_BASE_URL_PROD || 'https://ocr.aleph-cat.com' }}
+          ALEPH_TOOLS_SERVICE_PREVIEW: ${{ vars.ALEPH_TOOLS_SERVICE_PREVIEW || 'aleph-tools-gateway-preview' }}
+          ALEPH_TOOLS_SERVICE_PROD: ${{ vars.ALEPH_TOOLS_SERVICE_PROD || 'aleph-tools-gateway-prod' }}
       - run: |
           if [ -n "$ALEPH_AI_SERVICE_TOKEN" ]; then
             printf "%s" "$ALEPH_AI_SERVICE_TOKEN" | ../../apps/api/node_modules/.bin/wrangler secret put ALEPH_AI_SERVICE_TOKEN --config wrangler.generated-api-${{ github.ref_name == 'main' && 'prod' || 'preview' }}.json

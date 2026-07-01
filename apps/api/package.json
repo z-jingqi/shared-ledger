@@ -16,6 +16,7 @@
     "@hono/zod-validator": "^0.4.3",
     "@shared-ledger/ai": "workspace:*",
     "@shared-ledger/import": "workspace:*",
+    "@shared-ledger/ledger-skills": "workspace:*",
     "@shared-ledger/shared": "workspace:*",
     "hono": "^4.7.7",
     "zod": "^3.24.3"

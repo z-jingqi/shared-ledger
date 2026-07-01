@@ -9,11 +9,13 @@
     "APP_ENV": "local",
     "WEB_ORIGIN": "http://localhost:5175",
     "API_PUBLIC_ORIGIN": "http://127.0.0.1:8789",
-    "ALEPH_AI_BASE_URL": "https://ai-platform-preview.aleph-cat.com",
-    "ALEPH_AI_ENV": "prod",
-    "ALEPH_TOOLS_BASE_URL": "http://127.0.0.1:8787",
+    "ALEPH_AI_ENV": "preview",
     "ALEPH_TOOLS_WEBHOOK_SECRET": "aleph-tools-local-webhook-secret",
   },
+  "services": [
+    { "binding": "AI_ORCHESTRATOR", "service": "aleph-ai-orchestrator", "environment": "preview" },
+    { "binding": "ALEPH_TOOLS", "service": "aleph-tools-gateway-preview" },
+  ],
   "d1_databases": [
     {
       "binding": "DB",
@@ -23,8 +25,4 @@
     },
   ],
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "shared-ledger-local-files" }],
-  "queues": {
-    "producers": [{ "binding": "IMPORT_QUEUE", "queue": "shared-ledger-local-imports" }],
-    "consumers": [{ "queue": "shared-ledger-local-imports", "max_batch_size": 5, "max_batch_timeout": 10 }],
-  },
 }

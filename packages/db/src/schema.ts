@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 const systemActorId = "0";
@@ -64,20 +65,13 @@ export const accounts = sqliteTable("accounts", {
 });
 export const categories = sqliteTable("categories", {
   id: text("id").primaryKey(),
-  bookId: text("book_id").notNull(),
+  userId: text("user_id").notNull(),
   name: text("name").notNull(),
   type: text("type").notNull(),
   icon: text("icon").notNull(),
   sortOrder: integer("sort_order").notNull().default(0),
   ...fullAudit,
-});
-export const tags = sqliteTable("tags", {
-  id: text("id").primaryKey(),
-  bookId: text("book_id").notNull(),
-  name: text("name").notNull(),
-  color: text("color").notNull(),
-  ...fullAudit,
-});
+}, (t) => [uniqueIndex("categories_user_type_name_active").on(t.userId, t.type, t.name).where(sql`${t.deletedAt} IS NULL`)]);
 export const transactions = sqliteTable(
   "transactions",
   {
@@ -103,15 +97,6 @@ export const transactionItems = sqliteTable("transaction_items", {
   note: text("note"),
   ...fullAudit,
 });
-export const transactionTags = sqliteTable(
-  "transaction_tags",
-  {
-    transactionId: text("transaction_id").notNull(),
-    tagId: text("tag_id").notNull(),
-    ...fullAudit,
-  },
-  (t) => [uniqueIndex("transaction_tags_unique").on(t.transactionId, t.tagId)],
-);
 export const attachments = sqliteTable("attachments", {
   id: text("id").primaryKey(),
   bookId: text("book_id").notNull(),
@@ -151,8 +136,6 @@ export const importJobs = sqliteTable("import_jobs", {
   ocrTotalPages: integer("ocr_total_pages"),
   ocrCompletedAt: text("ocr_completed_at"),
   ocrEventSequence: integer("ocr_event_sequence").notNull().default(0),
-  processedR2Key: text("processed_r2_key"),
-  processedFileType: text("processed_file_type"),
   ...fullAudit,
 });
 export const importedRecords = sqliteTable("imported_records", {
@@ -165,6 +148,21 @@ export const importedRecords = sqliteTable("imported_records", {
   warnings: text("warnings").notNull(),
   ...fullAudit,
 });
+export const imageOcrUsage = sqliteTable(
+  "image_ocr_usage",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    importJobId: text("import_job_id").notNull(),
+    usageDate: text("usage_date").notNull(),
+    countedAt: text("counted_at").notNull(),
+    ...fullAudit,
+  },
+  (t) => [
+    uniqueIndex("image_ocr_usage_import_job").on(t.importJobId),
+    index("image_ocr_usage_user_date").on(t.userId, t.usageDate),
+  ],
+);
 export const subscriptions = sqliteTable("subscriptions", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull(),
@@ -198,6 +196,39 @@ export const aiMessages = sqliteTable(
   },
   (t) => [index("ai_messages_session_created").on(t.sessionId, t.createdAt)],
 );
+export const aiRuns = sqliteTable(
+  "ai_runs",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id").notNull(),
+    userId: text("user_id").notNull(),
+    bookId: text("book_id"),
+    status: text("status").notNull(),
+    input: text("input").notNull(),
+    selectedSkill: text("selected_skill"),
+    finalMessageId: text("final_message_id"),
+    errorMessage: text("error_message"),
+    ...fullAudit,
+  },
+  (t) => [index("ai_runs_session_created").on(t.sessionId, t.createdAt), index("ai_runs_user_status").on(t.userId, t.status)],
+);
+export const aiSteps = sqliteTable(
+  "ai_steps",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id").notNull(),
+    stepIndex: integer("step_index").notNull(),
+    kind: text("kind").notNull(),
+    skillName: text("skill_name"),
+    toolName: text("tool_name"),
+    status: text("status").notNull(),
+    input: text("input"),
+    output: text("output"),
+    errorMessage: text("error_message"),
+    ...fullAudit,
+  },
+  (t) => [index("ai_steps_run_index").on(t.runId, t.stepIndex)],
+);
 export const aiConfirmations = sqliteTable(
   "ai_confirmations",
   {
@@ -223,6 +254,7 @@ export const aiToolCalls = sqliteTable(
     sessionId: text("session_id").notNull(),
     userId: text("user_id").notNull(),
     bookId: text("book_id"),
+    skillName: text("skill_name").notNull().default("general.chat"),
     toolName: text("tool_name").notNull(),
     status: text("status").notNull(),
     args: text("args").notNull(),

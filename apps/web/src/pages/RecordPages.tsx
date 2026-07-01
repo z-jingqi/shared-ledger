@@ -40,7 +40,7 @@ import {
   isSupportedAttachment,
   maxAttachmentFiles,
   supportedFileAccept,
-  supportedFileDescription,
+  unsupportedFileMessage,
 } from "../features/imports/files";
 import { terminalImportStatuses, watchImportJobs, type ImportJobStatus } from "../features/imports/status";
 import { uploadImportFiles } from "../features/imports/upload";
@@ -302,7 +302,7 @@ function useRecordsPageController() {
   const { book, books, setActiveBook } = useActiveBook();
   const { openSheet } = useAppSheetActions();
   const { data, error: transactionsError, loading: transactionsLoading } = useApi<{ transactions: LedgerTransaction[] }>(book ? `/books/${book.id}/transactions` : undefined);
-  const { data: categories } = useApi<{ categories: CategoryOption[] }>(book ? `/books/${book.id}/categories` : undefined);
+  const { data: categories } = useApi<{ categories: CategoryOption[] }>("/me/categories");
   const { data: imports, reload: reloadImports } = useApi<{ imports: ImportJobStatus[] }>(book ? `/books/${book.id}/imports` : undefined);
 
   const categoryNames = useMemo(
@@ -541,7 +541,7 @@ export function RecordsPage() {
                     {activeImports.length}
                   </IconTile>
                   <span>
-                    <b>{activeImports.length} 个文件正在识别</b>
+                    <b>{activeImports.length} 张图片正在识别</b>
                     <small>{formatActiveImportSummary(activeImports)}</small>
                   </span>
                   <CaretRightIcon size={18} />
@@ -552,7 +552,7 @@ export function RecordsPage() {
                   <IconTile>{pendingCount}</IconTile>
                   <span>
                     <b>{pendingCount} 条待确认记录</b>
-                    <small>来自文件识别与 AI — 需你审核入账</small>
+                    <small>来自图片识别与 AI — 需你审核入账</small>
                   </span>
                   <CaretRightIcon size={18} />
                 </button>
@@ -724,7 +724,7 @@ export function TransactionFormSheet({
   const id = recordId;
   const { book } = useActiveBook();
   const { data: existing } = useApi<{ transaction: LedgerTransaction }>(id ? `/transactions/${id}` : undefined);
-  const { data: categoriesData } = useApi<{ categories: CategoryOption[] }>(book ? `/books/${book.id}/categories` : undefined);
+  const { data: categoriesData } = useApi<{ categories: CategoryOption[] }>("/me/categories");
   const draftKey = getRecordDraftKey(id, book?.id);
   const initialDraft = readRecordDraft(draftKey);
   const sourceDraft = initialDraft ?? (existing?.transaction ? transactionToRecordDraft(existing.transaction) : undefined);
@@ -767,7 +767,9 @@ function TransactionFormEditor({
   onClose: () => void;
 }) {
   const [state, dispatchForm] = useReducer(transactionFormReducer, initialState);
+  const { user } = useAuth();
   const { amount, attachments, categoryId, error, items, lineRows, note, occurredAt, saving, type, view } = state;
+  const canUseImageRecognition = user?.plan === "pro";
   const fileInput = useRef<HTMLInputElement>(null);
   const stopWatchingRef = useRef<(() => void) | undefined>(undefined);
   const amountNumber = Number(amount || 0);
@@ -787,12 +789,13 @@ function TransactionFormEditor({
     dispatchForm({ type: "append-digit", value });
   };
   const addFiles = (fileList: FileList | null) => {
+    if (!canUseImageRecognition) return;
     const files = Array.from(fileList ?? []);
     if (!files.length) return;
     const unsupported = files.find((file) => !isSupportedAttachment(file));
     if (unsupported) {
-      toast.error("附件格式暂不支持", {
-        description: `${unsupported.name} 不是支持的 ${supportedFileDescription} 格式。`,
+      toast.error(unsupportedFileMessage, {
+        description: unsupported.name,
         duration: 3000,
         closeButton: true,
       });
@@ -869,7 +872,6 @@ function TransactionFormEditor({
       categoryId: categoryId || undefined,
       note: note.trim() || undefined,
       occurredAt,
-      tagIds: [],
       items: normalizeLineItemPayload(items),
     };
     if (closeImmediately) close();
@@ -981,12 +983,16 @@ function TransactionFormEditor({
             <CalendarBlankIcon size={17} />
             <input aria-label="日期" type="date" value={occurredAt} onChange={(event) => dispatchForm({ type: "set-date", value: event.currentTarget.value })} />
           </label>
-          <button type="button" onClick={() => fileInput.current?.click()}>
-            <PaperclipIcon size={17} />
-            {attachments.length ? `附件 ${attachments.length}` : "附件"}
-          </button>
+          {canUseImageRecognition ? (
+            <button type="button" onClick={() => fileInput.current?.click()}>
+              <PaperclipIcon size={17} />
+              {attachments.length ? `图片 ${attachments.length}` : "图片识别"}
+            </button>
+          ) : null}
         </div>
-        <input ref={fileInput} className="sr-only" type="file" multiple aria-label="上传附件" accept={supportedFileAccept} onChange={(event) => addFiles(event.currentTarget.files)} />
+        {canUseImageRecognition ? (
+          <input ref={fileInput} className="sr-only" type="file" multiple aria-label="上传图片" accept={supportedFileAccept} onChange={(event) => addFiles(event.currentTarget.files)} />
+        ) : null}
 
         {attachments.length > 0 && (
           <div className="ios-form-attachments">
@@ -1520,13 +1526,11 @@ function formatActiveImportSummary(imports: ImportJobStatus[]) {
   const first = imports[0];
   if (!first) return "";
   if (first.status === "ai_processing") return imports.length > 1 ? `${imports.length} 个文件，AI 分析中` : "AI 分析中";
-  if (first.stage === "converting") return imports.length > 1 ? `${imports.length} 个文件，正在转换图片` : "正在转换图片";
-  if (first.stage === "compressing") return imports.length > 1 ? `${imports.length} 个文件，正在压缩图片` : "正在压缩图片";
   if (typeof first.currentPage === "number" && typeof first.totalPages === "number") {
     return imports.length > 1 ? `${imports.length} 个文件，第 ${first.currentPage}/${first.totalPages} 页` : `第 ${first.currentPage}/${first.totalPages} 页`;
   }
   if (typeof first.progress === "number" && first.progress > 0) return imports.length > 1 ? `${imports.length} 个文件，OCR ${first.progress}%` : `OCR ${first.progress}%`;
-  return `${imports.length} 个文件正在识别`;
+  return `${imports.length} 张图片正在识别`;
 }
 
 function normalizeAmountInput(current: string, input: string) {

@@ -1,22 +1,21 @@
 {
-  "name": "@shared-ledger/ai",
+  "name": "@shared-ledger/ledger-skills",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "exports": "./src/index.ts",
   "scripts": {
+    "test": "vitest run",
     "lint": "eslint src --max-warnings=0",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@aleph-ai-platform/ai-client": "link:../../../aleph-ai-platform/packages/ai-client",
-    "@aleph-ai-platform/shared": "link:../../../aleph-ai-platform/packages/shared",
-    "@shared-ledger/ledger-skills": "workspace:*",
     "@shared-ledger/shared": "workspace:*",
     "zod": "^3.24.3"
   },
   "devDependencies": {
     "eslint": "^9.25.1",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.2"
   }
 }

@@ -120,7 +120,7 @@ export function BookHomePage() {
                     {processing.length}
                   </IconTile>
                   <span>
-                    <b>{processing.length} 个文件正在识别</b>
+                    <b>{processing.length} 张图片正在识别</b>
                     <small>{formatHomeImportProgress(processing)} — 点击查看进度</small>
                   </span>
                   <CaretRightIcon size={18} />
@@ -131,7 +131,7 @@ export function BookHomePage() {
                   <IconTile>{pending.length}</IconTile>
                   <span>
                     <b>{pending.length} 条待确认记录</b>
-                    <small>来自文件识别与 AI — 需你审核入账</small>
+                    <small>来自图片识别与 AI — 需你审核入账</small>
                   </span>
                   <CaretRightIcon size={18} />
                 </button>
@@ -214,13 +214,11 @@ function formatHomeImportProgress(jobs: ImportJob[]) {
   const first = jobs[0];
   if (!first) return "";
   if (first.status === "ai_processing") return jobs.length > 1 ? `${jobs.length} 个文件，AI 分析中` : "AI 分析中";
-  if (first.stage === "converting") return jobs.length > 1 ? `${jobs.length} 个文件，正在转换图片` : "正在转换图片";
-  if (first.stage === "compressing") return jobs.length > 1 ? `${jobs.length} 个文件，正在压缩图片` : "正在压缩图片";
   if (typeof first.currentPage === "number" && typeof first.totalPages === "number") {
     return jobs.length > 1 ? `${jobs.length} 个文件，第 ${first.currentPage}/${first.totalPages} 页` : `第 ${first.currentPage}/${first.totalPages} 页`;
   }
   if (typeof first.progress === "number" && first.progress > 0) {
     return jobs.length > 1 ? `${jobs.length} 个文件，OCR ${first.progress}%` : `OCR ${first.progress}%`;
   }
-  return `${jobs.length} 个文件正在识别`;
+  return `${jobs.length} 张图片正在识别`;
 }

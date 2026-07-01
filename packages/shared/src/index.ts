@@ -9,7 +9,6 @@ export type SubscriptionPlan = (typeof subscriptionPlans)[number];
 export const invitationStatuses = ["pending", "accepted", "declined", "expired", "revoked"] as const;
 export const importStatuses = [
   "uploaded",
-  "parsing",
   "ocr_processing",
   "ai_processing",
   "pending_confirmation",
@@ -19,35 +18,42 @@ export const importStatuses = [
 ] as const;
 export const importedRecordStatuses = ["pending", "confirmed", "ignored", "duplicated"] as const;
 export const supportedFileTypes = [
+  "image/jpg",
   "image/jpeg",
   "image/png",
+  "image/gif",
   "image/webp",
   "image/heic",
   "image/heif",
+  "image/heic-sequence",
+  "image/heif-sequence",
   "image/tiff",
+  "image/x-tiff",
   "image/bmp",
-  "application/pdf",
-  "text/csv",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.ms-excel",
+  "image/x-ms-bmp",
+  "image/raw",
+  "image/x-raw",
+  "image/dng",
+  "image/x-dng",
+  "image/x-adobe-dng",
 ] as const;
 export type SupportedFileType = (typeof supportedFileTypes)[number];
 export const supportedFileExtensions = [
   ".jpg",
   ".jpeg",
   ".png",
+  ".gif",
   ".webp",
   ".heic",
   ".heif",
   ".tif",
   ".tiff",
   ".bmp",
-  ".pdf",
-  ".csv",
-  ".xlsx",
-  ".xls",
+  ".raw",
+  ".dng",
 ] as const;
 export const supportedFileAccept = [...supportedFileTypes, ...supportedFileExtensions].join(",");
+export const imageOcrDailyLimits = { free: 0, pro: 10 } as const satisfies Record<SubscriptionPlan, number>;
 
 export const idSchema = z.string().min(1).max(64);
 export const moneySchema = z.coerce.number().positive().finite().multipleOf(0.01);
@@ -83,7 +89,6 @@ export const createTransactionSchema = z
     memberId: idSchema.optional(),
     note: z.string().max(500).optional(),
     occurredAt: z.string().datetime().or(z.string().date()),
-    tagIds: z.array(idSchema).default([]),
     items: z
       .array(
         z.object({
@@ -121,13 +126,6 @@ export const categorySchema = z.object({
   icon: z.string().max(40).default("tag"),
   sortOrder: z.number().int().min(0).default(0),
 });
-export const tagSchema = z.object({
-  name: z.string().trim().min(1).max(30),
-  color: z
-    .string()
-    .regex(/^#[0-9a-fA-F]{6}$/)
-    .default("#ff6b1a"),
-});
 export const aiImportRecordSchema = z.object({
   type: z.enum(transactionTypes),
   amount: moneySchema,
@@ -147,9 +145,6 @@ export const aiActionNames = [
   "create-category",
   "update-category",
   "delete-category",
-  "create-tag",
-  "update-tag",
-  "delete-tag",
   "create-book",
   "update-book",
   "delete-book",
@@ -184,8 +179,6 @@ export const aiTransactionCandidateSchema = z.object({
   memberId: idSchema.optional(),
   memberName: aiEntityNameSchema.optional(),
   note: z.string().trim().max(500).optional(),
-  tagIds: z.array(idSchema).default([]),
-  tagNames: z.array(aiEntityNameSchema).default([]),
   items: z
     .array(
       z.object({
@@ -214,8 +207,6 @@ export const aiTransactionSearchSchema = z.object({
   maxAmount: aiAmountFilterSchema.optional(),
   categoryIds: z.array(idSchema).default([]),
   categoryNames: z.array(aiEntityNameSchema).default([]),
-  tagIds: z.array(idSchema).default([]),
-  tagNames: z.array(aiEntityNameSchema).default([]),
   memberIds: z.array(idSchema).default([]),
   memberNames: z.array(aiEntityNameSchema).default([]),
   limit: z.number().int().min(1).max(100).default(20),
@@ -233,7 +224,6 @@ export const aiNormalizedSearchFiltersSchema = z.object({
   minAmount: aiAmountFilterSchema.optional(),
   maxAmount: aiAmountFilterSchema.optional(),
   categoryIds: z.array(idSchema).default([]),
-  tagIds: z.array(idSchema).default([]),
   memberIds: z.array(idSchema).default([]),
   limit: z.number().int().min(1).max(100).default(20),
   sort: aiSortSchema,
@@ -256,15 +246,6 @@ export type AiIngestionResult = z.infer<typeof aiIngestionResultSchema>;
 
 export type CreateBookInput = z.infer<typeof createBookSchema>;
 export type CreateTransactionInput = z.infer<typeof createTransactionSchema>;
-
-export const aiToolCallPlanSchema = z.object({
-  toolName: z.enum(aiActionNames),
-  args: z.record(z.unknown()).default({}),
-  userMessage: z.string().trim().max(2000).optional(),
-  requiresConfirmation: z.boolean().default(false),
-  confidence: z.number().min(0).max(1).default(0.7),
-});
-export type AiToolCallPlan = z.infer<typeof aiToolCallPlanSchema>;
 
 export const aiConfirmationStatuses = ["pending", "confirmed", "cancelled"] as const;
 export type AiConfirmationStatus = (typeof aiConfirmationStatuses)[number];
@@ -302,6 +283,12 @@ export type AiSearchResultCardPart = {
     amount?: number;
   }>;
   pageName?: string;
+  href?: string;
+};
+export type AiFilterResultPart = {
+  type: "filter-result";
+  filters: Record<string, unknown>;
+  chips?: string[];
   href?: string;
 };
 export type AiAnalysisCardPart = {
@@ -346,6 +333,7 @@ export type AiChatPart =
   | { type: "text"; text: string }
   | AiToolStatusPart
   | AiRecordCardPart
+  | AiFilterResultPart
   | AiSearchResultCardPart
   | AiAnalysisCardPart
   | AiProfileCardPart

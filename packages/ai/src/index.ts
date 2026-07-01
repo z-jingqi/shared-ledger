@@ -1,12 +1,14 @@
 import { createAlephAIClient, type AlephAIClient } from "@aleph-ai-platform/ai-client";
 import { AlephAIError, type ChatMessage, type ErrorCode, type InvokeRequest, type JsonObject, type StreamEvent, type UserUsageResponse } from "@aleph-ai-platform/shared";
 import {
-  aiActionNames,
-  aiImportRecordSchema,
-  aiToolCallPlanSchema,
-  type AiActionName,
-  type AiToolCallPlan,
-} from "@shared-ledger/shared";
+  ledgerSkillNames,
+  ledgerSkillSelectionSchema,
+  ledgerToolStepSchema,
+  type LedgerSkillDefinition,
+  type LedgerSkillSelection,
+  type LedgerToolStep,
+} from "@shared-ledger/ledger-skills";
+import { aiImportRecordSchema } from "@shared-ledger/shared";
 import { z } from "zod";
 
 export { AlephAIError, createAlephAIClient };
@@ -26,13 +28,15 @@ export type LedgerAiRuntime = {
 export interface AiProvider {
   structureImport(input: AiContext): Promise<z.infer<typeof aiImportRecordSchema>[]>;
   streamChat(messages: AiChatMessage[], context: Pick<AiContext, "bookId" | "page">): AiTextStream;
-  planToolCall(input: AiToolPlanInput): Promise<AiToolCallPlan>;
+  selectSkill(input: AiSkillSelectionInput): Promise<LedgerSkillSelection>;
+  planSkillStep(input: AiSkillStepInput): Promise<LedgerToolStep>;
   chat(input: AiContext): Promise<string>;
 }
 
 const projectId = "shared-ledger";
 const chatTask = "ledger.chat";
-const toolPlanTask = "ledger.tool_plan";
+const skillSelectTask = "ledger.skill_select";
+const skillStepTask = "ledger.skill_step";
 
 const importSystemPrompt =
   "You extract bookkeeping entries. Return only JSON matching the supplied schema. Do not invent records unsupported by the supplied text.";
@@ -41,36 +45,43 @@ const chatSystemPrompt = [
   "用户可以聊任何话题；和账本无关的问题也要自然回答，不要强行转回记账。",
   "如果回答涉及当前账本数据，只能基于工具或上下文提供的真实数据，不要编造记录、成员、余额或文件状态。",
 ].join("\n");
-const toolPlanSystemPrompt = [
-  "你是一起记应用的智能助手。你可以正常聊天，也可以使用工具操作应用数据。",
+const skillSelectSystemPrompt = [
+  "你是一起记应用的通用智能助手。你可以正常聊天，也可以操作应用数据。",
   "用户输入可能有错别字、口语、省略、多意图或附件；不要依赖关键词，要理解语义。",
-  "如果用户只是聊天、提问、写作或任何不需要应用数据/操作的内容，选择 toolName=chat，并在 userMessage 中给出自然回复要点。",
-  "如果用户需要真实账本数据，必须选择最合适的查询或分析工具，不要编造数据。",
+  "先选择最合适的 Skill：普通聊天选择 general.chat；真实账本查询/分析/写入/附件处理选择对应 ledger.* Skill。",
+  "不要因为用户话题和账本无关就拒绝；普通聊天应自然回答。",
+  "输出必须符合 schema。",
+].join("\n");
+const skillStepSystemPrompt = [
+  "你是一起记应用的 Skill 执行规划器。",
+  "只能从当前 Skill 提供的 tools 中选择一个 toolName。",
+  "如果需要真实账本数据，必须选择查询/分析工具，不要编造数据。",
   "如果用户要修改应用数据，选择最小必要工具，并把参数放入 args。",
+  "金额筛选中，“大于/超过”使用 minAmount 且 minStrict=true；“至少/不低于”使用 minAmount 且 minStrict=false；“小于/低于”使用 maxAmount 且 maxStrict=true；“不超过/最多”使用 maxAmount 且 maxStrict=false。",
   "附件会在 attachments 中提供元数据；图片可用于头像或视觉问题，文件可用于导入或分析。用户没要求保存/导入时不要选择 save-attachments。",
   "删除、移除成员、删除账本、批量修改、发送邀请、导出等高影响动作必须 requiresConfirmation=true。",
-  "只能从 tools 列表中选择 toolName。输出必须符合 schema。",
+  "如果一次工具结果已经足够回答用户，把 isFinal 设为 true；只有确实需要基于观察结果继续第二步时才设为 false。",
+  "普通聊天选择 chat，并在 userMessage 中给出自然回复要点。",
+  "输出必须符合 schema。",
 ].join("\n");
 
-export type AiToolDefinition = {
-  name: AiActionName;
-  description: string;
-  confirmation?: "never" | "dangerous" | "always";
-  argsSchemaDescription?: string;
-};
-export type AiToolPlanInput = {
+export type AiSkillSelectionInput = {
   text: string;
   userId?: string;
   bookId?: string;
   page: string;
   today: string;
   timeZone: string;
-  tools: AiToolDefinition[];
+  skills: LedgerSkillDefinition[];
   context?: Record<string, unknown>;
   attachments?: Array<Record<string, unknown>>;
 };
-
-const supportedAiActions = new Set<AiActionName>(aiActionNames);
+export type AiSkillStepInput = AiSkillSelectionInput & {
+  selectedSkill: LedgerSkillDefinition;
+  observations?: Array<Record<string, unknown>>;
+  stepIndex: number;
+  maxSteps: number;
+};
 
 export function createAlephAiProvider(runtime: LedgerAiRuntime): AiProvider {
   const project = runtime.project ?? projectId;
@@ -128,31 +139,49 @@ export function createAlephAiProvider(runtime: LedgerAiRuntime): AiProvider {
       }
       return text;
     },
-    async planToolCall(input: AiToolPlanInput): Promise<AiToolCallPlan> {
-      const availableActions = normalizeAvailableActions(input.tools.map((tool) => tool.name));
+    async selectSkill(input: AiSkillSelectionInput): Promise<LedgerSkillSelection> {
       const response = await runtime.client.invoke<unknown>(
         invokeRequest({
-          task: toolPlanTask,
+          task: skillSelectTask,
           mode: "object",
           messages: [
-            { role: "system", content: toolPlanSystemPrompt },
-            { role: "user", content: JSON.stringify(toolPlanPayload(input), null, 2) },
+            { role: "system", content: skillSelectSystemPrompt },
+            { role: "user", content: JSON.stringify(skillSelectionPayload(input), null, 2) },
           ],
-          responseFormat: responseFormat("ledger_tool_plan", toolPlanJsonSchema),
+          responseFormat: responseFormat("ledger_skill_selection", skillSelectionJsonSchema),
           temperature: 0.1,
-          maxTokens: 1600,
+          maxTokens: 900,
         }),
       );
-      const plan = aiToolCallPlanSchema.parse(response.output);
-      if (!availableActions.includes(plan.toolName)) {
-        throw new AlephAIError("validation_failed", `AI tool planner returned unavailable tool: ${plan.toolName}`);
+      return ledgerSkillSelectionSchema.parse(response.output);
+    },
+    async planSkillStep(input: AiSkillStepInput): Promise<LedgerToolStep> {
+      const response = await runtime.client.invoke<unknown>(
+        invokeRequest({
+          task: skillStepTask,
+          mode: "object",
+          messages: [
+            { role: "system", content: skillStepSystemPrompt },
+            { role: "user", content: JSON.stringify(skillStepPayload(input), null, 2) },
+          ],
+          responseFormat: responseFormat("ledger_skill_step", skillStepJsonSchema(input.selectedSkill)),
+          temperature: 0.1,
+          maxTokens: 1800,
+        }),
+      );
+      const step = ledgerToolStepSchema.parse(response.output);
+      if (step.skillName !== input.selectedSkill.name) {
+        throw new AlephAIError("validation_failed", `AI selected mismatched skill: ${step.skillName}`);
       }
-      return plan;
+      if (!input.selectedSkill.tools.some((tool) => tool.name === step.toolName)) {
+        throw new AlephAIError("validation_failed", `AI selected unavailable tool: ${step.toolName}`);
+      }
+      return step;
     },
     async structureImport(input: AiContext): Promise<z.infer<typeof aiImportRecordSchema>[]> {
       const response = await runtime.client.invoke<unknown>(
         invokeRequest({
-          task: toolPlanTask,
+          task: skillStepTask,
           mode: "object",
           messages: [
             { role: "system", content: importSystemPrompt },
@@ -194,7 +223,7 @@ async function* streamDeltas(events: AsyncIterable<StreamEvent>) {
   }
 }
 
-function toolPlanPayload(input: AiToolPlanInput) {
+function skillSelectionPayload(input: AiSkillSelectionInput) {
   return {
     text: input.text,
     userId: input.userId,
@@ -202,19 +231,26 @@ function toolPlanPayload(input: AiToolPlanInput) {
     page: input.page,
     today: input.today,
     timeZone: input.timeZone,
-    tools: input.tools,
+    skills: input.skills.map((skill) => ({
+      name: skill.name,
+      title: skill.title,
+      description: skill.description,
+      useWhen: skill.useWhen,
+      tools: skill.tools.map((tool) => tool.name),
+    })),
     context: input.context ?? {},
     attachments: input.attachments ?? [],
   };
 }
 
-function normalizeAvailableActions(actions: AiActionName[]) {
-  if (!actions.length) throw new AlephAIError("validation_failed", "AI tool planner requires at least one available tool");
-  const invalidActions = actions.filter((action) => !supportedAiActions.has(action));
-  if (invalidActions.length) {
-    throw new AlephAIError("validation_failed", `AI tool planner received unsupported tools: ${invalidActions.join(", ")}`);
-  }
-  return Array.from(new Set(actions));
+function skillStepPayload(input: AiSkillStepInput) {
+  return {
+    ...skillSelectionPayload(input),
+    selectedSkill: input.selectedSkill,
+    observations: input.observations ?? [],
+    stepIndex: input.stepIndex,
+    maxSteps: input.maxSteps,
+  };
 }
 
 function responseFormat(name: string, schema: JsonObject): JsonObject {
@@ -261,18 +297,33 @@ const importRecordsJsonSchema = {
   },
 } as unknown as JsonObject;
 
-const toolPlanJsonSchema = {
+const skillSelectionJsonSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["toolName", "args", "requiresConfirmation", "confidence"],
+  required: ["skillName", "confidence"],
   properties: {
-    toolName: { type: "string", enum: aiActionNames },
-    args: { type: "object" },
-    userMessage: { type: "string", maxLength: 2000 },
-    requiresConfirmation: { type: "boolean" },
+    skillName: { type: "string", enum: ledgerSkillNames },
+    reason: { type: "string", maxLength: 500 },
     confidence: { type: "number", minimum: 0, maximum: 1 },
   },
 } as unknown as JsonObject;
+
+function skillStepJsonSchema(skill: LedgerSkillDefinition) {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["skillName", "toolName", "args", "requiresConfirmation", "confidence"],
+    properties: {
+      skillName: { type: "string", enum: [skill.name] },
+      toolName: { type: "string", enum: skill.tools.map((tool) => tool.name) },
+      args: { type: "object" },
+      userMessage: { type: "string", maxLength: 2000 },
+      requiresConfirmation: { type: "boolean" },
+      confidence: { type: "number", minimum: 0, maximum: 1 },
+      isFinal: { type: "boolean" },
+    },
+  } as unknown as JsonObject;
+}
 
 const importRecordsOutputSchema = z.object({
   records: z.array(aiImportRecordSchema),

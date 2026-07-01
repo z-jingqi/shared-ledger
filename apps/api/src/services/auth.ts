@@ -4,6 +4,25 @@ const encoder = new TextEncoder();
 const sessionTtlMs = 15 * 60 * 1000;
 const refreshTtlMs = 30 * 24 * 60 * 60 * 1000;
 const id = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
+const defaultCategories = [
+  { name: "餐饮", type: "expense", icon: "fork-knife" },
+  { name: "交通", type: "expense", icon: "car" },
+  { name: "购物", type: "expense", icon: "shopping-bag" },
+  { name: "水电燃气", type: "expense", icon: "lightning" },
+  { name: "医疗健康", type: "expense", icon: "first-aid" },
+  { name: "娱乐休闲", type: "expense", icon: "game-controller" },
+  { name: "教育学习", type: "expense", icon: "book-open" },
+  { name: "旅行出差", type: "expense", icon: "airplane" },
+  { name: "宠物", type: "expense", icon: "paw-print" },
+  { name: "其他支出", type: "expense", icon: "dots-three" },
+  { name: "工资", type: "income", icon: "wallet" },
+  { name: "奖金", type: "income", icon: "trophy" },
+  { name: "兼职副业", type: "income", icon: "briefcase" },
+  { name: "投资理财", type: "income", icon: "trend-up" },
+  { name: "报销", type: "income", icon: "receipt" },
+  { name: "红包转账", type: "income", icon: "gift" },
+  { name: "其他收入", type: "income", icon: "plus-circle" },
+] as const;
 
 type UserRow = {
   id: string;
@@ -105,8 +124,9 @@ export async function createPasswordAccount(
 
   const now = new Date().toISOString();
   const userId = `user_${crypto.randomUUID()}`;
+  const bookId = `book_${crypto.randomUUID()}`;
   const passwordHash = await hashPassword(input.password);
-  await db.batch([
+  const statements: D1PreparedStatement[] = [
     db
       .prepare(
         "INSERT INTO users (id,name,email,phone,password_hash,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
@@ -122,7 +142,38 @@ export async function createPasswordAccount(
         "INSERT INTO subscriptions (id,user_id,plan,status,started_at,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
       )
       .bind(`subscription_${crypto.randomUUID()}`, userId, "free", "active", now, userId, userId, now, now),
-  ]);
+    db
+      .prepare(
+        "INSERT INTO books (id,name,currency,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
+      )
+      .bind(bookId, username, "CNY", userId, userId, now, now),
+    db
+      .prepare(
+        "INSERT INTO book_members (id,book_id,user_id,role,joined_at,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+      )
+      .bind(`member_${crypto.randomUUID()}`, bookId, userId, "creator", now, userId, userId, now, now),
+  ];
+  defaultCategories.forEach((category, index) => {
+    statements.push(
+      db
+        .prepare(
+          "INSERT INTO categories (id,user_id,name,type,icon,sort_order,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        )
+        .bind(
+          `category_${crypto.randomUUID()}`,
+          userId,
+          category.name,
+          category.type,
+          category.icon,
+          index + 1,
+          userId,
+          userId,
+          now,
+          now,
+        ),
+    );
+  });
+  await db.batch(statements);
   return { id: userId, name: username, email: "", plan: "free" as const };
 }
 

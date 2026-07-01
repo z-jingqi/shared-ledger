@@ -1,4 +1,10 @@
 import {
+  getLedgerTool,
+  listLedgerSkills,
+  type LedgerSkillName,
+  type LedgerToolStep,
+} from "@shared-ledger/ledger-skills";
+import {
   canDeleteBook,
   canInvite,
   canManageMembers,
@@ -6,15 +12,11 @@ import {
   categorySchema,
   createBookSchema,
   createTransactionSchema,
-  tagSchema,
   updateProfileSchema,
   type AiActionName,
   type AiChatPart,
-  type AiToolCallPlan,
   type Role,
 } from "@shared-ledger/shared";
-import { supportedFileExtensions } from "@shared-ledger/shared";
-import { supportedFileTypes } from "@shared-ledger/import";
 import { z } from "zod";
 import { D1LedgerRepository } from "../repository";
 import type { MemoryLedgerStore, SimpleEntity } from "../store";
@@ -22,18 +24,16 @@ import type { LedgerUser, Transaction } from "../types";
 import type { Env } from "../types";
 import { updateUserAvatar, updateUserProfile } from "./auth";
 import {
-  isOcrImportFileType,
-  isImageImportFileType,
   markFailed,
   submitAlephOcrJob,
-  submitAlephPipelineJob,
-  type ImportQueueMessage,
 } from "./imports";
+import { assertImageImportFile, assertImageOcrQuota, imageImportFileType, maximumImageImportBatchFiles } from "./import-validation";
 
 export type AiToolRepository = D1LedgerRepository | MemoryLedgerStore;
 
-export type AiToolDefinition = {
+type AiToolDefinition = {
   name: AiActionName;
+  skillName: LedgerSkillName;
   description: string;
   confirmation: "never" | "dangerous" | "always";
   argsSchemaDescription: string;
@@ -62,157 +62,22 @@ type ToolExecutionResult = {
 const now = () => new Date().toISOString();
 const id = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 
-export const aiToolDefinitions: AiToolDefinition[] = [
-  {
-    name: "chat",
-    description: "普通聊天、解释、写作、闲聊、与账本无关的问题，或不需要真实应用数据的问题。",
-    confirmation: "never",
-    argsSchemaDescription: "{ message?: string }",
-  },
-  {
-    name: "search-records",
-    description: "查询、列出、筛选流水记录。需要真实账本数据时使用。",
-    confirmation: "never",
-    argsSchemaDescription: "{ type?, minAmount?, maxAmount?, from?, to?, categoryId?, categoryName?, q?, limit? }",
-  },
-  {
-    name: "analyze-records",
-    description: "分析收支、异常、大额、不合理消费、趋势和汇总。",
-    confirmation: "never",
-    argsSchemaDescription: "{ type?, minAmount?, maxAmount?, from?, to?, categoryId?, categoryName?, q?, limit? }",
-  },
-  {
-    name: "create-record",
-    description: "新增一笔或多笔收入/支出记录，用户要求创建测试/mock 数据时也使用这个工具。",
-    confirmation: "never",
-    argsSchemaDescription: "{ type, amount, occurredAt?, categoryId?, categoryName?, note?, tagIds?, tagNames?, items? } 或 { records: [{ type, amount, occurredAt?, categoryId?, categoryName?, note?, tagIds?, tagNames?, items? }] }",
-  },
-  {
-    name: "update-record",
-    description: "修改已有交易记录，可通过 transactionId 或 relative='last' 指向刚才/最近创建的记录。",
-    confirmation: "never",
-    argsSchemaDescription: "{ transactionId?, relative?, amount?, type?, occurredAt?, categoryId?, categoryName?, note?, tagIds?, tagNames?, items? }",
-  },
-  {
-    name: "delete-record",
-    description: "删除已有交易记录，可通过 transactionId、transactionIds、relative='last' 或 q 查询删除；批量删除必须确认。",
-    confirmation: "always",
-    argsSchemaDescription: "{ transactionId?, transactionIds?, relative?, amount?, note?, q? }",
-  },
-  {
-    name: "create-category",
-    description: "新增收入或支出分类。",
-    confirmation: "never",
-    argsSchemaDescription: "{ name, type, icon?, sortOrder? }",
-  },
-  {
-    name: "update-category",
-    description: "修改分类名称、类型、图标或排序。",
-    confirmation: "never",
-    argsSchemaDescription: "{ id?, name?, newName?, type?, icon?, sortOrder? }",
-  },
-  {
-    name: "delete-category",
-    description: "删除分类。关联记录保留，但分类会清空。",
-    confirmation: "always",
-    argsSchemaDescription: "{ id?, name?, type? }",
-  },
-  {
-    name: "create-tag",
-    description: "新增标签。",
-    confirmation: "never",
-    argsSchemaDescription: "{ name, color? }",
-  },
-  {
-    name: "update-tag",
-    description: "修改标签名称或颜色。",
-    confirmation: "never",
-    argsSchemaDescription: "{ id?, name?, newName?, color? }",
-  },
-  {
-    name: "delete-tag",
-    description: "删除标签。记录保留，标签关联会移除。",
-    confirmation: "always",
-    argsSchemaDescription: "{ id?, name? }",
-  },
-  {
-    name: "create-book",
-    description: "创建新账本。",
-    confirmation: "never",
-    argsSchemaDescription: "{ name, currency? }",
-  },
-  {
-    name: "update-book",
-    description: "修改当前账本名称或币种。",
-    confirmation: "never",
-    argsSchemaDescription: "{ id?, name?, currency? }",
-  },
-  {
-    name: "delete-book",
-    description: "删除账本。",
-    confirmation: "always",
-    argsSchemaDescription: "{ id? }",
-  },
-  {
-    name: "update-profile",
-    description: "修改当前用户用户名、邮箱，或把上传的图片设置为头像。",
-    confirmation: "never",
-    argsSchemaDescription: "{ name?, email?, avatarFromAttachment? }",
-  },
-  {
-    name: "update-member",
-    description: "修改账本成员角色。",
-    confirmation: "never",
-    argsSchemaDescription: "{ memberId?, userId?, name?, role }",
-  },
-  {
-    name: "remove-member",
-    description: "移除账本成员或当前用户退出账本。",
-    confirmation: "always",
-    argsSchemaDescription: "{ memberId?, userId?, name?, self? }",
-  },
-  {
-    name: "invite-member",
-    description: "邀请成员加入账本。",
-    confirmation: "always",
-    argsSchemaDescription: "{ target?, email?, phone?, userId?, role? }",
-  },
-  {
-    name: "export-book",
-    description: "导出当前账本数据。",
-    confirmation: "always",
-    argsSchemaDescription: "{ bookId? }",
-  },
-  {
-    name: "save-attachments",
-    description: "用户明确要求保存、导入、OCR、入账或处理附件为账本数据时使用。",
-    confirmation: "never",
-    argsSchemaDescription: "{ autoConfirm? }",
-  },
-  {
-    name: "confirm-import-batch",
-    description: "确认导入批次中的待确认记录。",
-    confirmation: "always",
-    argsSchemaDescription: "{ importJobId?, recordIds? }",
-  },
-  {
-    name: "cancel-task",
-    description: "取消可取消的导入或 AI 任务。",
-    confirmation: "always",
-    argsSchemaDescription: "{ taskId }",
-  },
-  {
-    name: "retry-task",
-    description: "重试失败且可重试的导入或 AI 任务。",
-    confirmation: "never",
-    argsSchemaDescription: "{ taskId }",
-  },
-];
+const runtimeToolDefinitions: AiToolDefinition[] = listLedgerSkills().flatMap((skill) =>
+  skill.tools.map((toolDefinition) => ({
+    name: toolDefinition.name,
+    skillName: skill.name,
+    description: toolDefinition.description,
+    confirmation: toolDefinition.confirmation,
+    argsSchemaDescription: toolDefinition.inputSchemaDescription,
+  })),
+);
 
 const searchArgsSchema = z.object({
   type: z.enum(["income", "expense"]).optional(),
   minAmount: z.coerce.number().positive().optional(),
+  minStrict: z.boolean().default(false),
   maxAmount: z.coerce.number().positive().optional(),
+  maxStrict: z.boolean().default(false),
   from: z.string().trim().min(1).optional(),
   to: z.string().trim().min(1).optional(),
   categoryId: z.string().trim().min(1).optional(),
@@ -229,8 +94,6 @@ const singleRecordArgsSchema = z.object({
   categoryId: z.string().trim().min(1).optional(),
   categoryName: z.string().trim().min(1).optional(),
   note: z.string().trim().max(500).optional(),
-  tagIds: z.array(z.string().trim().min(1)).default([]),
-  tagNames: z.array(z.string().trim().min(1)).default([]),
   items: z
     .array(
       z.object({
@@ -273,16 +136,6 @@ const categoryArgsSchema = z.object({
   sortOrder: z.coerce.number().int().min(0).optional(),
 });
 
-const tagArgsSchema = z.object({
-  id: z.string().trim().min(1).optional(),
-  name: z.string().trim().min(1).max(30).optional(),
-  newName: z.string().trim().min(1).max(30).optional(),
-  color: z
-    .string()
-    .regex(/^#[0-9a-fA-F]{6}$/)
-    .optional(),
-});
-
 const memberArgsSchema = z.object({
   memberId: z.string().trim().min(1).optional(),
   userId: z.string().trim().min(1).optional(),
@@ -291,21 +144,14 @@ const memberArgsSchema = z.object({
   self: z.boolean().optional(),
 });
 
-export function toolDefinitionsForModel() {
-  return aiToolDefinitions.map((tool) => ({
-    name: tool.name,
-    description: tool.description,
-    confirmation: tool.confirmation,
-    argsSchemaDescription: tool.argsSchemaDescription,
-  }));
-}
-
 export async function executeAiTool(
   runtime: AiToolRuntime,
-  plan: AiToolCallPlan,
+  plan: LedgerToolStep,
   options: { confirmed?: boolean; toolCallId?: string } = {},
 ): Promise<ToolExecutionResult> {
-  const definition = aiToolDefinitions.find((tool) => tool.name === plan.toolName);
+  const registryTool = getLedgerTool(plan.toolName, plan.skillName);
+  const definition = runtimeToolDefinitions.find((tool) => tool.name === plan.toolName && tool.skillName === plan.skillName);
+  if (!registryTool) return textResult(`暂不支持 Skill 工具：${plan.skillName}.${plan.toolName}`);
   if (!definition) return textResult(`暂不支持工具：${plan.toolName}`);
   if (definition.name === "chat") return textResult(plan.userMessage || "我在。");
   const bookId = await resolveBookId(runtime.repository, runtime.user.id, runtime.bookId);
@@ -324,6 +170,7 @@ export async function executeAiTool(
             sessionId: runtime.sessionId,
             userId: runtime.user.id,
             bookId,
+            skillName: definition.skillName,
             toolName: definition.name,
             status: requiresConfirmation && !options.confirmed ? "pending_confirmation" : "running",
             args: plan.args,
@@ -335,7 +182,7 @@ export async function executeAiTool(
         userId: runtime.user.id,
         bookId,
         action: definition.name,
-        payload: { toolName: definition.name, args: plan.args, sessionId: runtime.sessionId, toolCallId: toolCall?.id },
+        payload: { skillName: definition.skillName, toolName: definition.name, args: plan.args, sessionId: runtime.sessionId, toolCallId: toolCall?.id },
       });
       const parts: AiChatPart[] = [
         {
@@ -391,15 +238,19 @@ export async function confirmAiTool(runtime: AiToolRuntime, confirmationId: stri
     });
     return { status: 409, body: { confirmation: cancelled, expired: true } };
   }
-  const payload = confirmation.payload as { toolName?: AiActionName; args?: Record<string, unknown>; sessionId?: string; toolCallId?: string };
+  const payload = confirmation.payload as { skillName?: LedgerSkillName; toolName?: AiActionName; args?: Record<string, unknown>; sessionId?: string; toolCallId?: string };
   if (!payload.toolName) return { status: 400, body: { error: "确认项缺少工具信息" } };
+  const skillName = payload.skillName ?? (getLedgerTool(payload.toolName)?.skillName as LedgerSkillName | undefined);
+  if (!skillName) return { status: 400, body: { error: "确认项缺少 Skill 信息" } };
   const result = await executeAiTool(
     { ...runtime, sessionId: payload.sessionId ?? runtime.sessionId, bookId: confirmation.bookId ?? runtime.bookId },
     {
+      skillName,
       toolName: payload.toolName,
       args: payload.args ?? {},
       requiresConfirmation: false,
       confidence: 1,
+      isFinal: true,
     },
     { confirmed: true, toolCallId: payload.toolCallId },
   );
@@ -446,12 +297,6 @@ async function executeConfirmedTool(
       return updateCategory(runtime, bookId!, args);
     case "delete-category":
       return deleteCategory(runtime, bookId!, args);
-    case "create-tag":
-      return createTag(runtime, bookId!, args);
-    case "update-tag":
-      return updateTag(runtime, bookId!, args);
-    case "delete-tag":
-      return deleteTag(runtime, bookId!, args);
     case "create-book":
       return createBook(runtime, args);
     case "update-book":
@@ -479,7 +324,7 @@ async function executeConfirmedTool(
       return textResult("我已经准备好确认导入；这个工具会在待确认记录重构后接入批量确认。");
     case "cancel-task":
     case "retry-task":
-      return textResult("任务操作已收到；请在文件任务卡片中继续查看状态。");
+      return textResult("任务操作已收到；请在图片识别任务卡片中继续查看状态。");
     default:
       return textResult("这个操作暂时还没有对应的工具。");
   }
@@ -505,6 +350,12 @@ async function searchRecords(runtime: AiToolRuntime, bookId: string, rawArgs: Re
         pageName: "记录页",
         href: `/records?bookId=${bookId}`,
       },
+      {
+        type: "filter-result",
+        filters: args,
+        chips: chipsFromSearchArgs(args),
+        href: `/records?bookId=${bookId}`,
+      } as any,
     ],
     result: { count: transactions.length, ids: limited.map((item) => item.id) },
   };
@@ -546,7 +397,7 @@ async function createRecord(runtime: AiToolRuntime, bookId: string, rawArgs: Rec
   const records = "records" in args ? args.records : [args];
   const transactions = [];
   for (const record of records) {
-    const input = await transactionInput(runtime.repository, bookId, record, runtime.today);
+    const input = await transactionInput(runtime.repository, runtime.user.id, record, runtime.today);
     const parsed = createTransactionSchema.parse(input);
     const transaction =
       runtime.repository instanceof D1LedgerRepository
@@ -564,7 +415,7 @@ async function createRecord(runtime: AiToolRuntime, bookId: string, rawArgs: Rec
             ? `已保存${first.type === "income" ? "收入" : "支出"} ¥${first.amount.toFixed(2)}。`
             : `已创建 ${transactions.length} 笔记录。`,
       },
-      recordCard(first, await categoryName(runtime.repository, bookId, first.categoryId)) as unknown as Record<string, unknown>,
+      recordCard(first, await categoryName(runtime.repository, first.categoryId)) as unknown as Record<string, unknown>,
     ],
     result: { transactionId: first.id, transactionIds: transactions.map((transaction) => transaction.id) },
     changed: ["transactions"],
@@ -576,7 +427,7 @@ async function updateRecord(runtime: AiToolRuntime, bookId: string, rawArgs: Rec
   const transaction = await resolveTransaction(runtime.repository, runtime.user.id, bookId, args);
   if (!transaction) return textResult("我没有找到要修改的那笔记录。");
   if (!canMutateTransaction(runtime.user.id, transaction.createdByUserId)) return textResult("只能修改你自己创建的记录。");
-  const patch = await transactionInput(runtime.repository, bookId, { ...transaction, ...args } as any, runtime.today, transaction);
+  const patch = await transactionInput(runtime.repository, runtime.user.id, { ...transaction, ...args } as any, runtime.today, transaction);
   const parsed = createTransactionSchema.parse(patch);
   const updated =
     runtime.repository instanceof D1LedgerRepository
@@ -585,7 +436,7 @@ async function updateRecord(runtime: AiToolRuntime, bookId: string, rawArgs: Rec
   return {
     parts: [
       { type: "text", text: "已更新这笔记录。" },
-      recordCard(updated as Transaction, await categoryName(runtime.repository, bookId, (updated as Transaction).categoryId)) as unknown as Record<string, unknown>,
+      recordCard(updated as Transaction, await categoryName(runtime.repository, (updated as Transaction).categoryId)) as unknown as Record<string, unknown>,
     ],
     result: { transactionId: transaction.id },
     changed: ["transactions"],
@@ -611,7 +462,7 @@ async function deleteRecord(runtime: AiToolRuntime, bookId: string, rawArgs: Rec
   };
 }
 
-async function createCategory(runtime: AiToolRuntime, bookId: string, rawArgs: Record<string, unknown>) {
+async function createCategory(runtime: AiToolRuntime, _bookId: string, rawArgs: Record<string, unknown>) {
   const args = categoryArgsSchema.parse(rawArgs);
   const parsed = categorySchema.parse({
     name: args.name,
@@ -619,8 +470,8 @@ async function createCategory(runtime: AiToolRuntime, bookId: string, rawArgs: R
     icon: args.icon ?? (args.type === "income" ? "wallet" : "tag"),
     sortOrder: args.sortOrder ?? 0,
   });
-  const existing = await findSimple(runtime.repository, "categories", bookId, parsed.name, parsed.type);
-  const category = existing ?? (await createSimple(runtime.repository, "categories", bookId, parsed, runtime.user.id));
+  const existing = await findCategory(runtime.repository, runtime.user.id, parsed.name, parsed.type);
+  const category = existing ?? (await createCategoryEntity(runtime.repository, runtime.user.id, parsed, runtime.user.id));
   return {
     parts: [{ type: "text", text: existing ? `分类「${category.name}」已经存在。` : `已创建分类「${category.name}」。` }],
     result: { category },
@@ -628,9 +479,9 @@ async function createCategory(runtime: AiToolRuntime, bookId: string, rawArgs: R
   };
 }
 
-async function updateCategory(runtime: AiToolRuntime, bookId: string, rawArgs: Record<string, unknown>) {
+async function updateCategory(runtime: AiToolRuntime, _bookId: string, rawArgs: Record<string, unknown>) {
   const args = categoryArgsSchema.parse(rawArgs);
-  const category = await resolveSimple(runtime.repository, "categories", bookId, args.id, args.name, args.type);
+  const category = await resolveCategory(runtime.repository, runtime.user.id, args.id, args.name, args.type);
   if (!category) return textResult("我没有找到这个分类。");
   const parsed = categorySchema.parse({
     name: args.newName ?? args.name ?? category.name,
@@ -638,41 +489,16 @@ async function updateCategory(runtime: AiToolRuntime, bookId: string, rawArgs: R
     icon: args.icon ?? category.icon ?? "tag",
     sortOrder: args.sortOrder ?? category.sortOrder ?? 0,
   });
-  const updated = await updateSimple(runtime.repository, "categories", category.id, parsed, runtime.user.id);
+  const updated = await updateCategoryEntity(runtime.repository, category.id, parsed, runtime.user.id);
   return { parts: [{ type: "text", text: `已更新分类「${updated?.name ?? parsed.name}」。` }], result: { category: updated }, changed: ["categories"] };
 }
 
-async function deleteCategory(runtime: AiToolRuntime, bookId: string, rawArgs: Record<string, unknown>) {
+async function deleteCategory(runtime: AiToolRuntime, _bookId: string, rawArgs: Record<string, unknown>) {
   const args = categoryArgsSchema.parse(rawArgs);
-  const category = await resolveSimple(runtime.repository, "categories", bookId, args.id, args.name, args.type);
+  const category = await resolveCategory(runtime.repository, runtime.user.id, args.id, args.name, args.type);
   if (!category) return textResult("我没有找到这个分类。");
-  await deleteSimple(runtime.repository, "categories", category.id, runtime.user.id);
+  await deleteCategoryEntity(runtime.repository, category.id, runtime.user.id);
   return { parts: [{ type: "text", text: `已删除分类「${category.name}」，关联记录已保留。` }], result: { categoryId: category.id }, changed: ["categories", "transactions"] };
-}
-
-async function createTag(runtime: AiToolRuntime, bookId: string, rawArgs: Record<string, unknown>) {
-  const args = tagArgsSchema.parse(rawArgs);
-  const parsed = tagSchema.parse({ name: args.name, color: args.color ?? "#ff6b1a" });
-  const existing = await findSimple(runtime.repository, "tags", bookId, parsed.name);
-  const tag = existing ?? (await createSimple(runtime.repository, "tags", bookId, parsed, runtime.user.id));
-  return { parts: [{ type: "text", text: existing ? `标签「${tag.name}」已经存在。` : `已创建标签「${tag.name}」。` }], result: { tag }, changed: ["tags"] };
-}
-
-async function updateTag(runtime: AiToolRuntime, bookId: string, rawArgs: Record<string, unknown>) {
-  const args = tagArgsSchema.parse(rawArgs);
-  const tag = await resolveSimple(runtime.repository, "tags", bookId, args.id, args.name);
-  if (!tag) return textResult("我没有找到这个标签。");
-  const parsed = tagSchema.parse({ name: args.newName ?? args.name ?? tag.name, color: args.color ?? tag.color ?? "#ff6b1a" });
-  const updated = await updateSimple(runtime.repository, "tags", tag.id, parsed, runtime.user.id);
-  return { parts: [{ type: "text", text: `已更新标签「${updated?.name ?? parsed.name}」。` }], result: { tag: updated }, changed: ["tags"] };
-}
-
-async function deleteTag(runtime: AiToolRuntime, bookId: string, rawArgs: Record<string, unknown>) {
-  const args = tagArgsSchema.parse(rawArgs);
-  const tag = await resolveSimple(runtime.repository, "tags", bookId, args.id, args.name);
-  if (!tag) return textResult("我没有找到这个标签。");
-  await deleteSimple(runtime.repository, "tags", tag.id, runtime.user.id);
-  return { parts: [{ type: "text", text: `已删除标签「${tag.name}」。` }], result: { tagId: tag.id }, changed: ["tags", "transactions"] };
 }
 
 async function createBook(runtime: AiToolRuntime, rawArgs: Record<string, unknown>) {
@@ -807,17 +633,23 @@ async function inviteMember(runtime: AiToolRuntime, bookId: string, rawArgs: Rec
 }
 
 async function saveAttachments(runtime: AiToolRuntime, bookId: string, rawArgs: Record<string, unknown>) {
-  if (!runtime.attachments.length) return textResult("请先上传文件。");
+  if (!runtime.attachments.length) return textResult("请先上传图片。");
   if (!(runtime.repository instanceof D1LedgerRepository) || !runtime.env.FILES) return textResult("导入功能需要 D1 与 R2 绑定。");
   const args = z.object({ autoConfirm: z.boolean().default(false) }).parse(rawArgs);
+  if (runtime.attachments.length > maximumImageImportBatchFiles) {
+    return textResult(`一次最多上传 ${maximumImageImportBatchFiles} 张图片。`);
+  }
+  const files = runtime.attachments;
+  for (const file of files) assertImageImportFile(file);
+  await assertImageOcrQuota(runtime.repository, runtime.user.id, files.length);
   const jobs = [];
-  for (const file of runtime.attachments.slice(0, 5)) {
-    jobs.push(await createImportJobFromFile(runtime, bookId, file, args.autoConfirm));
+  for (const file of files) {
+    jobs.push(await createImportJobFromFile(runtime, bookId, file, args.autoConfirm, { skipQuotaCheck: true }));
   }
   return {
     parts: [
       { type: "text", text: `已提交 ${jobs.length} 个文件，正在处理。` },
-      { type: "import-job-card", title: "文件任务", message: "可以在待确认/文件任务中查看进度。", jobs: jobs as any, pageName: "文件任务", href: "/records/imports" } as any,
+      { type: "import-job-card", title: "图片识别", message: "可以在待确认/图片识别任务中查看进度。", jobs: jobs as any, pageName: "图片识别", href: "/records/imports" } as any,
     ],
     result: { jobs },
     changed: ["imports"],
@@ -826,26 +658,18 @@ async function saveAttachments(runtime: AiToolRuntime, bookId: string, rawArgs: 
 
 async function transactionInput(
   repository: AiToolRepository,
-  bookId: string,
+  userId: string,
   args: z.infer<typeof recordArgsSchema> | (Partial<z.infer<typeof recordArgsSchema>> & Transaction),
   today: string,
   current?: Transaction,
 ) {
   const type = args.type ?? current?.type ?? "expense";
   const category =
-    args.categoryId || !args.categoryName ? undefined : await findSimple(repository, "categories", bookId, args.categoryName, type);
-  const tagIds = [
-    ...(args.tagIds ?? current?.tagIds ?? []),
-    ...(
-      await Promise.all((args.tagNames ?? []).map((name) => findSimple(repository, "tags", bookId, name)))
-    )
-      .filter((tag): tag is SimpleEntity => Boolean(tag))
-      .map((tag) => tag.id),
-  ];
+    args.categoryId || !args.categoryName ? undefined : await findCategory(repository, userId, args.categoryName, type);
   const items = await Promise.all(
     (args.items ?? current?.items ?? []).map(async (item) => {
       const itemCategory =
-        item.categoryId || !item.categoryName ? undefined : await findSimple(repository, "categories", bookId, item.categoryName, type);
+        item.categoryId || !item.categoryName ? undefined : await findCategory(repository, userId, item.categoryName, type);
       return { ...item, categoryId: item.categoryId ?? itemCategory?.id };
     }),
   );
@@ -856,7 +680,6 @@ async function transactionInput(
     memberId: current?.memberId,
     note: args.note ?? current?.note,
     occurredAt: normalizeOccurredAt(args.occurredAt ?? current?.occurredAt, today),
-    tagIds: Array.from(new Set(tagIds)),
     items,
   };
 }
@@ -866,8 +689,8 @@ async function searchTransactions(repository: AiToolRepository, bookId: string, 
   return repository.transactions
     .filter((transaction) => transaction.bookId === bookId)
     .filter((transaction) => !args.type || transaction.type === args.type)
-    .filter((transaction) => args.minAmount === undefined || transaction.amount > args.minAmount)
-    .filter((transaction) => args.maxAmount === undefined || transaction.amount < args.maxAmount)
+    .filter((transaction) => args.minAmount === undefined || (args.minStrict ? transaction.amount > args.minAmount : transaction.amount >= args.minAmount))
+    .filter((transaction) => args.maxAmount === undefined || (args.maxStrict ? transaction.amount < args.maxAmount : transaction.amount <= args.maxAmount))
     .filter((transaction) => !args.from || transaction.occurredAt >= args.from)
     .filter((transaction) => !args.to || transaction.occurredAt <= args.to)
     .filter((transaction) => !args.categoryId || transaction.categoryId === args.categoryId)
@@ -936,51 +759,45 @@ async function canManageBook(repository: AiToolRepository, bookId: string, userI
   return canManageMembers((await bookRoleFor(repository, bookId, userId)) ?? "member");
 }
 
-async function categoryName(repository: AiToolRepository, bookId: string, categoryId?: string) {
+async function categoryName(repository: AiToolRepository, categoryId?: string) {
   if (!categoryId) return undefined;
-  const category = repository instanceof D1LedgerRepository ? await repository.getSimple("categories", categoryId) : repository.categories.find((item) => item.id === categoryId && item.bookId === bookId);
+  const category = repository instanceof D1LedgerRepository ? await repository.getCategory(categoryId) : repository.categories.find((item) => item.id === categoryId);
   return category?.name;
 }
 
-async function findSimple(repository: AiToolRepository, kind: "categories" | "tags", bookId: string, name?: string, type?: string) {
+async function findCategory(repository: AiToolRepository, userId: string, name?: string, type?: string) {
   if (!name) return undefined;
-  const values = repository instanceof D1LedgerRepository ? await repository.listSimple(kind, bookId) : repository[kind].filter((item) => item.bookId === bookId);
+  const values = repository instanceof D1LedgerRepository ? await repository.listCategories(userId) : repository.categories.filter((item) => item.userId === userId);
   return values.find((item) => item.name === name && (!type || !item.type || item.type === type));
 }
 
-async function resolveSimple(repository: AiToolRepository, kind: "categories" | "tags", bookId: string, idValue?: string, name?: string, type?: string) {
+async function resolveCategory(repository: AiToolRepository, userId: string, idValue?: string, name?: string, type?: string) {
   if (idValue) {
-    const entity = repository instanceof D1LedgerRepository ? await repository.getSimple(kind, idValue) : repository[kind].find((item) => item.id === idValue);
-    return entity?.bookId === bookId ? entity : undefined;
+    const entity = repository instanceof D1LedgerRepository ? await repository.getCategory(idValue) : repository.categories.find((item) => item.id === idValue);
+    return entity?.userId === userId ? entity : undefined;
   }
-  return findSimple(repository, kind, bookId, name, type);
+  return findCategory(repository, userId, name, type);
 }
 
-async function createSimple(repository: AiToolRepository, kind: "categories" | "tags", bookId: string, data: Omit<SimpleEntity, "id" | "bookId">, actorId: string) {
-  return repository instanceof D1LedgerRepository ? repository.createSimple(kind, bookId, data, actorId) : repository.createSimple(kind, bookId, data);
+async function createCategoryEntity(repository: AiToolRepository, userId: string, data: Omit<SimpleEntity, "id" | "userId">, actorId: string) {
+  return repository instanceof D1LedgerRepository ? repository.createCategory(userId, data, actorId) : repository.createCategory(userId, data);
 }
 
-async function updateSimple(repository: AiToolRepository, kind: "categories" | "tags", entityId: string, data: Omit<SimpleEntity, "id" | "bookId">, actorId: string) {
-  if (repository instanceof D1LedgerRepository) return repository.updateSimple(kind, entityId, data, actorId);
-  const entity = repository[kind].find((item) => item.id === entityId);
+async function updateCategoryEntity(repository: AiToolRepository, entityId: string, data: Omit<SimpleEntity, "id" | "userId">, actorId: string) {
+  if (repository instanceof D1LedgerRepository) return repository.updateCategory(entityId, data, actorId);
+  const entity = repository.categories.find((item) => item.id === entityId);
   return entity ? Object.assign(entity, data) : undefined;
 }
 
-async function deleteSimple(repository: AiToolRepository, kind: "categories" | "tags", entityId: string, actorId: string) {
-  if (repository instanceof D1LedgerRepository) return repository.deleteSimple(kind, entityId, actorId);
-  if (kind === "categories") {
-    repository.transactions.forEach((transaction) => {
-      if (transaction.categoryId === entityId) delete transaction.categoryId;
-      transaction.items.forEach((item) => {
-        if (item.categoryId === entityId) delete item.categoryId;
-      });
+async function deleteCategoryEntity(repository: AiToolRepository, entityId: string, actorId: string) {
+  if (repository instanceof D1LedgerRepository) return repository.deleteCategory(entityId, actorId);
+  repository.transactions.forEach((transaction) => {
+    if (transaction.categoryId === entityId) delete transaction.categoryId;
+    transaction.items.forEach((item) => {
+      if (item.categoryId === entityId) delete item.categoryId;
     });
-  } else {
-    repository.transactions.forEach((transaction) => {
-      transaction.tagIds = transaction.tagIds.filter((tagId) => tagId !== entityId);
-    });
-  }
-  repository[kind] = repository[kind].filter((item) => item.id !== entityId) as never;
+  });
+  repository.categories = repository.categories.filter((item) => item.id !== entityId);
 }
 
 async function memberByUser(repository: AiToolRepository, bookId: string, userId: string) {
@@ -1024,13 +841,18 @@ function createMemoryInvitation(
   return invitation;
 }
 
-async function createImportJobFromFile(runtime: AiToolRuntime, bookId: string, file: File, autoConfirm: boolean) {
+async function createImportJobFromFile(
+  runtime: AiToolRuntime,
+  bookId: string,
+  file: File,
+  autoConfirm: boolean,
+  options: { skipQuotaCheck?: boolean } = {},
+) {
   if (!(runtime.repository instanceof D1LedgerRepository)) throw new Error("导入功能需要 D1 运行时");
   if (!runtime.env.FILES) throw new Error("导入功能需要 R2 绑定");
-  const resolvedFileType = fileType(file);
-  if (!isSupportedFile(resolvedFileType) && !hasSupportedExtension(file.name)) throw new Error(`${file.name} 不是支持的文件格式`);
-  const needsOcr = isOcrImportFileType(resolvedFileType);
-  if (!needsOcr && !runtime.env.IMPORT_QUEUE) throw new Error("CSV/Excel 导入功能需要 Queue 绑定");
+  assertImageImportFile(file);
+  const resolvedFileType = imageImportFileType(file);
+  if (!options.skipQuotaCheck) await assertImageOcrQuota(runtime.repository, runtime.user.id);
   const suffix = file.name.replaceAll(/[^a-zA-Z0-9._-]/g, "_");
   const job = await runtime.repository.createImportJob({
     bookId,
@@ -1046,54 +868,11 @@ async function createImportJobFromFile(runtime: AiToolRuntime, bookId: string, f
       httpMetadata: { contentType: resolvedFileType },
       customMetadata: { importJobId: job.id, bookId, uploadedBy: runtime.user.id },
     });
-    if (needsOcr) {
-      if (isImageImportFileType(resolvedFileType)) {
-        return await submitAlephPipelineJob(runtime.env, runtime.repository, job, bytes, runtime.origin);
-      }
-      return await submitAlephOcrJob(runtime.env, runtime.repository, job, bytes, runtime.origin);
-    }
-    await runtime.env.IMPORT_QUEUE?.send({ jobId: job.id } satisfies ImportQueueMessage);
-    return (await runtime.repository.getImportJob(job.id)) ?? job;
+    return await submitAlephOcrJob(runtime.env, runtime.repository, job, bytes, runtime.origin);
   } catch (error) {
-    if (needsOcr) {
-      await markFailed(
-        runtime.repository,
-        job.id,
-        error,
-        isImageImportFileType(resolvedFileType) ? "pipeline" : "ocr",
-      );
-    }
-    else {
-      await runtime.env.FILES.delete(job.r2Key);
-      await runtime.repository.updateImportJob(job.id, "failed", error instanceof Error ? error.message : "上传失败");
-    }
+    await markFailed(runtime.repository, job.id, error, "ocr");
     throw error;
   }
-}
-
-function fileType(file: File) {
-  if (isSupportedFile(file.type)) return file.type;
-  const name = file.name.toLowerCase();
-  if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
-  if (name.endsWith(".png")) return "image/png";
-  if (name.endsWith(".webp")) return "image/webp";
-  if (name.endsWith(".heic")) return "image/heic";
-  if (name.endsWith(".heif")) return "image/heif";
-  if (name.endsWith(".tif") || name.endsWith(".tiff")) return "image/tiff";
-  if (name.endsWith(".bmp")) return "image/bmp";
-  if (name.endsWith(".pdf")) return "application/pdf";
-  if (name.endsWith(".csv")) return "text/csv";
-  if (name.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-  if (name.endsWith(".xls")) return "application/vnd.ms-excel";
-  return file.type;
-}
-
-function isSupportedFile(type: string): type is (typeof supportedFileTypes)[number] {
-  return (supportedFileTypes as readonly string[]).includes(type);
-}
-
-function hasSupportedExtension(name: string) {
-  return supportedFileExtensions.some((extension) => name.toLowerCase().endsWith(extension));
 }
 
 function normalizeOccurredAt(value: string | undefined, today: string) {
@@ -1107,6 +886,18 @@ function sortTransactions(left: Transaction, right: Transaction, sort: z.infer<t
   if (sort === "amount_desc") return right.amount - left.amount;
   if (sort === "amount_asc") return left.amount - right.amount;
   return right.occurredAt.localeCompare(left.occurredAt);
+}
+
+function chipsFromSearchArgs(args: z.infer<typeof searchArgsSchema>) {
+  return [
+    args.type === "income" ? "收入" : args.type === "expense" ? "支出" : "",
+    args.from || args.to ? [args.from, args.to].filter(Boolean).join(" 至 ") : "",
+    args.minAmount ? `金额 ${args.minStrict ? ">" : ">="} ${args.minAmount}` : "",
+    args.maxAmount ? `金额 ${args.maxStrict ? "<" : "<="} ${args.maxAmount}` : "",
+    args.categoryName ? `分类：${args.categoryName}` : "",
+    args.q ? `关键词：${args.q}` : "",
+    args.sort === "amount_desc" ? "金额最高" : "",
+  ].filter(Boolean);
 }
 
 function transactionResult(transaction: Transaction) {
@@ -1144,7 +935,6 @@ function confirmationSummary(toolName: AiActionName, args: Record<string, unknow
   const labels: Partial<Record<AiActionName, string>> = {
     "delete-record": "删除这笔记录？",
     "delete-category": `删除分类${readable}？`,
-    "delete-tag": `删除标签${readable}？`,
     "delete-book": "删除这个账本？",
     "remove-member": "移除这个成员？",
     "invite-member": "发送成员邀请？",

@@ -7,7 +7,7 @@ test("authenticated user can navigate from a real book response to a record form
       ? { user: { id: "user_test", name: "测试用户", email: "test@example.com", plan: "free" } }
       : path.endsWith("/books")
         ? { books: [{ id: "book_test", name: "家庭账本", currency: "CNY" }] }
-        : path.includes("/books/book_test/categories")
+        : path.endsWith("/me/categories")
           ? { categories: [] }
           : path.includes("/books/book_test/transactions")
             ? { transactions: [] }

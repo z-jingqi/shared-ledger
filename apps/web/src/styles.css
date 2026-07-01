@@ -3172,6 +3172,9 @@ a {
   background: #f2f4f7;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86);
 }
+.ai-composer.no-attach {
+  grid-template-columns: minmax(0, 1fr) 38px;
+}
 .ai-composer .import-attachment-strip {
   grid-column: 1 / -1;
 }

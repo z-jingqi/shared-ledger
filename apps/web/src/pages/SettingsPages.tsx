@@ -71,7 +71,7 @@ export function SettingsPage() {
   const [profileOpen, setProfileOpen] = useState(false);
   const imports = importsData?.imports ?? [];
   const pendingCount = imports.filter((job) => job.status === "pending_confirmation").length;
-  const fileTasks = imports.filter(
+  const imageTasks = imports.filter(
     (job) => job.status !== "pending_confirmation" && (!terminalImportStatuses.has(job.status) || job.status === "failed"),
   );
   const statusItems = [
@@ -85,13 +85,13 @@ export function SettingsPage() {
           tone: "blue" as const,
         }
       : undefined,
-    fileTasks.length > 0
+    imageTasks.length > 0
       ? {
-          key: "files",
+          key: "images",
           icon: <FilesIcon size={23} weight="fill" />,
-          title: "文件任务",
-          count: fileTasks.length,
-          caption: fileTasks.some((job) => job.status === "failed") ? "有文件处理失败" : "文件处理中",
+          title: "图片识别",
+          count: imageTasks.length,
+          caption: imageTasks.some((job) => job.status === "failed") ? "有图片处理失败" : "图片识别中",
           tone: "orange" as const,
         }
       : undefined,
@@ -394,8 +394,7 @@ function BookSettingsPage({ bookId }: { bookId: string }) {
 
 function CategoryManagerPage() {
   const navigate = useNavigate();
-  const { book } = useActiveBook();
-  const { data, reload } = useApi<{ categories: Resource[] }>(book ? `/books/${book.id}/categories` : undefined);
+  const { data, reload } = useApi<{ categories: Resource[] }>("/me/categories");
   const [editing, setEditing] = useState<Resource | undefined>();
   const [deleteTarget, setDeleteTarget] = useState<Resource | undefined>();
   const [name, setName] = useState("");
@@ -413,7 +412,7 @@ function CategoryManagerPage() {
     setError("");
   };
   const save = async () => {
-    if (!book || !name.trim()) return;
+    if (!name.trim()) return;
     setError("");
     const body = JSON.stringify({
       name: name.trim(),
@@ -423,7 +422,7 @@ function CategoryManagerPage() {
     });
     try {
       if (editing) await api(`/categories/${editing.id}`, { method: "PATCH", body });
-      else await api(`/books/${book.id}/categories`, { method: "POST", body });
+      else await api("/me/categories", { method: "POST", body });
       toast.success(editing ? "分类已更新" : "分类已新增", { duration: 2400, closeButton: true });
       resetForm();
       await reload();
@@ -545,7 +544,7 @@ export function HelpSheet({ onClose }: { onClose: () => void }) {
         <IosCard className="ios-help-card">
           <h2>常见问题</h2>
           <article>
-            <b>文件识别后为什么要确认？</b>
+            <b>图片识别后为什么要确认？</b>
             <p>OCR 与 AI 会先生成候选记录，确认后才会正式写入账本，避免误入账。</p>
           </article>
           <article>
@@ -554,7 +553,7 @@ export function HelpSheet({ onClose }: { onClose: () => void }) {
           </article>
           <article>
             <b>如何反馈问题？</b>
-            <p>请把问题现象、文件类型和时间告诉维护者；后续会接入正式反馈入口。</p>
+            <p>请把问题现象、图片类型和时间告诉维护者；后续会接入正式反馈入口。</p>
           </article>
         </IosCard>
       </div>

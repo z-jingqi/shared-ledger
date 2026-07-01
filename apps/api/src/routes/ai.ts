@@ -1,5 +1,6 @@
 import type { Hono } from "hono";
 import type { AiChatMessage } from "@shared-ledger/ai";
+import { getLedgerSkill, listLedgerSkills } from "@shared-ledger/ledger-skills";
 import { z } from "zod";
 import { jsonError } from "../lib/http";
 import { D1LedgerRepository } from "../repository";
@@ -9,7 +10,6 @@ import {
   cancelAiToolConfirmation,
   confirmAiTool,
   executeAiTool,
-  toolDefinitionsForModel,
   type AiToolRepository,
 } from "../services/ai-tools";
 import type { MemoryLedgerStore } from "../store";
@@ -193,60 +193,6 @@ export function registerAiRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryLed
       : context.json(result.body, result.status as 200);
   });
 
-  app.post("/ai/search/transactions", async (context) => {
-    const user = await requireUser(context, store);
-    if (user instanceof Response) return user;
-    const repository = requireAiRepository(context, store);
-    if (repository instanceof Response) return repository;
-    const body = await context.req.json<{ bookId: string; query: string; timeZone?: string; baseFilters?: Record<string, unknown> }>();
-    if (!body.bookId || !body.query?.trim()) return jsonError(context, "搜索条件不合法");
-    const denied = await requireMember(context, store, body.bookId, user);
-    if (denied) return denied;
-    const provider = runtimeAiProvider(context.env, user);
-    const contextSnapshot = await buildModelContext(repository, user, body.bookId);
-    let plan;
-    try {
-      plan = await provider.planToolCall({
-        text: body.query,
-        userId: user.id,
-        bookId: body.bookId,
-        page: "records",
-        today: today(),
-        timeZone: body.timeZone ?? "Asia/Shanghai",
-        tools: toolDefinitionsForModel().filter((tool) => tool.name === "search-records" || tool.name === "analyze-records" || tool.name === "chat"),
-        context: { ...contextSnapshot, baseFilters: body.baseFilters ?? {} },
-        attachments: [],
-      });
-    } catch (error) {
-      return context.json(aiErrorBody(error), aiErrorStatus(error));
-    }
-    const result = await executeAiTool(
-      {
-        env: context.env,
-        repository,
-        store,
-        user,
-        sessionId: "records-search",
-        bookId: body.bookId,
-        prompt: body.query,
-        today: today(),
-        timeZone: body.timeZone ?? "Asia/Shanghai",
-        origin: new URL(context.req.url).origin,
-        attachments: [],
-      },
-      plan.toolName === "chat" ? { ...plan, toolName: "search-records" } : plan,
-      { confirmed: true },
-    );
-    const searchCard = result.parts.find((part) => part.type === "search-result-card") as any;
-    return context.json({
-      query: body.query,
-      filters: plan.args,
-      chips: chipsFromFilters(plan.args),
-      results: searchCard?.results ?? [],
-      summary: searchCard?.summary,
-      href: searchCard?.href,
-    });
-  });
 }
 
 async function runAiMessage(
@@ -269,22 +215,43 @@ async function runAiMessage(
     if (denied) return denied;
   }
   const prompt = body.message.trim();
-  if (!prompt && !body.attachments.length) return jsonError(context, "请输入消息或上传附件");
-  await appendMessage(repository, sessionId, user.id, "user", prompt || "上传附件", undefined, attachmentMetadata(body.attachments));
+  if (!prompt && !body.attachments.length) return jsonError(context, "请输入消息或上传图片");
+  await appendMessage(repository, sessionId, user.id, "user", prompt || "上传图片", undefined, attachmentMetadata(body.attachments));
   const provider = runtimeAiProvider(context.env, user);
   const contextSnapshot = await buildModelContext(repository, user, bookId);
-  const plan = await provider.planToolCall({
+  const run =
+    repository instanceof D1LedgerRepository
+      ? await repository.createAiRun({
+          sessionId,
+          userId: user.id,
+          bookId,
+          input: { message: prompt, page: body.page, attachments: attachmentMetadata(body.attachments) },
+        })
+      : undefined;
+  const skillSelection = await provider.selectSkill({
     text: prompt || "用户上传了附件",
     userId: user.id,
     bookId,
     page: body.page ?? "AI 助手",
     today: today(),
     timeZone: body.timeZone ?? "Asia/Shanghai",
-    tools: toolDefinitionsForModel(),
+    skills: listLedgerSkills(),
     context: contextSnapshot,
     attachments: attachmentMetadata(body.attachments),
   });
-  stream?.onEvent("tool_call", { toolName: plan.toolName, args: plan.args, requiresConfirmation: plan.requiresConfirmation });
+  stream?.onEvent("skill_selected", skillSelection);
+  if (run && repository instanceof D1LedgerRepository) {
+    await repository.updateAiRun(run.id, { status: "running", selectedSkill: skillSelection.skillName }, user.id);
+    await repository.appendAiStep({
+      runId: run.id,
+      stepIndex: 0,
+      kind: "skill_selected",
+      status: "completed",
+      skillName: skillSelection.skillName,
+      output: skillSelection,
+      actorId: user.id,
+    });
+  }
   const runtime = {
     env: context.env,
     repository,
@@ -298,8 +265,8 @@ async function runAiMessage(
     origin: new URL(context.req.url).origin,
     attachments: body.attachments,
   };
-  let parts;
-  if (plan.toolName === "chat") {
+  let parts: Array<Record<string, any>>;
+  if (skillSelection.skillName === "general.chat") {
     let text = "";
     if (stream) {
       const chatStream = provider.streamChat(chatHistoryMessages(session, prompt, body.attachments), {
@@ -316,20 +283,73 @@ async function runAiMessage(
     }
     parts = [{ type: "text" as const, text }];
   } else {
-    const result = await executeAiTool(runtime, plan);
-    parts = result.parts;
-    stream?.onEvent("tool_result", { toolName: plan.toolName, parts, result: result.result, changed: result.changed });
-    const confirmation = parts.find((part) => part.type === "confirmation-card");
-    if (confirmation) stream?.onEvent("confirmation", confirmation);
-    const text = parts
-      .filter((part) => part.type === "text" || part.type === "tool-status")
-      .map((part) => ("text" in part ? part.text : part.message))
-      .filter(Boolean)
-      .join("\n");
-    if (text) await streamText(text, stream);
+    const selectedSkill = getLedgerSkill(skillSelection.skillName);
+    if (!selectedSkill) throw new Error(`未知 Skill：${skillSelection.skillName}`);
+    const maxSteps = 5;
+    const observations: Array<Record<string, unknown>> = [];
+    parts = [];
+    for (let stepIndex = 1; stepIndex <= maxSteps; stepIndex += 1) {
+      if (stream?.signal.aborted) return { sessionId, message: { id: `ai_cancelled_${crypto.randomUUID()}`, role: "assistant" as const, parts }, parts };
+      const step = await provider.planSkillStep({
+        text: prompt || "用户上传了附件",
+        userId: user.id,
+        bookId,
+        page: body.page ?? "AI 助手",
+        today: today(),
+        timeZone: body.timeZone ?? "Asia/Shanghai",
+        skills: listLedgerSkills(),
+        selectedSkill,
+        context: contextSnapshot,
+        attachments: attachmentMetadata(body.attachments),
+        observations,
+        stepIndex,
+        maxSteps,
+      });
+      stream?.onEvent("step_started", { stepIndex, skillName: step.skillName, toolName: step.toolName });
+      stream?.onEvent("tool_call", { skillName: step.skillName, toolName: step.toolName, args: step.args, requiresConfirmation: step.requiresConfirmation });
+      if (run && repository instanceof D1LedgerRepository) {
+        await repository.appendAiStep({
+          runId: run.id,
+          stepIndex,
+          kind: "tool_call",
+          status: "running",
+          skillName: step.skillName,
+          toolName: step.toolName,
+          input: { args: step.args, requiresConfirmation: step.requiresConfirmation, observations },
+          actorId: user.id,
+        });
+      }
+      const result = await executeAiTool(runtime, step);
+      parts.push(...result.parts);
+      const observation = { stepIndex, skillName: step.skillName, toolName: step.toolName, result: result.result, parts: result.parts, changed: result.changed };
+      observations.push(observation);
+      stream?.onEvent("tool_result", { skillName: step.skillName, toolName: step.toolName, parts: result.parts, result: result.result, changed: result.changed });
+      if (run && repository instanceof D1LedgerRepository) {
+        await repository.appendAiStep({
+          runId: run.id,
+          stepIndex,
+          kind: "tool_result",
+          status: "completed",
+          skillName: step.skillName,
+          toolName: step.toolName,
+          output: observation,
+          actorId: user.id,
+        });
+      }
+      const confirmation = result.parts.find((part) => part.type === "confirmation-card");
+      if (confirmation) stream?.onEvent("confirmation", confirmation);
+      const text = result.parts
+        .filter((part) => part.type === "text" || part.type === "tool-status")
+        .map((part) => ("text" in part ? part.text : part.message))
+        .filter(Boolean)
+        .join("\n");
+      if (text) await streamText(text, stream);
+      if (confirmation || step.isFinal) break;
+    }
   }
   const message = { id: `ai_assistant_${crypto.randomUUID()}`, role: "assistant" as const, parts };
   await appendMessage(repository, sessionId, user.id, "assistant", partsToText(parts), parts);
+  if (run && repository instanceof D1LedgerRepository) await repository.updateAiRun(run.id, { status: "completed", finalMessageId: message.id }, user.id);
   if (repository instanceof D1LedgerRepository && session.title === "新会话" && prompt) {
     await repository.updateAiSession(user.id, sessionId, { title: prompt.slice(0, 40), bookId });
   } else if (!(repository instanceof D1LedgerRepository) && session.title === "新会话" && prompt) {
@@ -390,21 +410,19 @@ async function buildModelContext(repository: AiToolRepository, user: LedgerUser,
   const books = repository instanceof D1LedgerRepository ? await repository.listBooks(user.id) : repository.books.filter((book) => repository.role(book.id, user.id));
   const resolvedBookId = bookId ?? books[0]?.id;
   if (!resolvedBookId) return { user: publicUser(user), books };
-  const [book, transactions, categories, tags, members, imports] =
+  const [book, transactions, categories, members, imports] =
     repository instanceof D1LedgerRepository
       ? await Promise.all([
           repository.getBook(resolvedBookId),
           repository.listTransactions(resolvedBookId),
-          repository.listSimple("categories", resolvedBookId),
-          repository.listSimple("tags", resolvedBookId),
+          repository.listCategories(user.id),
           repository.listMembers(resolvedBookId),
           repository.listImportJobs(resolvedBookId),
         ])
       : [
           repository.books.find((item) => item.id === resolvedBookId),
           repository.transactions.filter((item) => item.bookId === resolvedBookId),
-          repository.categories.filter((item) => item.bookId === resolvedBookId),
-          repository.tags.filter((item) => item.bookId === resolvedBookId),
+          repository.categories.filter((item) => item.userId === user.id),
           repository.members.filter((item) => item.bookId === resolvedBookId),
           repository.imports.filter((item) => item.bookId === resolvedBookId),
         ];
@@ -413,7 +431,6 @@ async function buildModelContext(repository: AiToolRepository, user: LedgerUser,
     books,
     currentBook: book,
     categories,
-    tags,
     members,
     recentTransactions: transactions.slice(0, 20),
     recentImportJobs: imports.slice(0, 10),
@@ -487,12 +504,6 @@ function attachmentMetadata(files: File[]) {
 
 function stringOrUndefined(value: FormDataEntryValue | null) {
   return typeof value === "string" && value.trim() ? value : undefined;
-}
-
-function chipsFromFilters(filters: Record<string, unknown>) {
-  return Object.entries(filters)
-    .filter(([, value]) => value !== undefined && value !== "" && !(Array.isArray(value) && value.length === 0))
-    .map(([key, value]) => ({ key, label: key, value: String(value) }));
 }
 
 type MemoryAiSession = { id: string; userId: string; bookId?: string; title: string; createdAt: string; updatedAt: string };

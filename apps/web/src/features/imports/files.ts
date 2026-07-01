@@ -6,7 +6,8 @@ import {
 
 export const maxAttachmentFiles = 5;
 export const supportedFileAccept = sharedSupportedFileAccept;
-export const supportedFileDescription = "图片、PDF、Excel、CSV";
+export const supportedFileDescription = "图片";
+export const unsupportedFileMessage = "当前只支持图片识别";
 
 export function isSupportedAttachment(file: File) {
   return (

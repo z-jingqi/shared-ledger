@@ -9,10 +9,19 @@
     "APP_ENV": "__ENV__",
     "WEB_ORIGIN": "__WEB_ORIGIN__",
     "API_PUBLIC_ORIGIN": "https://__API_DOMAIN__",
-    "ALEPH_AI_BASE_URL": "__ALEPH_AI_BASE_URL__",
     "ALEPH_AI_ENV": "__ALEPH_AI_ENV__",
-    "ALEPH_TOOLS_BASE_URL": "__ALEPH_TOOLS_BASE_URL__",
   },
+  "services": [
+    {
+      "binding": "AI_ORCHESTRATOR",
+      "service": "__ALEPH_AI_SERVICE__",
+      "environment": "__ALEPH_AI_SERVICE_ENVIRONMENT__",
+    },
+    {
+      "binding": "ALEPH_TOOLS",
+      "service": "__ALEPH_TOOLS_SERVICE__",
+    },
+  ],
   "d1_databases": [
     {
       "binding": "DB",
@@ -22,9 +31,5 @@
     },
   ],
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "__R2_BUCKET__" }],
-  "queues": {
-    "producers": [{ "binding": "IMPORT_QUEUE", "queue": "__QUEUE__" }],
-    "consumers": [{ "queue": "__QUEUE__", "max_batch_size": 5, "max_batch_timeout": 10 }],
-  },
   "routes": [{ "pattern": "__API_DOMAIN__", "custom_domain": true }],
 }

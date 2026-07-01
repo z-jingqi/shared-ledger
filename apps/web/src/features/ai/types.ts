@@ -42,6 +42,14 @@ export type AiSearchResultCardPart = {
   pageName?: string;
   href?: string;
 };
+export type AiFilterResultPart = {
+  type: "filter-result";
+  filters?: Record<string, unknown>;
+  filter?: Record<string, unknown>;
+  chips?: unknown;
+  href?: string;
+  url?: string;
+};
 
 export type AiAnalysisCardPart = {
   type: "analysis-card";
@@ -110,6 +118,7 @@ export type AiStructuredPart =
   | AiTextPart
   | AiToolStatusPart
   | AiRecordCardPart
+  | AiFilterResultPart
   | AiSearchResultCardPart
   | AiAnalysisCardPart
   | AiImportJobCardPart
@@ -128,6 +137,7 @@ export type AiRenderableMessage = {
 const structuredPartTypes = new Set([
   "tool-status",
   "record-card",
+  "filter-result",
   "search-result-card",
   "analysis-card",
   "import-job-card",

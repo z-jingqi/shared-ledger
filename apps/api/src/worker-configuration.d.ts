@@ -4,13 +4,12 @@
 interface __BaseEnv_Env {
   FILES: R2Bucket;
   DB: D1Database;
-  IMPORT_QUEUE: Queue;
+  AI_ORCHESTRATOR: Fetcher;
+  ALEPH_TOOLS: Fetcher;
   APP_ENV: "local";
   WEB_ORIGIN: "http://localhost:5175";
   API_PUBLIC_ORIGIN: "http://127.0.0.1:8789";
-  ALEPH_AI_BASE_URL: "http://127.0.0.1:5173";
-  ALEPH_AI_ENV: "prod";
-  ALEPH_TOOLS_BASE_URL: "http://127.0.0.1:8787";
+  ALEPH_AI_ENV: "preview";
   ALEPH_TOOLS_WEBHOOK_SECRET: "aleph-tools-local-webhook-secret";
 }
 declare namespace Cloudflare {
@@ -24,7 +23,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
   [Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-  interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "APP_ENV" | "WEB_ORIGIN" | "API_PUBLIC_ORIGIN" | "ALEPH_AI_BASE_URL" | "ALEPH_AI_ENV" | "ALEPH_TOOLS_BASE_URL" | "ALEPH_TOOLS_WEBHOOK_SECRET">> {}
+  interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "APP_ENV" | "WEB_ORIGIN" | "API_PUBLIC_ORIGIN" | "ALEPH_AI_ENV" | "ALEPH_TOOLS_WEBHOOK_SECRET">> {}
 }
 
 // Begin runtime types
