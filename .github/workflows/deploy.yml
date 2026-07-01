@@ -98,8 +98,6 @@ jobs:
           CLOUDFLARE_D1_DATABASE_ID_PROD: ${{ vars.CLOUDFLARE_D1_DATABASE_ID_PROD }}
           ALEPH_AI_SERVICE_PREVIEW: ${{ vars.ALEPH_AI_SERVICE_PREVIEW || 'aleph-ai-orchestrator' }}
           ALEPH_AI_SERVICE_PROD: ${{ vars.ALEPH_AI_SERVICE_PROD || 'aleph-ai-orchestrator' }}
-          ALEPH_AI_SERVICE_ENVIRONMENT_PREVIEW: ${{ vars.ALEPH_AI_SERVICE_ENVIRONMENT_PREVIEW || 'preview' }}
-          ALEPH_AI_SERVICE_ENVIRONMENT_PROD: ${{ vars.ALEPH_AI_SERVICE_ENVIRONMENT_PROD || 'production' }}
           ALEPH_AI_ENV_PREVIEW: ${{ vars.ALEPH_AI_ENV_PREVIEW || 'preview' }}
           ALEPH_AI_ENV_PROD: ${{ vars.ALEPH_AI_ENV_PROD || 'prod' }}
           ALEPH_TOOLS_SERVICE_PREVIEW: ${{ vars.ALEPH_TOOLS_SERVICE_PREVIEW || 'aleph-tools-gateway-preview' }}

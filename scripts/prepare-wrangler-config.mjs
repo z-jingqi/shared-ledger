@@ -21,8 +21,8 @@ const values = {
   __API_DOMAIN__: isProd ? "api.leger.aleph-cat.com" : "api.dev.leger.aleph-cat.com",
   __WEB_ORIGIN__: isProd ? "https://leger.aleph-cat.com" : "https://dev.leger.aleph-cat.com",
   __ALEPH_AI_ENV__: process.env[`ALEPH_AI_ENV_${suffix}`] ?? (isProd ? "prod" : "preview"),
-  __ALEPH_AI_SERVICE__: process.env[`ALEPH_AI_SERVICE_${suffix}`] ?? "aleph-ai-orchestrator",
-  __ALEPH_AI_SERVICE_ENVIRONMENT__: process.env[`ALEPH_AI_SERVICE_ENVIRONMENT_${suffix}`] ?? (isProd ? "production" : "preview"),
+  __ALEPH_AI_SERVICE__:
+    process.env[`ALEPH_AI_SERVICE_${suffix}`] ?? (isProd ? "aleph-ai-orchestrator" : "aleph-ai-orchestrator-preview"),
   __ALEPH_TOOLS_SERVICE__:
     process.env[`ALEPH_TOOLS_SERVICE_${suffix}`] ?? (isProd ? "aleph-tools-gateway-prod" : "aleph-tools-gateway-preview"),
   __D1_DATABASE_ID__:

@@ -15,7 +15,6 @@
     {
       "binding": "AI_ORCHESTRATOR",
       "service": "__ALEPH_AI_SERVICE__",
-      "environment": "__ALEPH_AI_SERVICE_ENVIRONMENT__",
     },
     {
       "binding": "ALEPH_TOOLS",

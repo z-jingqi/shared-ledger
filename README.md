@@ -95,7 +95,7 @@ shared-ledger 现在只支持图片导入：jpg/jpeg/png/gif/webp/tif/tiff/bmp/r
 
 生产环境需要为 API Worker 配置：
 
-- Service binding：`AI_ORCHESTRATOR`，preview 指向 `aleph-ai-orchestrator preview`，prod 指向 `aleph-ai-orchestrator production`
+- Service binding：`AI_ORCHESTRATOR`，preview 指向 `aleph-ai-orchestrator-preview`，prod 指向 `aleph-ai-orchestrator`
 - Service binding：`ALEPH_TOOLS`，preview 指向 `aleph-tools-gateway-preview`，prod 指向 `aleph-tools-gateway-prod`
 - 普通变量：`ALEPH_AI_ENV`
 - Secret：`ALEPH_AI_SERVICE_TOKEN`
