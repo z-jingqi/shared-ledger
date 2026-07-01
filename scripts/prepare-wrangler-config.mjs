@@ -12,7 +12,7 @@ if (!target || !["web", "api"].includes(target) || !["preview", "prod"].includes
 const suffix = environment.toUpperCase();
 const isProd = environment === "prod";
 const defaultD1DatabaseIds = {
-  preview: "4cd0cf69-dc51-4c02-bca5-e0141a73d17b",
+  preview: "58bdce1d-afd3-4d89-9ad7-330a685d0a26",
   prod: undefined,
 };
 const values = {
