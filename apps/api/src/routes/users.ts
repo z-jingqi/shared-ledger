@@ -50,7 +50,11 @@ export function registerUserRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryL
     }
     const blockedUser = store?.users.find((item) => item.id === blockedUserId);
     if (!blockedUser) return jsonError(context, "用户不存在", 404);
-    if (!store?.inviteBlocks.some((item) => item.blockerUserId === user.id && item.blockedUserId === blockedUserId && !item.deletedAt)) {
+    if (
+      !store?.inviteBlocks.some(
+        (item) => item.blockerUserId === user.id && item.blockedUserId === blockedUserId && !item.deletedAt,
+      )
+    ) {
       const timestamp = new Date().toISOString();
       store?.inviteBlocks.push({
         id: crypto.randomUUID(),
@@ -116,10 +120,15 @@ function listMemoryInviteBlocks(store: MemoryLedgerStore | undefined, blockerUse
   );
 }
 
-function isMemoryInviteBlocked(store: MemoryLedgerStore | undefined, blockerUserId: string, blockedUserId: string) {
+function isMemoryInviteBlocked(
+  store: MemoryLedgerStore | undefined,
+  blockerUserId: string,
+  blockedUserId: string,
+) {
   return Boolean(
     store?.inviteBlocks.some(
-      (item) => item.blockerUserId === blockerUserId && item.blockedUserId === blockedUserId && !item.deletedAt,
+      (item) =>
+        item.blockerUserId === blockerUserId && item.blockedUserId === blockedUserId && !item.deletedAt,
     ),
   );
 }

@@ -308,7 +308,7 @@ describe("Hono REST API", () => {
     expect((await app.request("/books/book_home/invitations", init, { APP_ENV: "test" })).status).toBe(409);
     expect(
       (await createApp().request("/imports/status-stream?ids=import_test", undefined, { APP_ENV: "test" }))
-      .status,
+        .status,
     ).toBe(401);
   });
 
@@ -351,7 +351,11 @@ describe("Hono REST API", () => {
 
     const declined = await app.request(
       `/invitations/${invitation.id}/decline`,
-      { method: "POST", body: JSON.stringify({ blockInviter: true }), headers: { ...jsonHeaders, "x-user-id": invitee.id } },
+      {
+        method: "POST",
+        body: JSON.stringify({ blockInviter: true }),
+        headers: { ...jsonHeaders, "x-user-id": invitee.id },
+      },
       { APP_ENV: "test" },
     );
     expect(declined.status).toBe(200);
@@ -359,7 +363,9 @@ describe("Hono REST API", () => {
       expect.objectContaining({ blockerUserId: invitee.id, blockedUserId: "user_demo" }),
     );
 
-    const hiddenAfterBlock = await app.request("/users/search?query=Target%20User", undefined, { APP_ENV: "test" });
+    const hiddenAfterBlock = await app.request("/users/search?query=Target%20User", undefined, {
+      APP_ENV: "test",
+    });
     expect((await hiddenAfterBlock.json<any>()).users).toEqual([]);
 
     const blockedInvite = await app.request(

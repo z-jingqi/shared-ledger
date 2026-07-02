@@ -835,9 +835,7 @@ export class D1LedgerRepository {
 
   async getInvitation(invitationId: string) {
     const row = await this.db
-      .prepare(
-        `SELECT ${invitationColumns} FROM invitations WHERE id=? AND deleted_at IS NULL`,
-      )
+      .prepare(`SELECT ${invitationColumns} FROM invitations WHERE id=? AND deleted_at IS NULL`)
       .bind(invitationId)
       .first<Row>();
     return row ? mapInvitation(row) : null;

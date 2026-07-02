@@ -54,7 +54,9 @@ export function registerInvitationRoutes(app: Hono<{ Bindings: Env }>, store?: M
       : store?.users.find((item) => item.id === body.userId);
     if (!target) return jsonError(context, "没有找到该用户，请先搜索并选择", 404);
     if (target.id === user.id) return jsonError(context, "不能邀请自己", 400);
-    const existingRole = repository ? await repository.role(bookId, target.id) : store?.role(bookId, target.id);
+    const existingRole = repository
+      ? await repository.role(bookId, target.id)
+      : store?.role(bookId, target.id);
     if (existingRole) return jsonError(context, "该用户已经在账本中", 409);
     const blocked = repository
       ? await repository.isInviteBlocked(target.id, user.id)
@@ -94,12 +96,18 @@ export function registerInvitationRoutes(app: Hono<{ Bindings: Env }>, store?: M
     const repository = context.env.DB ? new D1LedgerRepository(context.env.DB) : undefined;
     const invitation = repository
       ? await repository.getInvitation(context.req.param("id"))
-      : store?.invitations.find((item) => item.id === context.req.param("id") && !isMemoryInvitationDeleted(item));
+      : store?.invitations.find(
+          (item) => item.id === context.req.param("id") && !isMemoryInvitationDeleted(item),
+        );
     if (!invitation || invitation.status !== "pending" || new Date(invitation.expiresAt) < new Date())
       return jsonError(context, "邀请不可接受", 400);
     if (!invitationBelongsToUser(invitation, user)) return jsonError(context, "这不是发给你的邀请", 403);
     const updated = repository
-      ? await repository.updateInvitation(invitation.id, { status: "accepted", inviteeUserId: user.id }, user.id)
+      ? await repository.updateInvitation(
+          invitation.id,
+          { status: "accepted", inviteeUserId: user.id },
+          user.id,
+        )
       : Object.assign(invitation, {
           status: "accepted" as const,
           inviteeUserId: user.id,
@@ -124,7 +132,9 @@ export function registerInvitationRoutes(app: Hono<{ Bindings: Env }>, store?: M
     const repository = context.env.DB ? new D1LedgerRepository(context.env.DB) : undefined;
     const invitation = repository
       ? await repository.getInvitation(context.req.param("id"))
-      : store?.invitations.find((item) => item.id === context.req.param("id") && !isMemoryInvitationDeleted(item));
+      : store?.invitations.find(
+          (item) => item.id === context.req.param("id") && !isMemoryInvitationDeleted(item),
+        );
     if (!invitation || invitation.status !== "pending" || !invitationBelongsToUser(invitation, user))
       return jsonError(context, "邀请不可拒绝", 400);
     const body = await optionalJson<{ blockInviter?: boolean }>(context);
@@ -144,7 +154,9 @@ export function registerInvitationRoutes(app: Hono<{ Bindings: Env }>, store?: M
     const repository = context.env.DB ? new D1LedgerRepository(context.env.DB) : undefined;
     const invitation = repository
       ? await repository.getInvitation(context.req.param("id"))
-      : store?.invitations.find((item) => item.id === context.req.param("id") && !isMemoryInvitationDeleted(item));
+      : store?.invitations.find(
+          (item) => item.id === context.req.param("id") && !isMemoryInvitationDeleted(item),
+        );
     if (!invitation || invitation.status !== "pending" || invitation.inviterUserId !== user.id)
       return jsonError(context, "邀请不可撤回", 400);
     const updated = repository
@@ -159,13 +171,16 @@ export function registerInvitationRoutes(app: Hono<{ Bindings: Env }>, store?: M
     const repository = context.env.DB ? new D1LedgerRepository(context.env.DB) : undefined;
     const invitation = repository
       ? await repository.getInvitation(context.req.param("id"))
-      : store?.invitations.find((item) => item.id === context.req.param("id") && !isMemoryInvitationDeleted(item));
+      : store?.invitations.find(
+          (item) => item.id === context.req.param("id") && !isMemoryInvitationDeleted(item),
+        );
     if (!invitation) return jsonError(context, "邀请不存在", 404);
     const canDelete = invitation.inviterUserId === user.id || invitationBelongsToUser(invitation, user);
     if (!canDelete) return jsonError(context, "没有删除该邀请的权限", 403);
     if (invitation.status === "pending") return jsonError(context, "进行中的邀请不能删除", 400);
     if (repository) await repository.deleteInvitation(invitation.id, user.id);
-    else Object.assign(invitation, { deletedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    else
+      Object.assign(invitation, { deletedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
     return context.body(null, 204);
   });
 
@@ -175,7 +190,9 @@ export function registerInvitationRoutes(app: Hono<{ Bindings: Env }>, store?: M
     const repository = context.env.DB ? new D1LedgerRepository(context.env.DB) : undefined;
     const invitation = repository
       ? await repository.getInvitation(context.req.param("id"))
-      : store?.invitations.find((item) => item.id === context.req.param("id") && !isMemoryInvitationDeleted(item));
+      : store?.invitations.find(
+          (item) => item.id === context.req.param("id") && !isMemoryInvitationDeleted(item),
+        );
     if (!invitation || invitation.status !== "pending" || invitation.inviterUserId !== user.id)
       return jsonError(context, "邀请不可提醒", 400);
     if (invitation.lastRemindedAt && Date.now() - new Date(invitation.lastRemindedAt).getTime() < 86400000)
@@ -271,7 +288,8 @@ function isMemoryInviteBlocked(
 ) {
   return Boolean(
     store?.inviteBlocks.some(
-      (item) => item.blockerUserId === blockerUserId && item.blockedUserId === blockedUserId && !item.deletedAt,
+      (item) =>
+        item.blockerUserId === blockerUserId && item.blockedUserId === blockedUserId && !item.deletedAt,
     ),
   );
 }
@@ -286,10 +304,10 @@ function invitationBelongsToUser(
 ) {
   return Boolean(
     (invitation.inviteeUserId && invitation.inviteeUserId === user.id) ||
-      (invitation.inviteeEmail && sameValue(invitation.inviteeEmail, user.email)) ||
-      (invitation.inviteePhone &&
-        user.phone &&
-        normalizePhone(invitation.inviteePhone) === normalizePhone(user.phone)),
+    (invitation.inviteeEmail && sameValue(invitation.inviteeEmail, user.email)) ||
+    (invitation.inviteePhone &&
+      user.phone &&
+      normalizePhone(invitation.inviteePhone) === normalizePhone(user.phone)),
   );
 }
 

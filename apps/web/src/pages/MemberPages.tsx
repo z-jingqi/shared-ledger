@@ -146,12 +146,7 @@ export function MembersPage() {
           onConfirm={() => void removeMember()}
         />
       )}
-      {inviteSheetOpen && (
-        <InviteMemberSheet
-          bookId={book?.id}
-          onClose={() => setInviteSheetOpen(false)}
-        />
-      )}
+      {inviteSheetOpen && <InviteMemberSheet bookId={book?.id} onClose={() => setInviteSheetOpen(false)} />}
     </IosPage>
   );
 }
@@ -547,7 +542,11 @@ function BookMemberSummary({
       </span>
       <span>
         <b>{bookName ?? "当前账本"}</b>
-        {typeof memberCount === "number" ? <small>{memberCount} 位成员 · {currency ?? "CNY"}</small> : null}
+        {typeof memberCount === "number" ? (
+          <small>
+            {memberCount} 位成员 · {currency ?? "CNY"}
+          </small>
+        ) : null}
       </span>
     </IosCard>
   );
@@ -596,7 +595,10 @@ function InvitationSection({
       <IosCard className="ios-invitation-list">
         {invitations.map((invitation) => (
           <div className={`ios-invitation-row${compact ? " compact" : ""}`} key={invitation.id}>
-            <span className={`ios-invitation-status-dot ${statusTone(invitation.status)}`} aria-hidden="true" />
+            <span
+              className={`ios-invitation-status-dot ${statusTone(invitation.status)}`}
+              aria-hidden="true"
+            />
             <span>
               <b>{sent ? inviteeDisplay(invitation) : inviterDisplay(invitation)}</b>
               <small>
@@ -623,7 +625,12 @@ function InvitationSection({
                 </button>
               </div>
             ) : (
-              <button className="ios-member-remove" type="button" aria-label="删除邀请记录" onClick={() => onDelete(invitation)}>
+              <button
+                className="ios-member-remove"
+                type="button"
+                aria-label="删除邀请记录"
+                onClick={() => onDelete(invitation)}
+              >
                 <TrashIcon size={18} />
               </button>
             )}
@@ -707,7 +714,13 @@ function DeclineInviteDialog({
   return (
     <div className="ios-dialog-layer">
       <button className="ios-dialog-backdrop" type="button" aria-label="取消" onClick={onCancel} />
-      <dialog open className="ios-dialog ios-invite-decline-dialog" role="alertdialog" aria-modal="true" aria-label="拒绝邀请">
+      <dialog
+        open
+        className="ios-dialog ios-invite-decline-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-label="拒绝邀请"
+      >
         <span className="ios-dialog-danger">!</span>
         <h2>拒绝邀请</h2>
         <p>

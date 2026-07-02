@@ -1047,10 +1047,7 @@ async function resolveInviteTarget(
     if (args.userId) return repository.getUserSummary(args.userId);
     const users = await repository.searchUsersForInvitation(query, actorUserId);
     const exact = users.find(
-      (user) =>
-        user.name === query ||
-        user.email?.toLowerCase() === query.toLowerCase() ||
-        user.id === query,
+      (user) => user.name === query || user.email?.toLowerCase() === query.toLowerCase() || user.id === query,
     );
     return exact ?? (users.length === 1 ? users[0] : undefined);
   }
@@ -1066,7 +1063,11 @@ async function resolveInviteTarget(
       user.phone === query
     );
   });
-  return users.find((user) => user.id === query || user.name === query || user.email?.toLowerCase() === normalized) ?? users[0];
+  return (
+    users.find(
+      (user) => user.id === query || user.name === query || user.email?.toLowerCase() === normalized,
+    ) ?? users[0]
+  );
 }
 
 function memoryInviteBlocked(store: MemoryLedgerStore, blockerUserId: string, blockedUserId: string) {

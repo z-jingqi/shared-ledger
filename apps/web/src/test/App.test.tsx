@@ -51,8 +51,13 @@ let aiSessionMessages: Record<
   string,
   Array<{ id: string; role: "user" | "assistant"; content: string; parts: MockAiPart[] }>
 > = {};
-let mockUsers: Array<{ id: string; name: string; email?: string; avatarUrl?: string; plan?: "free" | "pro" }> =
-  [];
+let mockUsers: Array<{
+  id: string;
+  name: string;
+  email?: string;
+  avatarUrl?: string;
+  plan?: "free" | "pro";
+}> = [];
 let mockInvitations: Array<{
   id: string;
   bookId: string;
@@ -68,8 +73,11 @@ let mockInvitations: Array<{
   inviter: { id: string; name: string; email?: string; plan?: "free" | "pro" };
   invitee?: { id: string; name: string; email?: string; plan?: "free" | "pro" };
 }> = [];
-let mockInviteBlocks: Array<{ id: string; createdAt: string; user: { id: string; name: string; email?: string } }> =
-  [];
+let mockInviteBlocks: Array<{
+  id: string;
+  createdAt: string;
+  user: { id: string; name: string; email?: string };
+}> = [];
 let userSearchRequests: string[] = [];
 const json = (data: unknown) =>
   new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/json" } });
@@ -715,11 +723,7 @@ describe("shared ledger mobile UI", () => {
             json({
               users: mockUsers
                 .filter((user) => user.id !== "user_test")
-                .filter(
-                  (user) =>
-                    user.name.toLowerCase() === query ||
-                    user.email?.toLowerCase() === query,
-                )
+                .filter((user) => user.name.toLowerCase() === query || user.email?.toLowerCase() === query)
                 .slice(0, 1),
             }),
           );
@@ -733,7 +737,11 @@ describe("shared ledger mobile UI", () => {
           if (method === "POST") {
             mockInviteBlocks = [
               ...mockInviteBlocks,
-              { id: `block_${mockInviteBlocks.length + 1}`, createdAt: new Date().toISOString(), user: target },
+              {
+                id: `block_${mockInviteBlocks.length + 1}`,
+                createdAt: new Date().toISOString(),
+                user: target,
+              },
             ];
             return Promise.resolve(json({ block: { user: target } }));
           }
@@ -745,7 +753,9 @@ describe("shared ledger mobile UI", () => {
         if (pathname === "/invitations" && method === "GET") {
           return Promise.resolve(json({ invitations: mockInvitations }));
         }
-        const invitationActionMatch = pathname.match(/^\/invitations\/([^/]+)\/(accept|decline|revoke|remind)$/);
+        const invitationActionMatch = pathname.match(
+          /^\/invitations\/([^/]+)\/(accept|decline|revoke|remind)$/,
+        );
         if (invitationActionMatch) {
           const [, invitationId, action] = invitationActionMatch;
           const body = JSON.parse(bodyText ?? "{}") as { blockInviter?: boolean };
@@ -771,7 +781,8 @@ describe("shared ledger mobile UI", () => {
         const invitationDeleteMatch = pathname.match(/^\/invitations\/([^/]+)$/);
         if (invitationDeleteMatch && method === "DELETE") {
           const invitation = mockInvitations.find((item) => item.id === invitationDeleteMatch[1]);
-          if (invitation?.status === "pending") return Promise.resolve(errorJson(400, "进行中的邀请不能删除"));
+          if (invitation?.status === "pending")
+            return Promise.resolve(errorJson(400, "进行中的邀请不能删除"));
           mockInvitations = mockInvitations.filter((item) => item.id !== invitationDeleteMatch[1]);
           return Promise.resolve(new Response(null, { status: 204 }));
         }
@@ -779,9 +790,7 @@ describe("shared ledger mobile UI", () => {
         if (bookMembersMatch && method === "GET") {
           return Promise.resolve(
             json({
-              members: [
-                { id: "member_test", userId: "user_test", name: "测试用户", role: "creator" },
-              ],
+              members: [{ id: "member_test", userId: "user_test", name: "测试用户", role: "creator" }],
             }),
           );
         }
@@ -815,7 +824,12 @@ describe("shared ledger mobile UI", () => {
               invitee: target,
             };
             mockInvitations = [invitation, ...mockInvitations];
-            return Promise.resolve(new Response(JSON.stringify({ invitation }), { status: 201, headers: { "content-type": "application/json" } }));
+            return Promise.resolve(
+              new Response(JSON.stringify({ invitation }), {
+                status: 201,
+                headers: { "content-type": "application/json" },
+              }),
+            );
           }
         }
         if (path.includes("/books/book_test/transactions") && method !== "GET") {
@@ -1467,7 +1481,9 @@ describe("shared ledger mobile UI", () => {
 
     await user.click(membersLink);
     expect(await screen.findByRole("heading", { name: "成员管理" })).toBeInTheDocument();
-    expect(within(await screen.findByRole("link", { name: /邀请记录/ })).getByText(/查看收到/)).toBeInTheDocument();
+    expect(
+      within(await screen.findByRole("link", { name: /邀请记录/ })).getByText(/查看收到/),
+    ).toBeInTheDocument();
 
     await user.click(screen.getByRole("link", { name: /邀请记录/ }));
     expect(await screen.findByRole("heading", { name: "邀请记录" })).toBeInTheDocument();
@@ -1702,7 +1718,9 @@ describe("shared ledger mobile UI", () => {
 
     expect(searchForm?.firstElementChild).toBe(searchInput);
     expect(searchInput).toHaveAttribute("placeholder", "搜索记录");
-    expect(within(searchForm as HTMLElement).queryByRole("button", { name: "AI 搜索" })).not.toBeInTheDocument();
+    expect(
+      within(searchForm as HTMLElement).queryByRole("button", { name: "AI 搜索" }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByLabelText("打开 AI 助手")).not.toBeInTheDocument();
 
     await user.type(searchInput, "工资{Enter}");
