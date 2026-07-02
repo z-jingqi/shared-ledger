@@ -2,7 +2,14 @@ import type { SubscriptionPlan } from "@shared-ledger/shared";
 import { createContext, type ReactNode, use, useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../../lib";
 
-export type SessionUser = { id: string; name: string; email: string; phone?: string; plan: SubscriptionPlan; avatarUrl?: string };
+export type SessionUser = {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  plan: SubscriptionPlan;
+  avatarUrl?: string;
+};
 type AuthValue = {
   user?: SessionUser;
   loading: boolean;

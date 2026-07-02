@@ -45,15 +45,20 @@ let aiChatRequests: Array<{
   attachments?: Array<{ name: string; type: string; size: number; lastModified: number }>;
 }> = [];
 let aiConfirmationRequests: string[] = [];
-let aiSessions: Array<{ id: string; title: string; bookId?: string; createdAt: string; updatedAt: string }> = [];
-let aiSessionMessages: Record<string, Array<{ id: string; role: "user" | "assistant"; content: string; parts: MockAiPart[] }>> = {};
+let aiSessions: Array<{ id: string; title: string; bookId?: string; createdAt: string; updatedAt: string }> =
+  [];
+let aiSessionMessages: Record<
+  string,
+  Array<{ id: string; role: "user" | "assistant"; content: string; parts: MockAiPart[] }>
+> = {};
 const json = (data: unknown) =>
   new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/json" } });
 const errorJson = (status: number, error: string) =>
   new Response(JSON.stringify({ error }), { status, headers: { "content-type": "application/json" } });
 
 const bookSwitcherName = (bookName: string) => new RegExp(`((切换账本，)?当前账本\\s*)?${bookName}`);
-const findBookSwitcher = (bookName = "家庭账本") => screen.findByRole("button", { name: bookSwitcherName(bookName) });
+const findBookSwitcher = (bookName = "家庭账本") =>
+  screen.findByRole("button", { name: bookSwitcherName(bookName) });
 const queryAddOverlay = () =>
   screen.queryByRole("dialog", { name: /添加|新增|记一笔|记账方式/ }) ??
   screen.queryByRole("menu", { name: /添加|新增|记一笔|记账方式/ });
@@ -64,11 +69,20 @@ const openManualAddForm = async (user: ReturnType<typeof userEvent.setup>) => {
   await user.click(screen.getByRole("menuitem", { name: /手动添加/ }));
   return screen.findByRole("heading", { name: "记一笔支出" });
 };
-const recordRow = (container: HTMLElement, id: string) => container.querySelector<HTMLButtonElement>(`.ios-transaction-row[data-transaction-id="${id}"]`);
-const recordRows = (container: HTMLElement) => [...container.querySelectorAll<HTMLButtonElement>(".ios-transaction-row")];
+const recordRow = (container: HTMLElement, id: string) =>
+  container.querySelector<HTMLButtonElement>(`.ios-transaction-row[data-transaction-id="${id}"]`);
+const recordRows = (container: HTMLElement) => [
+  ...container.querySelectorAll<HTMLButtonElement>(".ios-transaction-row"),
+];
 const seedAiSession = (messages: Array<{ id: string; role: "user" | "assistant"; parts: MockAiPart[] }>) => {
   const now = new Date().toISOString();
-  const session = { id: "ai_session_test", title: "测试会话", bookId: "book_test", createdAt: now, updatedAt: now };
+  const session = {
+    id: "ai_session_test",
+    title: "测试会话",
+    bookId: "book_test",
+    createdAt: now,
+    updatedAt: now,
+  };
   aiSessions = [session];
   aiSessionMessages = {
     [session.id]: messages.map((message) => ({
@@ -78,7 +92,11 @@ const seedAiSession = (messages: Array<{ id: string; role: "user" | "assistant";
   };
 };
 
-function aiSseResponse(payload: { sessionId: string; message: { id: string; role: "assistant"; parts: MockAiPart[] }; parts: MockAiPart[] }) {
+function aiSseResponse(payload: {
+  sessionId: string;
+  message: { id: string; role: "assistant"; parts: MockAiPart[] };
+  parts: MockAiPart[];
+}) {
   const encoder = new TextEncoder();
   const text = payload.parts
     .filter((part) => part.type === "text" || part.type === "tool-status")
@@ -101,7 +119,10 @@ function aiSseResponse(payload: { sessionId: string; message: { id: string; role
   );
 }
 
-function mockAiParts(message?: string, attachments: Array<{ name: string; type: string; size: number; lastModified: number }> = []): MockAiPart[] {
+function mockAiParts(
+  message?: string,
+  attachments: Array<{ name: string; type: string; size: number; lastModified: number }> = [],
+): MockAiPart[] {
   if (attachments.length && message?.includes("backend-save")) {
     return [
       { type: "text", text: "已提交 1 张图片，正在处理。" },
@@ -109,11 +130,20 @@ function mockAiParts(message?: string, attachments: Array<{ name: string; type: 
         type: "import-job-card",
         title: "图片识别",
         message: "可以在待确认/图片识别任务中查看进度。",
-        jobs: [{ id: "job_new", fileName: attachments[0].name, status: "ocr_processing", progress: 12, stage: "OCR 12%" }],
+        jobs: [
+          {
+            id: "job_new",
+            fileName: attachments[0].name,
+            status: "ocr_processing",
+            progress: 12,
+            stage: "OCR 12%",
+          },
+        ],
       },
     ];
   }
-  if (attachments.length && message?.includes("backend-ignore")) return [{ type: "text", text: "已忽略附件。" }];
+  if (attachments.length && message?.includes("backend-ignore"))
+    return [{ type: "text", text: "已忽略附件。" }];
   if (attachments.length) {
     return [
       {
@@ -133,7 +163,12 @@ function mockAiParts(message?: string, attachments: Array<{ name: string; type: 
   }
   if (message?.includes("确认动作")) {
     return [
-      { type: "tool-status", tool: "analyze-records", status: "pending_confirmation", message: "请确认结算动作" },
+      {
+        type: "tool-status",
+        tool: "analyze-records",
+        status: "pending_confirmation",
+        message: "请确认结算动作",
+      },
       {
         type: "confirmation-card",
         confirmation: {
@@ -189,7 +224,16 @@ describe("shared ledger mobile UI", () => {
       { id: "book_b", name: "旅行账本", currency: "CNY" },
     ];
     transactionsByBook = {
-      book_test: [{ id: "tx_home", type: "expense", amount: 100, note: "餐饮", occurredAt: "2026-06-01", categoryId: "cat_food" }],
+      book_test: [
+        {
+          id: "tx_home",
+          type: "expense",
+          amount: 100,
+          note: "餐饮",
+          occurredAt: "2026-06-01",
+          categoryId: "cat_food",
+        },
+      ],
       book_b: [{ id: "tx_travel", type: "expense", amount: 300, note: "酒店", occurredAt: "2026-06-02" }],
     };
     categories = [
@@ -228,10 +272,7 @@ describe("shared ledger mobile UI", () => {
       unobserve() {}
       disconnect() {}
     }
-    vi.stubGlobal(
-      "ResizeObserver",
-      MockResizeObserver,
-    );
+    vi.stubGlobal("ResizeObserver", MockResizeObserver);
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: string | Request, init?: RequestInit) => {
@@ -274,7 +315,12 @@ describe("shared ledger mobile UI", () => {
           };
           aiSessions = [session, ...aiSessions];
           aiSessionMessages[session.id] = [];
-          return Promise.resolve(new Response(JSON.stringify({ session }), { status: 201, headers: { "content-type": "application/json" } }));
+          return Promise.resolve(
+            new Response(JSON.stringify({ session }), {
+              status: 201,
+              headers: { "content-type": "application/json" },
+            }),
+          );
         }
         const aiSessionJsonMessageMatch = pathname.match(/^\/ai\/sessions\/([^/]+)\/messages$/);
         if (aiSessionJsonMessageMatch) {
@@ -309,12 +355,21 @@ describe("shared ledger mobile UI", () => {
             ];
             const parts = [
               { type: "filter-result", filters, chips, href: "/records?bookId=book_test&source=ai" },
-              { type: "search-result-card", title: "搜索结果", summary: "找到 1 条记录", results: [{ id: "tx_party", title: "餐饮", description: "餐饮 · 2026-06-15", amount: -120 }] },
+              {
+                type: "search-result-card",
+                title: "搜索结果",
+                summary: "找到 1 条记录",
+                results: [{ id: "tx_party", title: "餐饮", description: "餐饮 · 2026-06-15", amount: -120 }],
+              },
             ];
-            return Promise.resolve(json({ sessionId, message: { id: "assistant_search", role: "assistant", parts }, parts }));
+            return Promise.resolve(
+              json({ sessionId, message: { id: "assistant_search", role: "assistant", parts }, parts }),
+            );
           }
           const parts = mockAiParts(body.message);
-          return Promise.resolve(json({ sessionId, message: { id: "assistant_json", role: "assistant", parts }, parts }));
+          return Promise.resolve(
+            json({ sessionId, message: { id: "assistant_json", role: "assistant", parts }, parts }),
+          );
         }
         const aiSessionMessageMatch = pathname.match(/^\/ai\/sessions\/([^/]+)\/messages\/stream$/);
         if (aiSessionMessageMatch) {
@@ -326,7 +381,12 @@ describe("shared ledger mobile UI", () => {
           const attachments = form
             .getAll("files")
             .filter((file): file is File => file instanceof File)
-            .map((file) => ({ name: file.name, type: file.type, size: file.size, lastModified: file.lastModified }));
+            .map((file) => ({
+              name: file.name,
+              type: file.type,
+              size: file.size,
+              lastModified: file.lastModified,
+            }));
           aiChatRequests.push({ message, bookId, page, sessionId, attachments });
           aiSessionMessages[sessionId] ??= [];
           aiSessionMessages[sessionId].push({
@@ -345,7 +405,11 @@ describe("shared ledger mobile UI", () => {
           aiSessionMessages[sessionId].push(assistant);
           aiSessions = aiSessions.map((session) =>
             session.id === sessionId
-              ? { ...session, title: session.title === "新会话" && message ? message.slice(0, 40) : session.title, updatedAt: new Date().toISOString() }
+              ? {
+                  ...session,
+                  title: session.title === "新会话" && message ? message.slice(0, 40) : session.title,
+                  updatedAt: new Date().toISOString(),
+                }
               : session,
           );
           return Promise.resolve(aiSseResponse({ sessionId, message: assistant, parts }));
@@ -357,7 +421,9 @@ describe("shared ledger mobile UI", () => {
           if (!session) return Promise.resolve(errorJson(404, "会话不存在"));
           if (method === "PATCH") {
             const body = JSON.parse(bodyText ?? "{}") as { title?: string };
-            aiSessions = aiSessions.map((item) => (item.id === sessionId ? { ...item, title: body.title ?? item.title } : item));
+            aiSessions = aiSessions.map((item) =>
+              item.id === sessionId ? { ...item, title: body.title ?? item.title } : item,
+            );
             return Promise.resolve(json({ session: aiSessions.find((item) => item.id === sessionId) }));
           }
           if (method === "DELETE") {
@@ -365,17 +431,31 @@ describe("shared ledger mobile UI", () => {
             delete aiSessionMessages[sessionId];
             return Promise.resolve(new Response(null, { status: 204 }));
           }
-          return Promise.resolve(json({ session: { ...session, messages: aiSessionMessages[sessionId] ?? [] } }));
+          return Promise.resolve(
+            json({ session: { ...session, messages: aiSessionMessages[sessionId] ?? [] } }),
+          );
         }
         if (path.includes("/ai/chat")) {
           const body = JSON.parse(bodyText ?? "{}") as (typeof aiChatRequests)[number];
           aiChatRequests.push(body);
           if (body.attachments?.length) {
             if (body.message?.includes("backend-save")) {
-              return Promise.resolve(json({ conversationId: "conversation_test", attachmentAction: { action: "save" }, parts: [] }));
+              return Promise.resolve(
+                json({
+                  conversationId: "conversation_test",
+                  attachmentAction: { action: "save" },
+                  parts: [],
+                }),
+              );
             }
             if (body.message?.includes("backend-ignore")) {
-              return Promise.resolve(json({ conversationId: "conversation_test", attachmentAction: { action: "ignore" }, parts: [] }));
+              return Promise.resolve(
+                json({
+                  conversationId: "conversation_test",
+                  attachmentAction: { action: "ignore" },
+                  parts: [],
+                }),
+              );
             }
             return Promise.resolve(
               json({
@@ -405,7 +485,12 @@ describe("shared ledger mobile UI", () => {
                   id: "ai_generic_confirmation",
                   role: "assistant",
                   parts: [
-                    { type: "tool-status", tool: "analyze-records", status: "pending_confirmation", message: "请确认结算动作" },
+                    {
+                      type: "tool-status",
+                      tool: "analyze-records",
+                      status: "pending_confirmation",
+                      message: "请确认结算动作",
+                    },
                     {
                       type: "confirmation-card",
                       confirmation: {
@@ -431,16 +516,27 @@ describe("shared ledger mobile UI", () => {
                   id: "ai_search",
                   role: "assistant",
                   parts: [
-                    { type: "tool-status", tool: "search-records", status: "success", message: "找到 1 条记录" },
+                    {
+                      type: "tool-status",
+                      tool: "search-records",
+                      status: "success",
+                      message: "找到 1 条记录",
+                    },
                     {
                       type: "search-result-card",
                       title: "搜索结果",
                       summary: "找到 1 条记录",
-                      results: [{ id: "tx_home", title: "餐饮", description: "餐饮 · 2026-06-01", amount: 100 }],
+                      results: [
+                        { id: "tx_home", title: "餐饮", description: "餐饮 · 2026-06-01", amount: 100 },
+                      ],
                       pageName: "记录页",
                       href: "/records?bookId=book_test&source=ai",
                     },
-                    { type: "navigation-card", pageName: "记录页", href: "/records?bookId=book_test&source=ai" },
+                    {
+                      type: "navigation-card",
+                      pageName: "记录页",
+                      href: "/records?bookId=book_test&source=ai",
+                    },
                   ],
                 },
               }),
@@ -479,7 +575,15 @@ describe("shared ledger mobile UI", () => {
                   type: "import-job-card",
                   title: "图片识别",
                   message: "可以在待确认/图片识别任务中查看进度。",
-                  jobs: [{ id: "job_new", fileName: "invoice.jpg", status: "ocr_processing", progress: 12, stage: "OCR 12%" }],
+                  jobs: [
+                    {
+                      id: "job_new",
+                      fileName: "invoice.jpg",
+                      status: "ocr_processing",
+                      progress: 12,
+                      stage: "OCR 12%",
+                    },
+                  ],
                 },
               ],
             }),
@@ -494,8 +598,19 @@ describe("shared ledger mobile UI", () => {
           return Promise.resolve(
             json({
               parts: [
-                { type: "tool-status", tool: "analyze-records", status: "success", label: "结算已确认", message: "后端已完成确认动作" },
-                { type: "navigation-card", pageName: "分析", description: "查看结算结果", href: "/analysis?bookId=book_test" },
+                {
+                  type: "tool-status",
+                  tool: "analyze-records",
+                  status: "success",
+                  label: "结算已确认",
+                  message: "后端已完成确认动作",
+                },
+                {
+                  type: "navigation-card",
+                  pageName: "分析",
+                  description: "查看结算结果",
+                  href: "/analysis?bookId=book_test",
+                },
               ],
             }),
           );
@@ -521,8 +636,12 @@ describe("shared ledger mobile UI", () => {
           const categoryId = path.split("/").pop();
           if (method === "PATCH") {
             const body = JSON.parse(bodyText ?? "{}") as { name?: string; type?: "expense" | "income" };
-            categories = categories.map((category) => category.id === categoryId ? { ...category, ...body } : category);
-            return Promise.resolve(json({ category: categories.find((category) => category.id === categoryId) }));
+            categories = categories.map((category) =>
+              category.id === categoryId ? { ...category, ...body } : category,
+            );
+            return Promise.resolve(
+              json({ category: categories.find((category) => category.id === categoryId) }),
+            );
           }
           if (method === "DELETE") {
             categories = categories.filter((category) => category.id !== categoryId);
@@ -582,7 +701,9 @@ describe("shared ledger mobile UI", () => {
           return Promise.resolve(json({ ok: true }));
         }
         if (path.includes("/imports/job_new"))
-          return Promise.resolve(json({ job: { id: "job_new", fileName: "invoice.jpg", status: "pending_confirmation" } }));
+          return Promise.resolve(
+            json({ job: { id: "job_new", fileName: "invoice.jpg", status: "pending_confirmation" } }),
+          );
         if (path.includes("/books/book_test/imports")) return Promise.resolve(json({ imports: [] }));
         if (path.includes("/books/book_test") && method === "PATCH") {
           const body = JSON.parse(bodyText ?? "{}") as { name?: string; currency?: string };
@@ -607,9 +728,13 @@ describe("shared ledger mobile UI", () => {
           return Promise.resolve(new Response(null, { status: 204 }));
         }
         if (path.includes("/books/book_test"))
-          return Promise.resolve(json({ book: bookList.find((item) => item.id === "book_test"), role: "creator" }));
+          return Promise.resolve(
+            json({ book: bookList.find((item) => item.id === "book_test"), role: "creator" }),
+          );
         if (path.includes("/books/book_b"))
-          return Promise.resolve(json({ book: bookList.find((item) => item.id === "book_b"), role: "creator" }));
+          return Promise.resolve(
+            json({ book: bookList.find((item) => item.id === "book_b"), role: "creator" }),
+          );
         if (path.includes("/books")) return Promise.resolve(json({ books: bookList }));
         return Promise.resolve(json({}));
       }),
@@ -624,11 +749,23 @@ describe("shared ledger mobile UI", () => {
     expect(screen.getByText("6月净收支")).toBeInTheDocument();
     expect(screen.queryByText("6月结余")).not.toBeInTheDocument();
     expect(screen.getByRole("navigation")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "首页" })).toHaveAttribute("href", expect.stringMatching(/^\/home/));
-    expect(screen.getByRole("link", { name: /流水|记录/ })).toHaveAttribute("href", expect.stringMatching(/^\/records/));
+    expect(screen.getByRole("link", { name: "首页" })).toHaveAttribute(
+      "href",
+      expect.stringMatching(/^\/home/),
+    );
+    expect(screen.getByRole("link", { name: /流水|记录/ })).toHaveAttribute(
+      "href",
+      expect.stringMatching(/^\/records/),
+    );
     expect(screen.getByRole("button", { name: "打开添加菜单" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "分析" })).toHaveAttribute("href", expect.stringMatching(/^\/analysis/));
-    expect(screen.getByRole("link", { name: "我的" })).toHaveAttribute("href", expect.stringMatching(/^\/settings/));
+    expect(screen.getByRole("link", { name: "分析" })).toHaveAttribute(
+      "href",
+      expect.stringMatching(/^\/analysis/),
+    );
+    expect(screen.getByRole("link", { name: "我的" })).toHaveAttribute(
+      "href",
+      expect.stringMatching(/^\/settings/),
+    );
     expect(screen.queryByRole("link", { name: "账本" })).not.toBeInTheDocument();
     expect(screen.getByRole("main")).toHaveClass("has-bottom-nav");
     expect(screen.getByLabelText("打开 AI 助手")).toBeInTheDocument();
@@ -667,7 +804,9 @@ describe("shared ledger mobile UI", () => {
     render(<App />);
 
     const emptyText = await screen.findByText("还没有记录，记下第一笔吧。");
-    const emptyBlock = emptyText.closest(".ios-empty, .ios-empty-state, .empty-state, .ios-transaction-empty, .ios-recent-empty");
+    const emptyBlock = emptyText.closest(
+      ".ios-empty, .ios-empty-state, .empty-state, .ios-transaction-empty, .ios-recent-empty",
+    );
 
     expect(emptyText.closest("p.muted")).toBeNull();
     expect(emptyBlock).toBeInTheDocument();
@@ -706,7 +845,10 @@ describe("shared ledger mobile UI", () => {
     expect(await screen.findByRole("heading", { name: "测试会话" })).toBeInTheDocument();
     expect(screen.queryByText(/关闭后会保留当前会话/)).not.toBeInTheDocument();
     expect(screen.getByText("今年大于100的支出").closest("article")).toHaveClass("ai-message", "ai-user");
-    expect(screen.getByText("已筛选出 12 笔记录。").closest("article")).toHaveClass("ai-message", "ai-assistant");
+    expect(screen.getByText("已筛选出 12 笔记录。").closest("article")).toHaveClass(
+      "ai-message",
+      "ai-assistant",
+    );
     expect(container.querySelector(".ai-message time")).toBeNull();
 
     const index = container.querySelector(".ai-message-index");
@@ -724,7 +866,13 @@ describe("shared ledger mobile UI", () => {
     const user = userEvent.setup();
     plan = "pro";
     seedAiSession([
-      { id: "assistant_message", role: "assistant", parts: [{ type: "navigation-card", pageName: "待确认记录", href: "/records/pending?bookId=book_test" }] },
+      {
+        id: "assistant_message",
+        role: "assistant",
+        parts: [
+          { type: "navigation-card", pageName: "待确认记录", href: "/records/pending?bookId=book_test" },
+        ],
+      },
     ]);
     render(<App />);
 
@@ -833,7 +981,10 @@ describe("shared ledger mobile UI", () => {
     await user.click(screen.getByRole("button", { name: "发送" }));
 
     const confirmation = await screen.findByLabelText("AI 操作确认");
-    expect(aiChatRequests.at(-1)?.attachments?.[0]).toMatchObject({ name: "invoice.jpg", type: "image/jpeg" });
+    expect(aiChatRequests.at(-1)?.attachments?.[0]).toMatchObject({
+      name: "invoice.jpg",
+      type: "image/jpeg",
+    });
     expect(within(confirmation).getByText("保存这些附件？")).toBeInTheDocument();
     expect(within(confirmation).getByText("invoice.jpg")).toBeInTheDocument();
     expect(within(confirmation).getByRole("button", { name: "保存" })).toBeInTheDocument();
@@ -844,7 +995,9 @@ describe("shared ledger mobile UI", () => {
     await user.click(within(confirmation).getByRole("button", { name: "保存" }));
 
     await waitFor(() =>
-      expect(aiConfirmationRequests).toEqual(expect.arrayContaining([expect.stringContaining("/ai/confirmations/local_attachment/confirm")])),
+      expect(aiConfirmationRequests).toEqual(
+        expect.arrayContaining([expect.stringContaining("/ai/confirmations/local_attachment/confirm")]),
+      ),
     );
     expect(importBatchRequests).toHaveLength(0);
     expect(await screen.findByText("图片识别")).toBeInTheDocument();
@@ -861,7 +1014,9 @@ describe("shared ledger mobile UI", () => {
     await user.type(await screen.findByPlaceholderText("输入消息..."), "backend-save");
     await user.click(screen.getByRole("button", { name: "发送" }));
 
-    await waitFor(() => expect(aiChatRequests.at(-1)?.attachments?.[0]).toMatchObject({ name: "invoice.jpg" }));
+    await waitFor(() =>
+      expect(aiChatRequests.at(-1)?.attachments?.[0]).toMatchObject({ name: "invoice.jpg" }),
+    );
     await screen.findByText("图片识别");
     expect(screen.queryByLabelText("AI 操作确认")).not.toBeInTheDocument();
     expect(importBatchRequests).toHaveLength(0);
@@ -1159,9 +1314,30 @@ describe("shared ledger mobile UI", () => {
     transactionsByBook = {
       ...transactionsByBook,
       book_test: [
-        { id: "tx_home", type: "expense", amount: 100, note: "早餐", occurredAt: "2026-06-01", categoryId: "cat_food" },
-        { id: "tx_salary", type: "income", amount: 8000, note: "工资", occurredAt: "2026-06-15", categoryId: "cat_salary" },
-        { id: "tx_ride", type: "expense", amount: 30, note: "打车", occurredAt: "2026-05-20", categoryId: "cat_food" },
+        {
+          id: "tx_home",
+          type: "expense",
+          amount: 100,
+          note: "早餐",
+          occurredAt: "2026-06-01",
+          categoryId: "cat_food",
+        },
+        {
+          id: "tx_salary",
+          type: "income",
+          amount: 8000,
+          note: "工资",
+          occurredAt: "2026-06-15",
+          categoryId: "cat_salary",
+        },
+        {
+          id: "tx_ride",
+          type: "expense",
+          amount: 30,
+          note: "打车",
+          occurredAt: "2026-05-20",
+          categoryId: "cat_food",
+        },
       ],
     };
     window.history.pushState({}, "", "/records?bookId=book_test");
@@ -1169,7 +1345,10 @@ describe("shared ledger mobile UI", () => {
 
     expect(await findBookSwitcher()).toBeInTheDocument();
     await waitFor(() =>
-      expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/books/book_test/transactions"), expect.anything()),
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining("/books/book_test/transactions"),
+        expect.anything(),
+      ),
     );
     await waitFor(() => expect(recordRow(container, "tx_home")).toBeInTheDocument());
     expect(recordRow(container, "tx_salary")).toBeInTheDocument();
@@ -1192,7 +1371,11 @@ describe("shared ledger mobile UI", () => {
     await waitFor(() => expect(recordRow(container, "tx_home")).toBeInTheDocument());
     expect(recordRow(container, "tx_ride")).toBeInTheDocument();
     expect(recordRow(container, "tx_salary")).not.toBeInTheDocument();
-    expect(recordRows(container).map((row) => row.dataset.transactionId).slice(0, 2)).toEqual(["tx_home", "tx_ride"]);
+    expect(
+      recordRows(container)
+        .map((row) => row.dataset.transactionId)
+        .slice(0, 2),
+    ).toEqual(["tx_home", "tx_ride"]);
 
     await user.click(screen.getByRole("button", { name: "筛选记录" }));
     filterDialog = await screen.findByRole("dialog", { name: "筛选流水" });
@@ -1207,8 +1390,22 @@ describe("shared ledger mobile UI", () => {
     transactionsByBook = {
       ...transactionsByBook,
       book_test: [
-        { id: "tx_breakfast", type: "expense", amount: 100, note: "早餐", occurredAt: "2026-06-01", categoryId: "cat_food" },
-        { id: "tx_salary", type: "income", amount: 8000, note: "工资", occurredAt: "2026-06-20", categoryId: "cat_salary" },
+        {
+          id: "tx_breakfast",
+          type: "expense",
+          amount: 100,
+          note: "早餐",
+          occurredAt: "2026-06-01",
+          categoryId: "cat_food",
+        },
+        {
+          id: "tx_salary",
+          type: "income",
+          amount: 8000,
+          note: "工资",
+          occurredAt: "2026-06-20",
+          categoryId: "cat_salary",
+        },
       ],
     };
     window.history.pushState({}, "", "/records?bookId=book_test");
@@ -1232,7 +1429,15 @@ describe("shared ledger mobile UI", () => {
   it("renders compact record rows with category names, note/type copy, and amount", async () => {
     transactionsByBook = {
       ...transactionsByBook,
-      book_test: [{ id: "tx_blank", type: "expense", amount: 500, occurredAt: "2026-06-27T08:00:00.000Z", categoryId: "cat_food" }],
+      book_test: [
+        {
+          id: "tx_blank",
+          type: "expense",
+          amount: 500,
+          occurredAt: "2026-06-27T08:00:00.000Z",
+          categoryId: "cat_food",
+        },
+      ],
     };
     window.history.pushState({}, "", "/records?bookId=book_test");
     const { container } = render(<App />);
@@ -1257,10 +1462,38 @@ describe("shared ledger mobile UI", () => {
     transactionsByBook = {
       ...transactionsByBook,
       book_test: [
-        { id: "tx_breakfast", type: "expense", amount: 100, note: "早餐", occurredAt: "2026-06-01", categoryId: "cat_food" },
-        { id: "tx_party", type: "expense", amount: 120, note: "年会餐费", occurredAt: "2026-06-15", categoryId: "cat_food" },
-        { id: "tx_salary", type: "income", amount: 8000, note: "工资", occurredAt: "2026-06-20", categoryId: "cat_salary" },
-        { id: "tx_old", type: "expense", amount: 300, note: "去年餐费", occurredAt: "2025-12-31", categoryId: "cat_food" },
+        {
+          id: "tx_breakfast",
+          type: "expense",
+          amount: 100,
+          note: "早餐",
+          occurredAt: "2026-06-01",
+          categoryId: "cat_food",
+        },
+        {
+          id: "tx_party",
+          type: "expense",
+          amount: 120,
+          note: "年会餐费",
+          occurredAt: "2026-06-15",
+          categoryId: "cat_food",
+        },
+        {
+          id: "tx_salary",
+          type: "income",
+          amount: 8000,
+          note: "工资",
+          occurredAt: "2026-06-20",
+          categoryId: "cat_salary",
+        },
+        {
+          id: "tx_old",
+          type: "expense",
+          amount: 300,
+          note: "去年餐费",
+          occurredAt: "2025-12-31",
+          categoryId: "cat_food",
+        },
       ],
     };
     window.history.pushState({}, "", "/records?bookId=book_test");
@@ -1308,10 +1541,38 @@ describe("shared ledger mobile UI", () => {
     transactionsByBook = {
       ...transactionsByBook,
       book_test: [
-        { id: "tx_breakfast", type: "expense", amount: 100, note: "早餐", occurredAt: "2026-06-01", categoryId: "cat_food" },
-        { id: "tx_party", type: "expense", amount: 120, note: "年会餐费", occurredAt: "2026-06-15", categoryId: "cat_food" },
-        { id: "tx_salary", type: "income", amount: 8000, note: "工资", occurredAt: "2026-06-20", categoryId: "cat_salary" },
-        { id: "tx_old", type: "expense", amount: 300, note: "去年餐费", occurredAt: "2025-12-31", categoryId: "cat_food" },
+        {
+          id: "tx_breakfast",
+          type: "expense",
+          amount: 100,
+          note: "早餐",
+          occurredAt: "2026-06-01",
+          categoryId: "cat_food",
+        },
+        {
+          id: "tx_party",
+          type: "expense",
+          amount: 120,
+          note: "年会餐费",
+          occurredAt: "2026-06-15",
+          categoryId: "cat_food",
+        },
+        {
+          id: "tx_salary",
+          type: "income",
+          amount: 8000,
+          note: "工资",
+          occurredAt: "2026-06-20",
+          categoryId: "cat_salary",
+        },
+        {
+          id: "tx_old",
+          type: "expense",
+          amount: 300,
+          note: "去年餐费",
+          occurredAt: "2025-12-31",
+          categoryId: "cat_food",
+        },
       ],
     };
     const aiParams = new URLSearchParams({
@@ -1465,7 +1726,9 @@ describe("shared ledger mobile UI", () => {
     await waitFor(() => expect(transactionRequests).toHaveLength(1));
     expect(window.location.pathname).toBe("/home");
     expect(screen.getByRole("heading", { name: "记一笔收入" })).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByText("0", { selector: ".ios-amount-panel strong" })).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("0", { selector: ".ios-amount-panel strong" })).toBeInTheDocument(),
+    );
     expect(screen.getByPlaceholderText("添加备注…")).toHaveValue("");
 
     for (const key of ["3", "0"]) await user.click(screen.getByRole("button", { name: key }));

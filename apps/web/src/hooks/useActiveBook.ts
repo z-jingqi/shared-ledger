@@ -14,9 +14,7 @@ export function useActiveBook() {
   const books = data?.books ?? emptyBooks;
   const stored = useMemo(() => readLastActiveBookId(), []);
   const book =
-    books.find((item) => item.id === requested) ??
-    books.find((item) => item.id === stored) ??
-    books[0];
+    books.find((item) => item.id === requested) ?? books.find((item) => item.id === stored) ?? books[0];
 
   useEffect(() => {
     if (!book) return;

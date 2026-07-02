@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { verifyAlephWebhookSignature } from "../src/routes/imports";
-import { assertImageImportFile, assertImageOcrQuota, maximumImageImportFileBytes } from "../src/services/import-validation";
+import {
+  assertImageImportFile,
+  assertImageOcrQuota,
+  maximumImageImportFileBytes,
+} from "../src/services/import-validation";
 import { AlephToolsClient, AlephToolsError, ocrConfidence } from "../src/services/ocr";
 import type { D1LedgerRepository } from "../src/repository";
 import type { WorkerServiceBinding } from "../src/types";
@@ -111,7 +115,9 @@ describe("Aleph Tools client", () => {
   });
 
   it("rejects oversized image imports before creating OCR jobs", () => {
-    const file = new File([new Uint8Array(maximumImageImportFileBytes + 1)], "huge.jpg", { type: "image/jpeg" });
+    const file = new File([new Uint8Array(maximumImageImportFileBytes + 1)], "huge.jpg", {
+      type: "image/jpeg",
+    });
 
     expect(() => assertImageImportFile(file)).toThrow("文件大小必须在 1 B 到 10 MB 之间");
   });
@@ -137,22 +143,39 @@ describe("Aleph Tools client", () => {
 
   it("verifies Aleph Tools webhook HMAC signatures", async () => {
     const timestamp = new Date().toISOString();
-    const body = JSON.stringify({ event: "ocr.job.ready", jobId: "ocr_1", metadata: { importJobId: "import_1" } });
+    const body = JSON.stringify({
+      event: "ocr.job.ready",
+      jobId: "ocr_1",
+      metadata: { importJobId: "import_1" },
+    });
     const signature = `sha256=${await hmacSha256Hex("webhook-secret", `${timestamp}.${body}`)}`;
 
-    await expect(verifyAlephWebhookSignature("webhook-secret", timestamp, signature, body)).resolves.toBe(true);
-    await expect(verifyAlephWebhookSignature("webhook-secret", timestamp, "sha256=bad", body)).resolves.toBe(false);
+    await expect(verifyAlephWebhookSignature("webhook-secret", timestamp, signature, body)).resolves.toBe(
+      true,
+    );
+    await expect(verifyAlephWebhookSignature("webhook-secret", timestamp, "sha256=bad", body)).resolves.toBe(
+      false,
+    );
     await expect(
-      verifyAlephWebhookSignature("webhook-secret", new Date(Date.now() - 10 * 60_000).toISOString(), signature, body),
+      verifyAlephWebhookSignature(
+        "webhook-secret",
+        new Date(Date.now() - 10 * 60_000).toISOString(),
+        signature,
+        body,
+      ),
     ).resolves.toBe(false);
   });
 });
 
 async function hmacSha256Hex(secret: string, value: string) {
   const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, [
-    "sign",
-  ]);
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
   const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(value));
   return [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }

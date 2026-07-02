@@ -117,9 +117,22 @@ describe("D1 image import and OCR quota integrity", () => {
     expect(uploaded.status).toBe(202);
     expect(job?.status).toBe("ocr_processing");
 
-    context.alephTools.jobStatus[job!.ocrJobId!] = { jobId: job!.ocrJobId, status: "ready", resultAvailable: true, progress: 100 };
-    await finalizeAlephOcrJob({ ...context.env, ALEPH_AI_TEST_CLIENT: aiClientWithImportedRecord() }, context.repository, job!.id);
-    await finalizeAlephOcrJob({ ...context.env, ALEPH_AI_TEST_CLIENT: aiClientWithImportedRecord() }, context.repository, job!.id);
+    context.alephTools.jobStatus[job!.ocrJobId!] = {
+      jobId: job!.ocrJobId,
+      status: "ready",
+      resultAvailable: true,
+      progress: 100,
+    };
+    await finalizeAlephOcrJob(
+      { ...context.env, ALEPH_AI_TEST_CLIENT: aiClientWithImportedRecord() },
+      context.repository,
+      job!.id,
+    );
+    await finalizeAlephOcrJob(
+      { ...context.env, ALEPH_AI_TEST_CLIENT: aiClientWithImportedRecord() },
+      context.repository,
+      job!.id,
+    );
 
     const finalized = await context.repository.getImportJob(job!.id);
     expect(finalized?.status).toBe("pending_confirmation");

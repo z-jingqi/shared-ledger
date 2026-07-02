@@ -112,7 +112,12 @@ export interface UserUsageResponse {
 export interface AlephAIClient {
   invoke<TOutput = unknown>(request: InvokeRequest): Promise<InvokeResponse<TOutput>>;
   stream(request: InvokeRequest): AsyncIterable<StreamEvent>;
-  getUserUsage(params: { project: string; userId: string; plan?: string; env?: string }): Promise<UserUsageResponse>;
+  getUserUsage(params: {
+    project: string;
+    userId: string;
+    plan?: string;
+    env?: string;
+  }): Promise<UserUsageResponse>;
 }
 
 export class AlephAIError extends Error {
@@ -133,7 +138,10 @@ export class AlephAIError extends Error {
   }
 }
 
-export function createAlephAIClient(config: { service: ServiceBinding; serviceToken: string }): AlephAIClient {
+export function createAlephAIClient(config: {
+  service: ServiceBinding;
+  serviceToken: string;
+}): AlephAIClient {
   const transport = createTransport(config);
 
   return {
@@ -156,7 +164,12 @@ export function createAlephAIClient(config: { service: ServiceBinding; serviceTo
       );
     },
 
-    async getUserUsage(params: { project: string; userId: string; plan?: string; env?: string }): Promise<UserUsageResponse> {
+    async getUserUsage(params: {
+      project: string;
+      userId: string;
+      plan?: string;
+      env?: string;
+    }): Promise<UserUsageResponse> {
       const search = new URLSearchParams();
       if (params.plan) {
         search.set("plan", params.plan);
@@ -176,9 +189,15 @@ export function createAlephAIClient(config: { service: ServiceBinding; serviceTo
   };
 }
 
-function createTransport(config: { service: ServiceBinding; serviceToken: string }): (path: string, init: RequestInit) => Promise<Response> {
+function createTransport(config: {
+  service: ServiceBinding;
+  serviceToken: string;
+}): (path: string, init: RequestInit) => Promise<Response> {
   return async (path, init) => {
-    const request = new Request(`https://aleph-ai-platform.internal${path}`, withServiceToken(init, config.serviceToken));
+    const request = new Request(
+      `https://aleph-ai-platform.internal${path}`,
+      withServiceToken(init, config.serviceToken),
+    );
     return config.service.fetch(request);
   };
 }
@@ -243,7 +262,11 @@ async function* createStreamIterator(responsePromise: Promise<Response>): AsyncI
           continue;
         }
         if (event.type === "error") {
-          throw new AlephAIError(event.error.code, event.error.message, errorOptions(event.requestId, event.error.details));
+          throw new AlephAIError(
+            event.error.code,
+            event.error.message,
+            errorOptions(event.requestId, event.error.details),
+          );
         }
         yield event;
       }

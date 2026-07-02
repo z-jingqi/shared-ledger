@@ -26,71 +26,71 @@ export function ImportFileUploadInput({
   onUploadingChange,
   ref,
 }: ImportFileUploadInputProps & { ref?: Ref<ImportFileUploadInputHandle> }) {
-    const inputRef = useRef<HTMLInputElement>(null);
-    const [uploading, setUploading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
 
-    const setUploadingState = (nextUploading: boolean) => {
-      setUploading(nextUploading);
-      onUploadingChange?.(nextUploading);
-    };
+  const setUploadingState = (nextUploading: boolean) => {
+    setUploading(nextUploading);
+    onUploadingChange?.(nextUploading);
+  };
 
-    const resetInput = () => {
-      if (inputRef.current) inputRef.current.value = "";
-    };
+  const resetInput = () => {
+    if (inputRef.current) inputRef.current.value = "";
+  };
 
-    useImperativeHandle(
-      ref,
-      () => ({
-        open: () => {
-          if (disabled || uploading) return;
-          inputRef.current?.click();
-        },
-      }),
-      [disabled, uploading],
-    );
+  useImperativeHandle(
+    ref,
+    () => ({
+      open: () => {
+        if (disabled || uploading) return;
+        inputRef.current?.click();
+      },
+    }),
+    [disabled, uploading],
+  );
 
-    const upload = async (fileList: FileList | null) => {
-      const files = Array.from(fileList ?? []);
-      if (!files.length) {
-        resetInput();
-        return;
-      }
-      if (!bookId) {
-        toast.error("请先选择账本", { duration: 3000, closeButton: true });
-        resetInput();
-        return;
-      }
-      const unsupported = files.find((file) => !isSupportedAttachment(file));
-      if (unsupported) {
-        toast.error(unsupportedFileMessage, {
-          description: unsupported.name,
-          duration: 3000,
-          closeButton: true,
-        });
-        resetInput();
-        return;
-      }
-      const selectedFiles = files.slice(0, maxAttachmentFiles);
-      if (files.length > maxAttachmentFiles) {
-        toast.warning(`一次最多上传 ${maxAttachmentFiles} 个文件`, { duration: 3000, closeButton: true });
-      }
+  const upload = async (fileList: FileList | null) => {
+    const files = Array.from(fileList ?? []);
+    if (!files.length) {
+      resetInput();
+      return;
+    }
+    if (!bookId) {
+      toast.error("请先选择账本", { duration: 3000, closeButton: true });
+      resetInput();
+      return;
+    }
+    const unsupported = files.find((file) => !isSupportedAttachment(file));
+    if (unsupported) {
+      toast.error(unsupportedFileMessage, {
+        description: unsupported.name,
+        duration: 3000,
+        closeButton: true,
+      });
+      resetInput();
+      return;
+    }
+    const selectedFiles = files.slice(0, maxAttachmentFiles);
+    if (files.length > maxAttachmentFiles) {
+      toast.warning(`一次最多上传 ${maxAttachmentFiles} 个文件`, { duration: 3000, closeButton: true });
+    }
 
-      setUploadingState(true);
-      try {
-        const { jobs } = await uploadImportFiles(bookId, selectedFiles);
-        toast.success("图片已上传", {
-          description: "识别会在后台继续，完成后进入待确认。",
-          duration: 3000,
-          closeButton: true,
-        });
-        await onUploaded?.(jobs);
-      } catch (cause) {
-        toast.error(cause instanceof Error ? cause.message : "上传失败", { duration: 3000, closeButton: true });
-      } finally {
-        setUploadingState(false);
-        resetInput();
-      }
-    };
+    setUploadingState(true);
+    try {
+      const { jobs } = await uploadImportFiles(bookId, selectedFiles);
+      toast.success("图片已上传", {
+        description: "识别会在后台继续，完成后进入待确认。",
+        duration: 3000,
+        closeButton: true,
+      });
+      await onUploaded?.(jobs);
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "上传失败", { duration: 3000, closeButton: true });
+    } finally {
+      setUploadingState(false);
+      resetInput();
+    }
+  };
 
   return (
     <input

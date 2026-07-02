@@ -13,14 +13,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import {
-  IconTile,
-  IosButton,
-  IosCard,
-  IosDialog,
-  IosField,
-  IosSheet,
-} from "../components/ios/IosDesign";
+import { IconTile, IosButton, IosCard, IosDialog, IosField, IosSheet } from "../components/ios/IosDesign";
 import { useAuth } from "../features/auth/AuthProvider";
 import { useInvitationBadge } from "../features/invitations/useInvitationBadge";
 import { markInvitationIdsViewed } from "../features/invitations/viewed";
@@ -37,7 +30,11 @@ type SentInvitation = {
   role: "admin" | "member";
   status: string;
 };
-type MemberSheetView = { type: "list" } | { type: "invite" } | { type: "role"; memberId: string } | { type: "sent" };
+type MemberSheetView =
+  | { type: "list" }
+  | { type: "invite" }
+  | { type: "role"; memberId: string }
+  | { type: "sent" };
 
 export function MembersPage() {
   return <Navigate to="/settings" replace />;
@@ -48,7 +45,9 @@ export function MembersSheet({ onClose }: { onClose: () => void }) {
   const { user } = useAuth();
   const { book } = useActiveBook();
   const { data, reload } = useApi<{ members: Member[] }>(book ? `/books/${book.id}/members` : undefined);
-  const { data: sentInvitations, reload: reloadSentInvitations } = useApi<{ invitations: SentInvitation[] }>(book ? `/books/${book.id}/invitations` : undefined);
+  const { data: sentInvitations, reload: reloadSentInvitations } = useApi<{ invitations: SentInvitation[] }>(
+    book ? `/books/${book.id}/invitations` : undefined,
+  );
   const {
     pendingInvitations: receivedInvitations,
     reload: reloadReceivedInvitations,
@@ -56,9 +55,13 @@ export function MembersSheet({ onClose }: { onClose: () => void }) {
   } = useInvitationBadge(user?.id);
   const [removing, setRemoving] = useState<Member | "me" | undefined>();
   const [view, setView] = useState<MemberSheetView>({ type: "list" });
-  const pendingSentInvitations = sentInvitations?.invitations.filter((item) => item.status === "pending") ?? [];
+  const pendingSentInvitations =
+    sentInvitations?.invitations.filter((item) => item.status === "pending") ?? [];
   const myMember = data?.members.find((member) => member.userId === user?.id);
-  const receivedInvitationIds = useMemo(() => receivedInvitations.map((item) => item.id), [receivedInvitations]);
+  const receivedInvitationIds = useMemo(
+    () => receivedInvitations.map((item) => item.id),
+    [receivedInvitations],
+  );
   const receivedInvitationKey = receivedInvitationIds.join(",");
   const close = onClose;
 
@@ -96,7 +99,10 @@ export function MembersSheet({ onClose }: { onClose: () => void }) {
   const handleSentInvitation = async (id: string, endpoint: "remind" | "revoke") => {
     try {
       await api(`/invitations/${id}/${endpoint}`, { method: "POST" });
-      toast.success(endpoint === "remind" ? "提醒已发送" : "邀请已撤回", { duration: 2600, closeButton: true });
+      toast.success(endpoint === "remind" ? "提醒已发送" : "邀请已撤回", {
+        duration: 2600,
+        closeButton: true,
+      });
       await reloadSentInvitations();
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : "操作失败", { duration: 3000, closeButton: true });
@@ -150,7 +156,11 @@ export function MembersSheet({ onClose }: { onClose: () => void }) {
           </button>
         }
         footer={
-          <button className="ios-button primary ios-member-invite-footer" type="button" onClick={() => setView({ type: "invite" })}>
+          <button
+            className="ios-button primary ios-member-invite-footer"
+            type="button"
+            onClick={() => setView({ type: "invite" })}
+          >
             邀请成员
           </button>
         }
@@ -180,10 +190,17 @@ export function MembersSheet({ onClose }: { onClose: () => void }) {
                       <small>将加入为 {roleLabel(invitation.role)} · 等待处理</small>
                     </span>
                     <div className="ios-inline-actions">
-                      <button type="button" onClick={() => void handleReceivedInvitation(invitation.id, "accept")}>
+                      <button
+                        type="button"
+                        onClick={() => void handleReceivedInvitation(invitation.id, "accept")}
+                      >
                         接受
                       </button>
-                      <button className="danger" type="button" onClick={() => void handleReceivedInvitation(invitation.id, "decline")}>
+                      <button
+                        className="danger"
+                        type="button"
+                        onClick={() => void handleReceivedInvitation(invitation.id, "decline")}
+                      >
                         拒绝
                       </button>
                     </div>
@@ -214,13 +231,24 @@ export function MembersSheet({ onClose }: { onClose: () => void }) {
               {pendingSentInvitations.map((invitation) => (
                 <div className="ios-member-row" key={invitation.id}>
                   <IconTile tint="#f0f2f5" color="#5b6473">
-                    {invitation.inviteePhone ? <PhoneIcon size={18} weight="bold" /> : <EnvelopeSimpleIcon size={18} weight="bold" />}
+                    {invitation.inviteePhone ? (
+                      <PhoneIcon size={18} weight="bold" />
+                    ) : (
+                      <EnvelopeSimpleIcon size={18} weight="bold" />
+                    )}
                   </IconTile>
                   <span>
-                    <b>{invitation.inviteeEmail || invitation.inviteePhone || invitation.inviteeUserId || "指定用户"}</b>
+                    <b>
+                      {invitation.inviteeEmail ||
+                        invitation.inviteePhone ||
+                        invitation.inviteeUserId ||
+                        "指定用户"}
+                    </b>
                     <small>将加入为 {roleLabel(invitation.role)} · 待接受</small>
                   </span>
-                  <button type="button" onClick={() => setView({ type: "sent" })}>管理</button>
+                  <button type="button" onClick={() => setView({ type: "sent" })}>
+                    管理
+                  </button>
                 </div>
               ))}
               {!pendingSentInvitations.length && (
@@ -302,40 +330,45 @@ function InviteMemberSheet({
   };
   return (
     <IosSheet title="邀请成员" onClose={onClose} onBack={onBack} back>
-        <div className="ios-invite-sheet">
-          <IosCard className="ios-invite-intro">
-            <IconTile>
-              <UserPlusIcon size={24} weight="fill" />
-            </IconTile>
-            <span>
-              <b>邀请成员一起记账</b>
-              <small>对方接受后即可查看并记录该账本。邀请有效期 7 天。</small>
-            </span>
-          </IosCard>
-          <IosField label="邀请对象" error={message}>
-            <input
-              value={target}
-              aria-label="邀请对象"
-              placeholder="邮箱 / 手机号 / 用户名 / 用户 ID"
-              onChange={(event) => {
-                setTarget(event.currentTarget.value);
-                if (message) setMessage("");
-              }}
-            />
-          </IosField>
-          <IosField label="分配角色">
-            <div className="ios-role-cards">
-              {(["member", "admin"] as const).map((value) => (
-                <button className={role === value ? "active" : ""} type="button" onClick={() => setRole(value)} key={value}>
-                  <ShieldCheckIcon size={19} />
-                  <b>{roleLabel(value)}</b>
-                  <small>{value === "admin" ? "可邀请成员、管理权限" : "可查看账本并记录"}</small>
-                </button>
-              ))}
-            </div>
-          </IosField>
-          <IosButton onClick={() => void send()}>发送邀请</IosButton>
-        </div>
+      <div className="ios-invite-sheet">
+        <IosCard className="ios-invite-intro">
+          <IconTile>
+            <UserPlusIcon size={24} weight="fill" />
+          </IconTile>
+          <span>
+            <b>邀请成员一起记账</b>
+            <small>对方接受后即可查看并记录该账本。邀请有效期 7 天。</small>
+          </span>
+        </IosCard>
+        <IosField label="邀请对象" error={message}>
+          <input
+            value={target}
+            aria-label="邀请对象"
+            placeholder="邮箱 / 手机号 / 用户名 / 用户 ID"
+            onChange={(event) => {
+              setTarget(event.currentTarget.value);
+              if (message) setMessage("");
+            }}
+          />
+        </IosField>
+        <IosField label="分配角色">
+          <div className="ios-role-cards">
+            {(["member", "admin"] as const).map((value) => (
+              <button
+                className={role === value ? "active" : ""}
+                type="button"
+                onClick={() => setRole(value)}
+                key={value}
+              >
+                <ShieldCheckIcon size={19} />
+                <b>{roleLabel(value)}</b>
+                <small>{value === "admin" ? "可邀请成员、管理权限" : "可查看账本并记录"}</small>
+              </button>
+            ))}
+          </div>
+        </IosField>
+        <IosButton onClick={() => void send()}>发送邀请</IosButton>
+      </div>
     </IosSheet>
   );
 }
@@ -360,7 +393,9 @@ function MemberRoleSheet({
   const { data } = useApi<{ members: Member[] }>(bookId ? `/books/${bookId}/members` : undefined);
   const member = useMemo(() => data?.members.find((item) => item.id === memberId), [data?.members, memberId]);
   const memberRole = member?.role === "admin" ? "admin" : "member";
-  const [roleOverride, setRoleOverride] = useState<{ memberId: string; role: "admin" | "member" } | undefined>();
+  const [roleOverride, setRoleOverride] = useState<
+    { memberId: string; role: "admin" | "member" } | undefined
+  >();
   const role = roleOverride?.memberId === memberId ? roleOverride.role : memberRole;
   const [error, setError] = useState("");
 
@@ -379,35 +414,40 @@ function MemberRoleSheet({
     }
   };
   return (
-      <IosSheet
-        title="成员权限"
-        onClose={onClose}
-        onBack={onBack}
-        back
-        footer={<IosButton onClick={() => void save()}>保存权限</IosButton>}
-      >
-        <div className="ios-member-role-sheet">
-          <IosCard className="ios-role-intro">
-            <IconTile tint="#eaf1ff" color="#4c8dff">
-              <UserCircleIcon size={24} weight="fill" />
-            </IconTile>
-            <span>
-              <b>{member?.name ?? "编辑成员角色"}</b>
-              <small>管理员可邀请成员、调整权限；成员可查看账本并新增自己的记录。</small>
-            </span>
-          </IosCard>
-          <div className="ios-role-cards">
-            {(["member", "admin"] as const).map((value) => (
-              <button className={role === value ? "active" : ""} type="button" onClick={() => setRoleOverride({ memberId, role: value })} key={value}>
-                <ShieldCheckIcon size={20} />
-                <b>{roleLabel(value)}</b>
-                <small>{value === "admin" ? "可邀请成员、管理成员" : "可查看账本并记录"}</small>
-              </button>
-            ))}
-          </div>
-          {error && <p className="field-error">{error}</p>}
+    <IosSheet
+      title="成员权限"
+      onClose={onClose}
+      onBack={onBack}
+      back
+      footer={<IosButton onClick={() => void save()}>保存权限</IosButton>}
+    >
+      <div className="ios-member-role-sheet">
+        <IosCard className="ios-role-intro">
+          <IconTile tint="#eaf1ff" color="#4c8dff">
+            <UserCircleIcon size={24} weight="fill" />
+          </IconTile>
+          <span>
+            <b>{member?.name ?? "编辑成员角色"}</b>
+            <small>管理员可邀请成员、调整权限；成员可查看账本并新增自己的记录。</small>
+          </span>
+        </IosCard>
+        <div className="ios-role-cards">
+          {(["member", "admin"] as const).map((value) => (
+            <button
+              className={role === value ? "active" : ""}
+              type="button"
+              onClick={() => setRoleOverride({ memberId, role: value })}
+              key={value}
+            >
+              <ShieldCheckIcon size={20} />
+              <b>{roleLabel(value)}</b>
+              <small>{value === "admin" ? "可邀请成员、管理成员" : "可查看账本并记录"}</small>
+            </button>
+          ))}
         </div>
-      </IosSheet>
+        {error && <p className="field-error">{error}</p>}
+      </div>
+    </IosSheet>
   );
 }
 
@@ -428,7 +468,10 @@ function MemberRow({
     <div className="ios-member-row">
       <span className="ios-member-avatar">{member.name.slice(0, 1)}</span>
       <span>
-        <b>{member.name}{isMe ? "（我）" : ""}</b>
+        <b>
+          {member.name}
+          {isMe ? "（我）" : ""}
+        </b>
         <small>{roleLabel(member.role)}</small>
       </span>
       {member.role !== "creator" && (
@@ -465,7 +508,9 @@ function SentInvitationsSheet({
               <ClockCounterClockwiseIcon size={20} weight="fill" />
             </IconTile>
             <span>
-              <b>{invitation.inviteeEmail || invitation.inviteePhone || invitation.inviteeUserId || "指定用户"}</b>
+              <b>
+                {invitation.inviteeEmail || invitation.inviteePhone || invitation.inviteeUserId || "指定用户"}
+              </b>
               <small>
                 {roleLabel(invitation.role)} · {statusLabel(invitation.status)}
               </small>

@@ -18,7 +18,9 @@ export function registerInvitationRoutes(app: Hono<{ Bindings: Env }>, store?: M
             (item) =>
               item.inviteeUserId === user.id ||
               (item.inviteeEmail && sameValue(item.inviteeEmail, user.email)) ||
-              (item.inviteePhone && user.phone && normalizePhone(item.inviteePhone) === normalizePhone(user.phone)),
+              (item.inviteePhone &&
+                user.phone &&
+                normalizePhone(item.inviteePhone) === normalizePhone(user.phone)),
           ) ?? []),
     });
   });
@@ -45,7 +47,9 @@ export function registerInvitationRoutes(app: Hono<{ Bindings: Env }>, store?: M
     if ("error" in target) return jsonError(context, target.error ?? "邀请对象不合法", 400);
     if (target.user?.id === user.id) return jsonError(context, "不能邀请自己", 400);
     if (target.user?.id) {
-      const existingRole = repository ? await repository.role(bookId, target.user.id) : store?.role(bookId, target.user.id);
+      const existingRole = repository
+        ? await repository.role(bookId, target.user.id)
+        : store?.role(bookId, target.user.id);
       if (existingRole) return jsonError(context, "该用户已经在账本中", 409);
     }
     const duplicate = repository
@@ -93,7 +97,11 @@ export function registerInvitationRoutes(app: Hono<{ Bindings: Env }>, store?: M
       return jsonError(context, "邀请不可接受", 400);
     if (!invitationBelongsToUser(invitation, user)) return jsonError(context, "这不是发给你的邀请", 403);
     const updated = repository
-      ? await repository.updateInvitation(invitation.id, { status: "accepted", inviteeUserId: user.id }, user.id)
+      ? await repository.updateInvitation(
+          invitation.id,
+          { status: "accepted", inviteeUserId: user.id },
+          user.id,
+        )
       : Object.assign(invitation, { status: "accepted" as const, inviteeUserId: user.id });
     if (repository) await repository.addMember(invitation.bookId, user.id, invitation.role, user.id);
     else if (store && !store.role(invitation.bookId, user.id))
@@ -119,13 +127,21 @@ export function registerInvitationRoutes(app: Hono<{ Bindings: Env }>, store?: M
         ? await repository.getInvitation(context.req.param("id"))
         : store?.invitations.find((item) => item.id === context.req.param("id"));
       const canChange =
-        action === "revoke" ? invitation?.inviterUserId === user.id : invitation ? invitationBelongsToUser(invitation, user) : false;
+        action === "revoke"
+          ? invitation?.inviterUserId === user.id
+          : invitation
+            ? invitationBelongsToUser(invitation, user)
+            : false;
       if (!invitation || invitation.status !== "pending" || !canChange)
         return jsonError(context, message, 400);
       const updated = repository
-        ? await repository.updateInvitation(invitation.id, {
-            status: action === "decline" ? "declined" : "revoked",
-          }, user.id)
+        ? await repository.updateInvitation(
+            invitation.id,
+            {
+              status: action === "decline" ? "declined" : "revoked",
+            },
+            user.id,
+          )
         : Object.assign(invitation, { status: action === "decline" ? "declined" : "revoked" });
       return context.json({ invitation: updated });
     });
@@ -142,7 +158,11 @@ export function registerInvitationRoutes(app: Hono<{ Bindings: Env }>, store?: M
     if (invitation.lastRemindedAt && Date.now() - new Date(invitation.lastRemindedAt).getTime() < 86400000)
       return jsonError(context, "提醒过于频繁", 429);
     const updated = repository
-      ? await repository.updateInvitation(invitation.id, { lastRemindedAt: new Date().toISOString() }, user.id)
+      ? await repository.updateInvitation(
+          invitation.id,
+          { lastRemindedAt: new Date().toISOString() },
+          user.id,
+        )
       : Object.assign(invitation, { lastRemindedAt: new Date().toISOString() });
     return context.json({ invitation: updated });
   });
@@ -155,12 +175,24 @@ type InviteInput = {
   userId?: string;
 };
 
-async function resolveInvitationTarget(db: D1Database | undefined, store: MemoryLedgerStore | undefined, body: InviteInput) {
+async function resolveInvitationTarget(
+  db: D1Database | undefined,
+  store: MemoryLedgerStore | undefined,
+  body: InviteInput,
+) {
   const raw = (body.target ?? body.userId ?? body.email ?? body.phone ?? "").trim();
   if (!raw) return { error: "请输入邮箱、手机号、用户名或用户 ID" };
 
-  const normalizedPhone = body.phone ? normalizePhone(body.phone) : looksLikePhone(raw) ? normalizePhone(raw) : undefined;
-  const normalizedEmail = body.email ? body.email.trim().toLowerCase() : looksLikeEmail(raw) ? raw.toLowerCase() : undefined;
+  const normalizedPhone = body.phone
+    ? normalizePhone(body.phone)
+    : looksLikePhone(raw)
+      ? normalizePhone(raw)
+      : undefined;
+  const normalizedEmail = body.email
+    ? body.email.trim().toLowerCase()
+    : looksLikeEmail(raw)
+      ? raw.toLowerCase()
+      : undefined;
   const requestedUserId = body.userId ?? (raw.startsWith("user_") ? raw : undefined);
   const user = db ? await findUserForInvitation(db, raw) : findMemoryUser(store, raw);
 
@@ -172,7 +204,8 @@ async function resolveInvitationTarget(db: D1Database | undefined, store: Memory
     };
   }
   if (requestedUserId) return { error: "没有找到该用户，请检查用户 ID" };
-  if (!normalizedEmail && !normalizedPhone) return { error: "没有找到该用户，请输入有效邮箱、手机号、用户名或用户 ID" };
+  if (!normalizedEmail && !normalizedPhone)
+    return { error: "没有找到该用户，请输入有效邮箱、手机号、用户名或用户 ID" };
   return { email: normalizedEmail, phone: normalizedPhone };
 }
 
@@ -188,11 +221,16 @@ function findMemoryUser(store: MemoryLedgerStore | undefined, value: string) {
   );
 }
 
-function invitationBelongsToUser(invitation: { inviteeUserId?: string; inviteeEmail?: string; inviteePhone?: string }, user: { id: string; email?: string; phone?: string }) {
+function invitationBelongsToUser(
+  invitation: { inviteeUserId?: string; inviteeEmail?: string; inviteePhone?: string },
+  user: { id: string; email?: string; phone?: string },
+) {
   return Boolean(
     (invitation.inviteeUserId && invitation.inviteeUserId === user.id) ||
-      (invitation.inviteeEmail && sameValue(invitation.inviteeEmail, user.email)) ||
-      (invitation.inviteePhone && user.phone && normalizePhone(invitation.inviteePhone) === normalizePhone(user.phone)),
+    (invitation.inviteeEmail && sameValue(invitation.inviteeEmail, user.email)) ||
+    (invitation.inviteePhone &&
+      user.phone &&
+      normalizePhone(invitation.inviteePhone) === normalizePhone(user.phone)),
   );
 }
 

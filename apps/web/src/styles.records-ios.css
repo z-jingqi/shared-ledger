@@ -89,7 +89,7 @@
 }
 
 .ios-record-search .ios-record-ai-search-button:disabled {
-  opacity: .56;
+  opacity: 0.56;
 }
 
 .ios-filter-chips {
@@ -420,7 +420,7 @@
 }
 
 .ios-category-strip button.active .ios-icon-tile {
-  box-shadow: 0 8px 18px rgba(255, 104, 28, .28);
+  box-shadow: 0 8px 18px rgba(255, 104, 28, 0.28);
 }
 
 .ios-category-strip button.active span {
@@ -502,7 +502,7 @@
   position: relative;
   z-index: 1;
   color: #fff;
-  text-shadow: 0 1px 4px rgba(0,0,0,.34);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.34);
   font-size: 11px;
   line-height: 1.25;
   display: -webkit-box;
@@ -525,7 +525,7 @@
   height: 22px;
   border: 0;
   border-radius: 999px;
-  background: rgba(0,0,0,.45);
+  background: rgba(0, 0, 0, 0.45);
   color: #fff;
   display: flex;
   align-items: center;
@@ -536,7 +536,7 @@
   position: absolute;
   inset: 0;
   z-index: 1;
-  background: rgba(16,24,39,.45);
+  background: rgba(16, 24, 39, 0.45);
   color: #fff;
   display: flex;
   align-items: center;
@@ -547,11 +547,11 @@
 }
 
 .ios-form-attachment.completed em {
-  background: rgba(31,157,87,.75);
+  background: rgba(31, 157, 87, 0.75);
 }
 
 .ios-form-attachment.failed em {
-  background: rgba(215,64,53,.78);
+  background: rgba(215, 64, 53, 0.78);
 }
 
 .ios-note-input {
@@ -593,7 +593,7 @@
   border-radius: 13px;
   background: #fff;
   color: #172032;
-  box-shadow: 0 2px 5px rgba(29,42,71,.04);
+  box-shadow: 0 2px 5px rgba(29, 42, 71, 0.04);
   font: inherit;
   font-size: 23px;
   font-weight: 700;
@@ -1118,9 +1118,11 @@
 }
 
 .ios-spin {
-  animation: iosSpin .8s linear infinite;
+  animation: iosSpin 0.8s linear infinite;
 }
 
 @keyframes iosSpin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }

@@ -13,7 +13,15 @@ import {
   XIcon,
 } from "@phosphor-icons/react";
 import { Button, Textarea } from "@shared-ledger/ui";
-import { type FormEvent, type ReactNode, type Ref, useEffect, useEffectEvent, useMemo, useState } from "react";
+import {
+  type FormEvent,
+  type ReactNode,
+  type Ref,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useState,
+} from "react";
 import { useNavigate } from "react-router-dom";
 import { Streamdown } from "streamdown";
 import { useAppSheetActions } from "../../features/sheets/SheetContext";
@@ -68,7 +76,10 @@ export function AiMessage({
   messageId?: string;
 }) {
   return (
-    <article className={`ai-message ${messageRole === "user" ? "ai-user" : "ai-assistant"}`} data-ai-message-id={messageId}>
+    <article
+      className={`ai-message ${messageRole === "user" ? "ai-user" : "ai-assistant"}`}
+      data-ai-message-id={messageId}
+    >
       {children}
     </article>
   );
@@ -143,7 +154,10 @@ export function AiPromptInput({
   const hasContent = input.trim().length > 0 || attachments.length > 0;
   const expanded = attachments.length > 0 || input.includes("\n");
   return (
-    <form className={`ai-composer ${hasContent ? "has-content" : ""} ${expanded ? "expanded" : ""} ${showAttachmentButton ? "" : "no-attach"}`} onSubmit={onSubmit}>
+    <form
+      className={`ai-composer ${hasContent ? "has-content" : ""} ${expanded ? "expanded" : ""} ${showAttachmentButton ? "" : "no-attach"}`}
+      onSubmit={onSubmit}
+    >
       <ImportAttachmentCards attachments={attachments} onRemove={onClearAttachment} />
       {attachmentError && <p className="ai-composer-notice">{attachmentError}</p>}
       {showAttachmentButton ? (
@@ -180,11 +194,22 @@ export function AiPromptInput({
         rows={1}
       />
       {isStreaming ? (
-        <Button className="ai-composer-send stop" type="button" size="icon" aria-label="停止" onClick={onStop}>
+        <Button
+          className="ai-composer-send stop"
+          type="button"
+          size="icon"
+          aria-label="停止"
+          onClick={onStop}
+        >
           <XIcon />
         </Button>
       ) : (
-        <Button className="ai-composer-send" aria-label="发送" size="icon" disabled={busy || (!input.trim() && attachments.length === 0)}>
+        <Button
+          className="ai-composer-send"
+          aria-label="发送"
+          size="icon"
+          disabled={busy || (!input.trim() && attachments.length === 0)}
+        >
           <ArrowUpIcon weight="bold" />
         </Button>
       )}
@@ -217,7 +242,10 @@ export function AiPendingConfirmationBar({
 }) {
   const [now, setNow] = useState(() => Date.now());
   const cancelWhenExpired = useEffectEvent(onCancel);
-  const createdAt = useMemo(() => Math.max(Date.now(), expiresAt - progressDurationMs), [expiresAt, progressDurationMs]);
+  const createdAt = useMemo(
+    () => Math.max(Date.now(), expiresAt - progressDurationMs),
+    [expiresAt, progressDurationMs],
+  );
   const remaining = Math.max(0, expiresAt - now);
   const progress = Math.max(0, Math.min(1, remaining / Math.max(1, expiresAt - createdAt)));
   const attachmentNames = attachments?.map((attachment) => attachment.file.name).join("、");
@@ -239,7 +267,10 @@ export function AiPendingConfirmationBar({
   });
 
   return (
-    <section className="ai-pending-confirmation" aria-label={attachments?.length ? "附件保存确认" : "AI 操作确认"}>
+    <section
+      className="ai-pending-confirmation"
+      aria-label={attachments?.length ? "附件保存确认" : "AI 操作确认"}
+    >
       <div className="ai-pending-copy">
         <strong>{title}</strong>
         {(description || attachmentNames) && <span>{description ?? attachmentNames}</span>}
@@ -264,7 +295,13 @@ export function AiToolStatus({ part }: { part: AiToolStatusPart }) {
   const complete = part.status === "success";
   return (
     <section className={`ai-structured-card ai-tool-status ${failed ? "failed" : complete ? "success" : ""}`}>
-      {failed ? <WarningCircleIcon weight="fill" /> : complete ? <CheckCircleIcon weight="fill" /> : <CircleNotchIcon weight="bold" />}
+      {failed ? (
+        <WarningCircleIcon weight="fill" />
+      ) : complete ? (
+        <CheckCircleIcon weight="fill" />
+      ) : (
+        <CircleNotchIcon weight="bold" />
+      )}
       <div>
         <strong>{part.label ?? part.toolName ?? "正在处理"}</strong>
         {part.message && <p>{part.message}</p>}
@@ -282,7 +319,12 @@ export function AiRecordCard({ part }: { part: AiRecordCardPart }) {
         <p>{[part.categoryName, part.note, part.occurredAt].filter(Boolean).join(" · ")}</p>
       </div>
       {part.amount !== undefined && <b>{part.amount}</b>}
-      {part.href && part.pageName && <AiNavigationCard part={{ type: "navigation-card", pageName: part.pageName, href: part.href }} compact />}
+      {part.href && part.pageName && (
+        <AiNavigationCard
+          part={{ type: "navigation-card", pageName: part.pageName, href: part.href }}
+          compact
+        />
+      )}
     </section>
   );
 }
@@ -307,13 +349,21 @@ export function AiSearchResultCard({ part }: { part: AiSearchResultCardPart }) {
               </div>
               {result.amount !== undefined && <b>{result.amount}</b>}
               {result.href && result.pageName && (
-                <AiNavigationCard part={{ type: "navigation-card", pageName: result.pageName, href: result.href }} compact />
+                <AiNavigationCard
+                  part={{ type: "navigation-card", pageName: result.pageName, href: result.href }}
+                  compact
+                />
               )}
             </div>
           ))}
         </div>
       ) : null}
-      {part.href && part.pageName && <AiNavigationCard part={{ type: "navigation-card", pageName: part.pageName, href: part.href }} compact />}
+      {part.href && part.pageName && (
+        <AiNavigationCard
+          part={{ type: "navigation-card", pageName: part.pageName, href: part.href }}
+          compact
+        />
+      )}
     </section>
   );
 }
@@ -366,7 +416,12 @@ export function AiImportJobCard({ part }: { part: AiImportJobCardPart }) {
           ))}
         </div>
       ) : null}
-      {part.href && part.pageName && <AiNavigationCard part={{ type: "navigation-card", pageName: part.pageName, href: part.href }} compact />}
+      {part.href && part.pageName && (
+        <AiNavigationCard
+          part={{ type: "navigation-card", pageName: part.pageName, href: part.href }}
+          compact
+        />
+      )}
     </section>
   );
 }
@@ -379,12 +434,23 @@ export function AiInviteCard({ part }: { part: AiInviteCardPart }) {
         <strong>{part.title ?? "成员邀请"}</strong>
         <p>{[part.email, part.role, part.status].filter(Boolean).join(" · ")}</p>
       </div>
-      {part.href && part.pageName && <AiNavigationCard part={{ type: "navigation-card", pageName: part.pageName, href: part.href }} compact />}
+      {part.href && part.pageName && (
+        <AiNavigationCard
+          part={{ type: "navigation-card", pageName: part.pageName, href: part.href }}
+          compact
+        />
+      )}
     </section>
   );
 }
 
-export function AiNavigationCard({ part, compact = false }: { part: AiNavigationCardPart; compact?: boolean }) {
+export function AiNavigationCard({
+  part,
+  compact = false,
+}: {
+  part: AiNavigationCardPart;
+  compact?: boolean;
+}) {
   const navigate = useNavigate();
   const { openSheet } = useAppSheetActions();
   const target = part.href ?? part.to ?? part.path ?? part.url;
@@ -474,13 +540,12 @@ export function AiConfirmation({ part }: { part: AiConfirmationPart }) {
   );
 }
 
-type TextSegment =
-  | { kind: "text"; text: string }
-  | { kind: "navigation"; part: AiNavigationCardPart };
+type TextSegment = { kind: "text"; text: string } | { kind: "navigation"; part: AiNavigationCardPart };
 
 function splitTextLinks(text: string): TextSegment[] {
   const segments: TextSegment[] = [];
-  const pattern = /\[([^\]]+)\]\(([^)]+)\)|(https?:\/\/[^\s)]+)|(\/(?:records|analysis|members|settings|books|home)(?:[^\s)]*)?)/g;
+  const pattern =
+    /\[([^\]]+)\]\(([^)]+)\)|(https?:\/\/[^\s)]+)|(\/(?:records|analysis|members|settings|books|home)(?:[^\s)]*)?)/g;
   let cursor = 0;
   for (const match of text.matchAll(pattern)) {
     const index = match.index ?? 0;

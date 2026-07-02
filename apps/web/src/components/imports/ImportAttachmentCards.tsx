@@ -1,10 +1,4 @@
-import {
-  CheckCircleIcon,
-  CircleNotchIcon,
-  FileIcon,
-  WarningCircleIcon,
-  XIcon,
-} from "@phosphor-icons/react";
+import { CheckCircleIcon, CircleNotchIcon, FileIcon, WarningCircleIcon, XIcon } from "@phosphor-icons/react";
 import { useState } from "react";
 
 export type ImportAttachmentView = {
@@ -61,7 +55,11 @@ export function ImportAttachmentCards({
               </div>
             )}
             {onRemove && !isLocked(attachment.status) && (
-              <button type="button" aria-label={`移除 ${attachment.file.name}`} onClick={() => onRemove(attachment.id)}>
+              <button
+                type="button"
+                aria-label={`移除 ${attachment.file.name}`}
+                onClick={() => onRemove(attachment.id)}
+              >
                 <XIcon size={16} />
               </button>
             )}
@@ -71,7 +69,11 @@ export function ImportAttachmentCards({
               </span>
             )}
             {attachment.status === "failed" && (
-              <span className="import-card-status failed" title={attachment.errorMessage} aria-label="处理失败">
+              <span
+                className="import-card-status failed"
+                title={attachment.errorMessage}
+                aria-label="处理失败"
+              >
                 <WarningCircleIcon size={34} weight="fill" />
                 {attachment.retryable && onRetry && (
                   <button
@@ -156,7 +158,8 @@ function importProgressLabel(attachment: ImportAttachmentView) {
   if (typeof attachment.currentPage === "number" && typeof attachment.totalPages === "number") {
     return `第 ${attachment.currentPage}/${attachment.totalPages} 页`;
   }
-  if (typeof attachment.progress === "number" && attachment.progress > 0) return `OCR ${attachment.progress}%`;
+  if (typeof attachment.progress === "number" && attachment.progress > 0)
+    return `OCR ${attachment.progress}%`;
   return "处理中";
 }
 

@@ -38,7 +38,13 @@ import { api } from "../lib";
 
 type Resource = { id: string; name: string; type?: "income" | "expense"; icon?: string; sortOrder?: number };
 type ImportJobSummary = { id: string; fileName?: string; status: string };
-type ProfileEditState = { avatarUploading: boolean; email: string; error: string; name: string; saving: boolean };
+type ProfileEditState = {
+  avatarUploading: boolean;
+  email: string;
+  error: string;
+  name: string;
+  saving: boolean;
+};
 type ProfileEditAction =
   | { type: "field"; field: "email" | "name"; value: string }
   | { type: "avatar-start" }
@@ -66,13 +72,17 @@ export function SettingsPage() {
   const { book } = useActiveBook();
   const { openSheet } = useAppSheetActions();
   const { unreadCount: invitationBadge } = useInvitationBadge(user?.id);
-  const { data: importsData } = useApi<{ imports: ImportJobSummary[] }>(book ? `/books/${book.id}/imports` : undefined);
+  const { data: importsData } = useApi<{ imports: ImportJobSummary[] }>(
+    book ? `/books/${book.id}/imports` : undefined,
+  );
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const imports = importsData?.imports ?? [];
   const pendingCount = imports.filter((job) => job.status === "pending_confirmation").length;
   const imageTasks = imports.filter(
-    (job) => job.status !== "pending_confirmation" && (!terminalImportStatuses.has(job.status) || job.status === "failed"),
+    (job) =>
+      job.status !== "pending_confirmation" &&
+      (!terminalImportStatuses.has(job.status) || job.status === "failed"),
   );
   const statusItems = [
     pendingCount > 0
@@ -168,16 +178,34 @@ export function SettingsPage() {
         </Link>
 
         <SettingsSection title="账本与协作">
-          <SettingsRow to="/books/manage" icon={<BookOpenIcon size={18} />} label="管理账本" detail={book?.name} />
-          <SettingsRow sheet={{ type: "members" }} icon={<UsersThreeIcon size={18} />} label="成员与邀请" badge={invitationBadge} />
+          <SettingsRow
+            to="/books/manage"
+            icon={<BookOpenIcon size={18} />}
+            label="管理账本"
+            detail={book?.name}
+          />
+          <SettingsRow
+            sheet={{ type: "members" }}
+            icon={<UsersThreeIcon size={18} />}
+            label="成员与邀请"
+            badge={invitationBadge}
+          />
           <SettingsRow to="/settings/categories" icon={<TagIcon size={18} />} label="分类管理" />
         </SettingsSection>
         <SettingsSection title="数据">
-          <SettingsRow sheet={{ type: "settings-export" }} icon={<DownloadSimpleIcon size={18} />} label="导出数据" />
+          <SettingsRow
+            sheet={{ type: "settings-export" }}
+            icon={<DownloadSimpleIcon size={18} />}
+            label="导出数据"
+          />
         </SettingsSection>
         <SettingsSection title="账户">
           <SettingsRow to="/account" icon={<ShieldCheckIcon size={18} />} label="账户与安全" />
-          <SettingsRow sheet={{ type: "settings-help" }} icon={<LifebuoyIcon size={18} />} label="帮助与反馈" />
+          <SettingsRow
+            sheet={{ type: "settings-help" }}
+            icon={<LifebuoyIcon size={18} />}
+            label="帮助与反馈"
+          />
           <SettingsRow sheet={{ type: "settings-about" }} icon={<InfoIcon size={18} />} label="关于一起记" />
         </SettingsSection>
         <button className="ios-logout-row" type="button" onClick={() => setLogoutOpen(true)}>
@@ -203,13 +231,16 @@ export function SettingsPage() {
 function ProfileEditSheet({ close }: { close: () => void }) {
   const { user, setUser } = useAuth();
   const avatarInputRef = useRef<HTMLInputElement>(null);
-  const [{ avatarUploading, email, error, name, saving }, dispatchProfileEdit] = useReducer(profileEditReducer, {
-    avatarUploading: false,
-    email: user?.email ?? "",
-    error: "",
-    name: user?.name ?? "",
-    saving: false,
-  });
+  const [{ avatarUploading, email, error, name, saving }, dispatchProfileEdit] = useReducer(
+    profileEditReducer,
+    {
+      avatarUploading: false,
+      email: user?.email ?? "",
+      error: "",
+      name: user?.name ?? "",
+      saving: false,
+    },
+  );
 
   const uploadAvatar = async (file?: File) => {
     if (!file || avatarUploading) return;
@@ -224,7 +255,10 @@ function ProfileEditSheet({ close }: { close: () => void }) {
       setUser(result.user);
       toast.success("头像已更新", { duration: 2400, closeButton: true });
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "头像上传失败", { duration: 3000, closeButton: true });
+      toast.error(cause instanceof Error ? cause.message : "头像上传失败", {
+        duration: 3000,
+        closeButton: true,
+      });
     } finally {
       dispatchProfileEdit({ type: "avatar-finish" });
       if (avatarInputRef.current) avatarInputRef.current.value = "";
@@ -251,7 +285,11 @@ function ProfileEditSheet({ close }: { close: () => void }) {
     <IosSheet
       title="编辑个人资料"
       onClose={close}
-      footer={<IosButton disabled={saving || !name.trim()} onClick={() => void save()}>{saving ? "保存中…" : "保存资料"}</IosButton>}
+      footer={
+        <IosButton disabled={saving || !name.trim()} onClick={() => void save()}>
+          {saving ? "保存中…" : "保存资料"}
+        </IosButton>
+      }
     >
       <div className="ios-profile-edit-sheet">
         <input
@@ -262,15 +300,33 @@ function ProfileEditSheet({ close }: { close: () => void }) {
           accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
           onChange={(event) => void uploadAvatar(event.currentTarget.files?.[0])}
         />
-        <button className="ios-profile-edit-avatar" type="button" disabled={avatarUploading} onClick={() => avatarInputRef.current?.click()}>
+        <button
+          className="ios-profile-edit-avatar"
+          type="button"
+          disabled={avatarUploading}
+          onClick={() => avatarInputRef.current?.click()}
+        >
           <ProfileAvatar name={user?.name} url={user?.avatarUrl} />
           <small>{avatarUploading ? "上传中…" : "更换头像"}</small>
         </button>
         <IosField label="昵称" error={!name.trim() ? "请输入昵称" : undefined}>
-          <Input value={name} onChange={(event) => dispatchProfileEdit({ type: "field", field: "name", value: event.currentTarget.value })} placeholder="昵称" />
+          <Input
+            value={name}
+            onChange={(event) =>
+              dispatchProfileEdit({ type: "field", field: "name", value: event.currentTarget.value })
+            }
+            placeholder="昵称"
+          />
         </IosField>
         <IosField label="邮箱">
-          <Input type="email" value={email} onChange={(event) => dispatchProfileEdit({ type: "field", field: "email", value: event.currentTarget.value })} placeholder="可选，用于邀请和找回" />
+          <Input
+            type="email"
+            value={email}
+            onChange={(event) =>
+              dispatchProfileEdit({ type: "field", field: "email", value: event.currentTarget.value })
+            }
+            placeholder="可选，用于邀请和找回"
+          />
         </IosField>
         {error && <p className="field-error">{error}</p>}
       </div>
@@ -298,7 +354,11 @@ export function ManagementSettingsPage() {
   const location = useLocation();
   const { id: routeBookId } = useParams();
 
-  if (location.pathname.includes("/export") || location.pathname.includes("/help") || location.pathname.includes("/about")) {
+  if (
+    location.pathname.includes("/export") ||
+    location.pathname.includes("/help") ||
+    location.pathname.includes("/about")
+  ) {
     return <Navigate to="/settings" replace />;
   }
   if (location.pathname.includes("/categories")) return <CategoryManagerPage />;
@@ -308,7 +368,9 @@ export function ManagementSettingsPage() {
 
 function BookSettingsPage({ bookId }: { bookId: string }) {
   const navigate = useNavigate();
-  const { data, reload } = useApi<{ book: { name: string; currency: string }; role?: string }>(`/books/${bookId}`);
+  const { data, reload } = useApi<{ book: { name: string; currency: string }; role?: string }>(
+    `/books/${bookId}`,
+  );
   const [bookNameEdit, setBookNameEdit] = useState<{ bookId: string; name: string }>();
   const [bookError, setBookError] = useState("");
   const [savingBook, setSavingBook] = useState(false);
@@ -367,7 +429,10 @@ function BookSettingsPage({ bookId }: { bookId: string }) {
                 placeholder="账本名称"
               />
             </IosField>
-            <IosButton disabled={savingBook || !trimmedBookName || trimmedBookName === data?.book.name} onClick={() => void saveBook()}>
+            <IosButton
+              disabled={savingBook || !trimmedBookName || trimmedBookName === data?.book.name}
+              onClick={() => void saveBook()}
+            >
               {savingBook ? "保存中…" : "保存名称"}
             </IosButton>
           </IosCard>
@@ -500,7 +565,9 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
     setBusy(true);
     try {
       const payload = await api(`/books/${book.id}/export`);
-      const objectUrl = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
+      const objectUrl = URL.createObjectURL(
+        new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }),
+      );
       const anchor = document.createElement("a");
       anchor.href = objectUrl;
       anchor.download = `${book.name}-export.json`;
@@ -524,12 +591,14 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
       <div className="ios-me-scroll">
         <IosCard className="ios-export-card">
           <h2>本次导出包含</h2>
-          {["账本信息与默认货币", "全部成员与角色", "全部交易与明细", "类别与邀请记录", "相关元数据"].map((item) => (
-            <p key={item}>
-              <i />
-              {item}
-            </p>
-          ))}
+          {["账本信息与默认货币", "全部成员与角色", "全部交易与明细", "类别与邀请记录", "相关元数据"].map(
+            (item) => (
+              <p key={item}>
+                <i />
+                {item}
+              </p>
+            ),
+          )}
         </IosCard>
         <p className="ios-export-note">导出格式为 JSON，文件仅包含你有权访问的数据。</p>
       </div>

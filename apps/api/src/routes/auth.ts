@@ -1,4 +1,10 @@
-import { changePasswordSchema, loginSchema, registerSchema, subscriptionContactSchema, updateProfileSchema } from "@shared-ledger/shared";
+import {
+  changePasswordSchema,
+  loginSchema,
+  registerSchema,
+  subscriptionContactSchema,
+  updateProfileSchema,
+} from "@shared-ledger/shared";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { Hono } from "hono";
 import { jsonError, parseJson } from "../lib/http";
@@ -89,7 +95,8 @@ export function registerAuthRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryL
     }
     if (context.env.APP_ENV !== "test" || !store) return jsonError(context, "认证需要 D1 运行时", 503);
     const user = store.users.find(
-      (item) => item.name === body.identifier || item.email === body.identifier || item.id === body.identifier,
+      (item) =>
+        item.name === body.identifier || item.email === body.identifier || item.id === body.identifier,
     );
     return user ? context.json({ user }) : jsonError(context, "账号或密码错误", 401);
   });

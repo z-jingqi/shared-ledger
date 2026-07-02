@@ -134,7 +134,11 @@ function BottomTab({
   bookQuery: string;
 }) {
   return (
-    <Link className={`ios-bottom-tab${active ? " active" : ""}`} to={`${to}${bookQuery}`} aria-current={active ? "page" : undefined}>
+    <Link
+      className={`ios-bottom-tab${active ? " active" : ""}`}
+      to={`${to}${bookQuery}`}
+      aria-current={active ? "page" : undefined}
+    >
       <span className="ios-bottom-tab-icon">
         <Icon size={24} weight={active ? "fill" : "regular"} aria-hidden />
         {badge > 0 ? <em>{badge > 9 ? "9+" : badge}</em> : null}

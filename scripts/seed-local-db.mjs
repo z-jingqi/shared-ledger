@@ -77,29 +77,25 @@ writeFileSync(sqlPath, sql, "utf8");
 mkdirSync(resolve(root, ".wrangler", "xdg.config"), { recursive: true });
 
 const command = pnpmCommand([
-    "--filter",
-    "@shared-ledger/api",
-    "exec",
-    "wrangler",
-    "d1",
-    "execute",
-    "shared-ledger-local",
-    "--local",
-    "--config",
-    "wrangler.local.jsonc",
-    "--file",
-    sqlPath,
+  "--filter",
+  "@shared-ledger/api",
+  "exec",
+  "wrangler",
+  "d1",
+  "execute",
+  "shared-ledger-local",
+  "--local",
+  "--config",
+  "wrangler.local.jsonc",
+  "--file",
+  sqlPath,
 ]);
-const result = spawnSync(
-  command.command,
-  command.args,
-  {
-    cwd: root,
-    env: localWranglerEnv(root),
-    shell: command.shell,
-    stdio: "inherit",
-  },
-);
+const result = spawnSync(command.command, command.args, {
+  cwd: root,
+  env: localWranglerEnv(root),
+  shell: command.shell,
+  stdio: "inherit",
+});
 
 if (result.error) {
   console.error(result.error);
@@ -109,7 +105,9 @@ console.log(`Seeded local D1 with ${seed.username} / ${seed.password}`);
 
 async function hashPassword(password) {
   const salt = randomToken(16);
-  const key = await webcrypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
+  const key = await webcrypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, [
+    "deriveBits",
+  ]);
   const bits = await webcrypto.subtle.deriveBits(
     { name: "PBKDF2", hash: "SHA-256", salt: encoder.encode(salt), iterations: 210_000 },
     key,

@@ -73,7 +73,14 @@ export function AccountSettingsPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [passwordState, dispatchPassword] = useReducer(passwordReducer, initialPasswordState);
-  const { currentPassword, newPassword, confirmPassword, error: passwordError, saved: passwordSaved, saving: savingPassword } = passwordState;
+  const {
+    currentPassword,
+    newPassword,
+    confirmPassword,
+    error: passwordError,
+    saved: passwordSaved,
+    saving: savingPassword,
+  } = passwordState;
   const changePassword = async () => {
     if (newPassword !== confirmPassword) {
       dispatchPassword({ type: "error", error: "两次输入的新密码不一致" });
@@ -100,7 +107,9 @@ export function AccountSettingsPage() {
           </IconTile>
           <div>
             <b>账号安全</b>
-            <small>{user?.email || user?.name || "当前账号"} · {user?.plan === "pro" ? "Pro" : "Free"}</small>
+            <small>
+              {user?.email || user?.name || "当前账号"} · {user?.plan === "pro" ? "Pro" : "Free"}
+            </small>
           </div>
         </IosCard>
         <section className="ios-settings-section">
@@ -112,7 +121,13 @@ export function AccountSettingsPage() {
                 autoComplete="current-password"
                 type="password"
                 value={currentPassword}
-                onChange={(event) => dispatchPassword({ type: "field", field: "currentPassword", value: event.currentTarget.value })}
+                onChange={(event) =>
+                  dispatchPassword({
+                    type: "field",
+                    field: "currentPassword",
+                    value: event.currentTarget.value,
+                  })
+                }
               />
             </IosField>
             <IosField label="新密码">
@@ -121,7 +136,9 @@ export function AccountSettingsPage() {
                 autoComplete="new-password"
                 type="password"
                 value={newPassword}
-                onChange={(event) => dispatchPassword({ type: "field", field: "newPassword", value: event.currentTarget.value })}
+                onChange={(event) =>
+                  dispatchPassword({ type: "field", field: "newPassword", value: event.currentTarget.value })
+                }
                 placeholder="至少 6 位"
               />
             </IosField>
@@ -131,11 +148,20 @@ export function AccountSettingsPage() {
                 autoComplete="new-password"
                 type="password"
                 value={confirmPassword}
-                onChange={(event) => dispatchPassword({ type: "field", field: "confirmPassword", value: event.currentTarget.value })}
+                onChange={(event) =>
+                  dispatchPassword({
+                    type: "field",
+                    field: "confirmPassword",
+                    value: event.currentTarget.value,
+                  })
+                }
               />
             </IosField>
             {passwordSaved ? <p className="ios-success-note">密码已更新，下次登录请使用新密码。</p> : null}
-            <IosButton disabled={savingPassword || !currentPassword || !newPassword || !confirmPassword} onClick={() => void changePassword()}>
+            <IosButton
+              disabled={savingPassword || !currentPassword || !newPassword || !confirmPassword}
+              onClick={() => void changePassword()}
+            >
               {savingPassword ? "保存中…" : "修改密码"}
             </IosButton>
           </IosCard>
@@ -239,8 +265,20 @@ export function LoginPage() {
   return (
     <AuthShell title="欢迎回来" subtitle="继续维护你和家人的共享账本">
       <form className="ios-auth-form" onSubmit={submit}>
-        <AuthInput icon={<UserCircleIcon size={19} />} label="用户名" placeholder="用户名 / 邮箱 / 手机号" autoComplete="username" registration={form.register("identifier")} />
-        <PasswordInput label="密码" placeholder="密码" autoComplete="current-password" value={form.watch("password")} onChange={(value) => form.setValue("password", value, { shouldDirty: true })} />
+        <AuthInput
+          icon={<UserCircleIcon size={19} />}
+          label="用户名"
+          placeholder="用户名 / 邮箱 / 手机号"
+          autoComplete="username"
+          registration={form.register("identifier")}
+        />
+        <PasswordInput
+          label="密码"
+          placeholder="密码"
+          autoComplete="current-password"
+          value={form.watch("password")}
+          onChange={(value) => form.setValue("password", value, { shouldDirty: true })}
+        />
         {error && <p className="field-error">{error}</p>}
         <IosButton disabled={form.formState.isSubmitting} type="submit">
           {form.formState.isSubmitting ? "登录中…" : "登录"}
@@ -279,9 +317,27 @@ export function RegisterPage() {
   return (
     <AuthShell title="创建账号" subtitle="几秒钟后，你就能开始创建共享账本">
       <form className="ios-auth-form" onSubmit={submit}>
-        <AuthInput icon={<UserCircleIcon size={19} />} label="用户名" placeholder="用户名" autoComplete="username" registration={form.register("name")} />
-        <PasswordInput label="密码" placeholder="密码（至少 6 位）" autoComplete="new-password" value={form.watch("password")} onChange={(value) => form.setValue("password", value, { shouldDirty: true })} />
-        <PasswordInput label="确认密码" placeholder="确认密码" autoComplete="new-password" value={form.watch("confirmPassword")} onChange={(value) => form.setValue("confirmPassword", value, { shouldDirty: true })} />
+        <AuthInput
+          icon={<UserCircleIcon size={19} />}
+          label="用户名"
+          placeholder="用户名"
+          autoComplete="username"
+          registration={form.register("name")}
+        />
+        <PasswordInput
+          label="密码"
+          placeholder="密码（至少 6 位）"
+          autoComplete="new-password"
+          value={form.watch("password")}
+          onChange={(value) => form.setValue("password", value, { shouldDirty: true })}
+        />
+        <PasswordInput
+          label="确认密码"
+          placeholder="确认密码"
+          autoComplete="new-password"
+          value={form.watch("confirmPassword")}
+          onChange={(value) => form.setValue("confirmPassword", value, { shouldDirty: true })}
+        />
         {error && <p className="field-error">{error}</p>}
         <IosButton disabled={form.formState.isSubmitting} type="submit">
           {form.formState.isSubmitting ? "创建中…" : "创建账号"}
@@ -356,7 +412,11 @@ function PasswordInput({
         value={value}
         onChange={(event) => onChange(event.currentTarget.value)}
       />
-      <button type="button" aria-label={`${visible ? "隐藏" : "显示"}${label}`} onClick={() => setVisible((current) => !current)}>
+      <button
+        type="button"
+        aria-label={`${visible ? "隐藏" : "显示"}${label}`}
+        onClick={() => setVisible((current) => !current)}
+      >
         {visible ? <EyeSlashIcon size={20} /> : <EyeIcon size={20} />}
       </button>
     </label>

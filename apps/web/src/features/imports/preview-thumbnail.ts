@@ -7,13 +7,7 @@ export type PreviewThumbnailOptions = {
 };
 
 export async function createPreviewThumbnail(blob: Blob, options: PreviewThumbnailOptions = {}) {
-  const {
-    maxWidth = 240,
-    maxHeight = 240,
-    type = "image/webp",
-    quality = 0.82,
-    signal,
-  } = options;
+  const { maxWidth = 240, maxHeight = 240, type = "image/webp", quality = 0.82, signal } = options;
   if (!blob.type.startsWith("image/")) throw new Error("只能为图片生成预览缩略图");
   assertNotAborted(signal);
 

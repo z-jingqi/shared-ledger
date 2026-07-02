@@ -1,6 +1,10 @@
 import { useMemo, useSyncExternalStore } from "react";
 import { useApi } from "../../hooks/useApi";
-import { countUnviewedPendingInvitations, getViewedInvitationSnapshot, onInvitationViewsChanged } from "./viewed";
+import {
+  countUnviewedPendingInvitations,
+  getViewedInvitationSnapshot,
+  onInvitationViewsChanged,
+} from "./viewed";
 
 export type ReceivedInvitation = {
   id: string;

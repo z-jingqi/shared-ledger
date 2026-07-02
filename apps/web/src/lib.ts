@@ -41,7 +41,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await apiFetch(path, init);
   if (!response.ok) {
     const error = await parseError(response);
-    throw new ApiError(error.error ?? "请求失败", response.status, error.code, error.requestId, error.details);
+    throw new ApiError(
+      error.error ?? "请求失败",
+      response.status,
+      error.code,
+      error.requestId,
+      error.details,
+    );
   }
   if (response.status === 204) return undefined as T;
   return response.json();

@@ -154,7 +154,10 @@ export function normalizeAiPart(part: unknown): AiStructuredPart | undefined {
   const candidate = part as Record<string, unknown>;
   const rawType = typeof candidate.type === "string" ? candidate.type : "";
   const type = rawType.startsWith("data-") ? rawType.slice(5) : rawType;
-  const data = candidate.data && typeof candidate.data === "object" ? (candidate.data as Record<string, unknown>) : undefined;
+  const data =
+    candidate.data && typeof candidate.data === "object"
+      ? (candidate.data as Record<string, unknown>)
+      : undefined;
   const payload = data ?? candidate;
   if (type === "text" && typeof payload.text === "string") return { type, text: payload.text };
   if (!structuredPartTypes.has(type)) return undefined;
@@ -174,7 +177,10 @@ function normalizeToolStatus(payload: Record<string, unknown>): AiToolStatusPart
       ? "failed"
       : rawStatus === "pending_confirmation"
         ? "pending"
-        : rawStatus === "failed" || rawStatus === "success" || rawStatus === "running" || rawStatus === "pending"
+        : rawStatus === "failed" ||
+            rawStatus === "success" ||
+            rawStatus === "running" ||
+            rawStatus === "pending"
           ? rawStatus
           : undefined;
   return {
@@ -204,7 +210,11 @@ function normalizeRecordCard(payload: Record<string, unknown>): AiRecordCardPart
 }
 
 function normalizeSearchResultCard(payload: Record<string, unknown>): AiSearchResultCardPart {
-  const rawResults = Array.isArray(payload.results) ? payload.results : Array.isArray(payload.records) ? payload.records : [];
+  const rawResults = Array.isArray(payload.results)
+    ? payload.results
+    : Array.isArray(payload.records)
+      ? payload.records
+      : [];
   return {
     type: "search-result-card",
     ...(stringValue(payload.title) ? { title: stringValue(payload.title) } : {}),
@@ -220,10 +230,15 @@ function normalizeSearchResult(item: unknown, index: number) {
   const amount = numberOrString(record.amount);
   return {
     id: stringValue(record.id) ?? `ai_result_${index}`,
-    title: stringValue(record.title) ?? stringValue(record.note) ?? stringValue(record.categoryName) ?? "记录",
+    title:
+      stringValue(record.title) ?? stringValue(record.note) ?? stringValue(record.categoryName) ?? "记录",
     ...(stringValue(record.description)
       ? { description: stringValue(record.description) }
-      : { description: [stringValue(record.categoryName), stringValue(record.occurredAt)].filter(Boolean).join(" · ") }),
+      : {
+          description: [stringValue(record.categoryName), stringValue(record.occurredAt)]
+            .filter(Boolean)
+            .join(" · "),
+        }),
     ...(amount !== undefined ? { amount } : {}),
     ...(stringValue(record.pageName) ? { pageName: stringValue(record.pageName) } : {}),
     ...(stringValue(record.href) ? { href: stringValue(record.href) } : {}),
@@ -236,7 +251,11 @@ function normalizeAnalysisCard(payload: Record<string, unknown>): AiAnalysisCard
   return {
     type: "analysis-card",
     title: stringValue(payload.title) ?? "分析",
-    ...(stringValue(payload.summary) ? { summary: stringValue(payload.summary) } : insights.length ? { summary: insights.join("；") } : {}),
+    ...(stringValue(payload.summary)
+      ? { summary: stringValue(payload.summary) }
+      : insights.length
+        ? { summary: insights.join("；") }
+        : {}),
     metrics: normalizeMetrics(rawMetrics),
   };
 }
@@ -283,13 +302,17 @@ function normalizeConfirmation(payload: Record<string, unknown>): AiConfirmation
   const source = confirmation ?? payload;
   return {
     type: "confirmation",
-    ...(stringValue(source.id) ?? stringValue(source.confirmationId)
+    ...((stringValue(source.id) ?? stringValue(source.confirmationId))
       ? { confirmationId: stringValue(source.id) ?? stringValue(source.confirmationId) }
       : {}),
     ...(stringValue(source.action) ? { action: stringValue(source.action) } : {}),
-    title: stringValue(source.summary) ?? stringValue(source.title) ?? stringValue(payload.title) ?? "需要确认",
-    ...(stringValue(source.message) ?? stringValue(source.description) ?? stringValue(payload.message)
-      ? { message: stringValue(source.message) ?? stringValue(source.description) ?? stringValue(payload.message) }
+    title:
+      stringValue(source.summary) ?? stringValue(source.title) ?? stringValue(payload.title) ?? "需要确认",
+    ...((stringValue(source.message) ?? stringValue(source.description) ?? stringValue(payload.message))
+      ? {
+          message:
+            stringValue(source.message) ?? stringValue(source.description) ?? stringValue(payload.message),
+        }
       : {}),
     ...(stringValue(source.confirmLabel) ? { confirmLabel: stringValue(source.confirmLabel) } : {}),
     ...(stringValue(source.cancelLabel) ? { cancelLabel: stringValue(source.cancelLabel) } : {}),
@@ -298,7 +321,9 @@ function normalizeConfirmation(payload: Record<string, unknown>): AiConfirmation
 }
 
 function objectValue(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
 }
 
 function stringValue(value: unknown) {

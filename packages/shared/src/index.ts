@@ -119,7 +119,10 @@ export const inviteSchema = z
     userId: idSchema.optional(),
     role: z.enum(["admin", "member"]).default("member"),
   })
-  .refine((data) => data.target || data.email || data.phone || data.userId, "请输入邮箱、手机号、用户名或用户 ID");
+  .refine(
+    (data) => data.target || data.email || data.phone || data.userId,
+    "请输入邮箱、手机号、用户名或用户 ID",
+  );
 export const categorySchema = z.object({
   name: z.string().trim().min(1).max(30),
   type: z.enum(transactionTypes),
@@ -165,7 +168,9 @@ export type AiConfirmationAction = z.infer<typeof aiConfirmationActionSchema>;
 const aiEntityNameSchema = z.string().trim().min(1).max(80);
 const aiDateValueSchema = z.string().trim().min(1).max(40);
 const aiAmountFilterSchema = z.coerce.number().nonnegative().finite().multipleOf(0.01);
-const aiSortSchema = z.enum(["occurredAt_desc", "occurredAt_asc", "amount_desc", "amount_asc"]).default("occurredAt_desc");
+const aiSortSchema = z
+  .enum(["occurredAt_desc", "occurredAt_asc", "amount_desc", "amount_asc"])
+  .default("occurredAt_desc");
 
 export const aiTransactionCandidateSchema = z.object({
   type: z.enum(transactionTypes).optional(),
@@ -231,7 +236,9 @@ export const aiNormalizedSearchFiltersSchema = z.object({
 export type AiNormalizedSearchFilters = z.infer<typeof aiNormalizedSearchFiltersSchema>;
 
 export const aiIngestionResultSchema = z.object({
-  status: z.enum(["not_requested", "pending", "ready", "needs_confirmation", "completed", "failed"]).default("not_requested"),
+  status: z
+    .enum(["not_requested", "pending", "ready", "needs_confirmation", "completed", "failed"])
+    .default("not_requested"),
   source: z.enum(["text", "attachment", "import-batch", "task"]).optional(),
   attachmentIds: z.array(idSchema).default([]),
   importJobIds: z.array(idSchema).default([]),
@@ -249,7 +256,14 @@ export type CreateTransactionInput = z.infer<typeof createTransactionSchema>;
 
 export const aiConfirmationStatuses = ["pending", "confirmed", "cancelled"] as const;
 export type AiConfirmationStatus = (typeof aiConfirmationStatuses)[number];
-export const aiTaskStatuses = ["queued", "running", "pending_confirmation", "completed", "failed", "cancelled"] as const;
+export const aiTaskStatuses = [
+  "queued",
+  "running",
+  "pending_confirmation",
+  "completed",
+  "failed",
+  "cancelled",
+] as const;
 export type AiTaskStatus = (typeof aiTaskStatuses)[number];
 
 export type AiToolStatusPart = {

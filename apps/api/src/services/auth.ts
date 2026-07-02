@@ -111,10 +111,7 @@ async function findUser(db: D1Database, where: string, value: string) {
     .first<UserRow>();
 }
 
-export async function createPasswordAccount(
-  db: D1Database,
-  input: { name: string; password: string },
-) {
+export async function createPasswordAccount(db: D1Database, input: { name: string; password: string }) {
   const username = input.name.trim();
   const existingIdentity = await db
     .prepare("SELECT id FROM auth_identities WHERE provider = 'password' AND provider_account_id = ? LIMIT 1")
@@ -136,7 +133,17 @@ export async function createPasswordAccount(
       .prepare(
         "INSERT INTO auth_identities (id,user_id,provider,provider_account_id,password_hash,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
       )
-      .bind(`identity_${crypto.randomUUID()}`, userId, "password", username, passwordHash, userId, userId, now, now),
+      .bind(
+        `identity_${crypto.randomUUID()}`,
+        userId,
+        "password",
+        username,
+        passwordHash,
+        userId,
+        userId,
+        now,
+        now,
+      ),
     db
       .prepare(
         "INSERT INTO subscriptions (id,user_id,plan,status,started_at,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
@@ -347,16 +354,21 @@ export async function changeUserPassword(
   input: { currentPassword: string; newPassword: string },
 ) {
   const identity = await db
-    .prepare("SELECT id,password_hash AS passwordHash FROM auth_identities WHERE user_id = ? AND provider = 'password'")
+    .prepare(
+      "SELECT id,password_hash AS passwordHash FROM auth_identities WHERE user_id = ? AND provider = 'password'",
+    )
     .bind(userId)
     .first<{ id: string; passwordHash: string }>();
   if (!identity) throw new Error("当前账号不支持密码修改");
-  if (!(await verifyPassword(input.currentPassword, identity.passwordHash))) throw new Error("当前密码不正确");
+  if (!(await verifyPassword(input.currentPassword, identity.passwordHash)))
+    throw new Error("当前密码不正确");
   const passwordHash = await hashPassword(input.newPassword);
   const now = new Date().toISOString();
   await db.batch([
     db
-      .prepare("UPDATE auth_identities SET password_hash = ?, updated_at = ?, updated_by_user_id = ? WHERE id = ?")
+      .prepare(
+        "UPDATE auth_identities SET password_hash = ?, updated_at = ?, updated_by_user_id = ? WHERE id = ?",
+      )
       .bind(passwordHash, now, userId, identity.id),
     db
       .prepare("UPDATE users SET password_hash = ?, updated_at = ?, updated_by_user_id = ? WHERE id = ?")

@@ -8,14 +8,7 @@ import {
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import {
-  IconTile,
-  IosButton,
-  IosCard,
-  IosField,
-  IosSegment,
-  IosSheet,
-} from "../components/ios/IosDesign";
+import { IconTile, IosButton, IosCard, IosField, IosSegment, IosSheet } from "../components/ios/IosDesign";
 import { yuan } from "../features/formatting/money";
 import { createPreviewThumbnail } from "../features/imports/preview-thumbnail";
 import { terminalImportStatuses, watchImportJobs, type ImportJobStatus } from "../features/imports/status";
@@ -68,7 +61,11 @@ const successStatuses = new Set(["completed", "pending_confirmation"]);
 const failedStatuses = new Set(["failed"]);
 const imageExtensions = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".heic", ".heif"];
 const emptyJobs: Job[] = [];
-const importDayFormatter = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "short" });
+const importDayFormatter = new Intl.DateTimeFormat("zh-CN", {
+  month: "long",
+  day: "numeric",
+  weekday: "short",
+});
 const thumbnailBlobCache = new Map<string, Blob>();
 const maxThumbnailCacheSize = 48;
 let activeThumbnailLoads = 0;
@@ -87,10 +84,15 @@ function pendingRecordsReducer(_: PendingRecordsState, action: PendingRecordsAct
 
 function usePendingRecords() {
   const { book } = useActiveBook();
-  const { data: jobs, reload: reloadJobs } = useApi<{ imports: Job[] }>(book ? `/books/${book.id}/imports` : undefined);
+  const { data: jobs, reload: reloadJobs } = useApi<{ imports: Job[] }>(
+    book ? `/books/${book.id}/imports` : undefined,
+  );
   const [{ records, error }, dispatchRecords] = useReducer(pendingRecordsReducer, { records: [], error: "" });
   const imports = jobs?.imports ?? emptyJobs;
-  const pendingJobs = useMemo(() => imports.filter((job) => job.status === "pending_confirmation"), [imports]);
+  const pendingJobs = useMemo(
+    () => imports.filter((job) => job.status === "pending_confirmation"),
+    [imports],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -98,12 +100,22 @@ function usePendingRecords() {
       dispatchRecords({ type: "reset" });
       return undefined;
     }
-    void Promise.all(pendingJobs.map((job) => api<{ records: PendingRecord[] }>(`/imports/${job.id}/records`)))
+    void Promise.all(
+      pendingJobs.map((job) => api<{ records: PendingRecord[] }>(`/imports/${job.id}/records`)),
+    )
       .then((results) => {
-        if (!cancelled) dispatchRecords({ type: "success", records: results.flatMap((item) => item.records.filter((record) => record.status === "pending")) });
+        if (!cancelled)
+          dispatchRecords({
+            type: "success",
+            records: results.flatMap((item) => item.records.filter((record) => record.status === "pending")),
+          });
       })
       .catch((cause) => {
-        if (!cancelled) dispatchRecords({ type: "error", error: cause instanceof Error ? cause.message : "读取待确认记录失败" });
+        if (!cancelled)
+          dispatchRecords({
+            type: "error",
+            error: cause instanceof Error ? cause.message : "读取待确认记录失败",
+          });
       });
     return () => {
       cancelled = true;
@@ -154,7 +166,10 @@ export function PendingImportsSheet({ onClose }: { onClose: () => void }) {
       toast.success("已全部确认", { duration: 2600, closeButton: true });
       await reload();
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "全部确认失败", { duration: 3000, closeButton: true });
+      toast.error(cause instanceof Error ? cause.message : "全部确认失败", {
+        duration: 3000,
+        closeButton: true,
+      });
     } finally {
       setBusy("");
     }
@@ -191,14 +206,21 @@ export function PendingImportsSheet({ onClose }: { onClose: () => void }) {
         onClose={close}
         right={
           records.length ? (
-            <button className="ios-sheet-text-action" type="button" disabled={busy === "all"} onClick={() => void confirmAll()}>
+            <button
+              className="ios-sheet-text-action"
+              type="button"
+              disabled={busy === "all"}
+              onClick={() => void confirmAll()}
+            >
               全部确认
             </button>
           ) : null
         }
       >
         <div className="ios-pending-sheet">
-          <p className="ios-sheet-note">以下记录由图片识别或 AI 生成，确认后才会正式入账。低置信度字段已标记，请核对。</p>
+          <p className="ios-sheet-note">
+            以下记录由图片识别或 AI 生成，确认后才会正式入账。低置信度字段已标记，请核对。
+          </p>
           {error && <p className="field-error">{error}</p>}
           {!records.length && (
             <div className="ios-empty">
@@ -236,13 +258,18 @@ export function ImportHistoryPage() {
 
 export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
   const { book } = useActiveBook();
-  const { data, error, reload } = useApi<{ imports: Job[]; retentionDays?: number }>(book ? `/books/${book.id}/imports` : undefined);
+  const { data, error, reload } = useApi<{ imports: Job[]; retentionDays?: number }>(
+    book ? `/books/${book.id}/imports` : undefined,
+  );
   const [filter, setFilter] = useState<JobFilter>("all");
   const [busyJobId, setBusyJobId] = useState("");
   const stopWatchingRef = useRef<(() => void) | undefined>(undefined);
   const close = onClose;
   const imports = data?.imports ?? emptyJobs;
-  const filteredImports = useMemo(() => imports.filter((job) => matchesJobFilter(job, filter)), [filter, imports]);
+  const filteredImports = useMemo(
+    () => imports.filter((job) => matchesJobFilter(job, filter)),
+    [filter, imports],
+  );
   const groupedImports = useMemo(() => groupJobsByDay(filteredImports), [filteredImports]);
   const activeImports = useMemo(() => {
     const ids: string[] = [];
@@ -309,7 +336,8 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
       <div className="ios-import-sheet">
         <section className="ios-import-hero">
           <p>
-            图片会在后台异步识别，完成后进入「待确认」，不会直接入账。这里只保留最近 {data?.retentionDays ?? 7} 天任务。
+            图片会在后台异步识别，完成后进入「待确认」，不会直接入账。这里只保留最近{" "}
+            {data?.retentionDays ?? 7} 天任务。
           </p>
           <div className="ios-import-stats" aria-label="识别任务统计">
             <span>
@@ -394,7 +422,10 @@ function PendingRecordCard({
   return (
     <IosCard className="ios-pending-card">
       <div className="ios-pending-main">
-        <IconTile tint={type === "income" ? "#e8f7ef" : "#fff0e8"} color={type === "income" ? "#1f9d57" : "#ff681c"}>
+        <IconTile
+          tint={type === "income" ? "#e8f7ef" : "#fff0e8"}
+          color={type === "income" ? "#1f9d57" : "#ff681c"}
+        >
           <ShoppingCartIcon size={18} weight="fill" />
         </IconTile>
         <span>
@@ -449,7 +480,11 @@ function PendingEditSheet({
     <IosSheet
       title="编辑识别记录"
       onClose={onClose}
-      footer={<IosButton disabled={busy} onClick={() => onSave(draft)}>{busy ? "保存中…" : "保存修改"}</IosButton>}
+      footer={
+        <IosButton disabled={busy} onClick={() => onSave(draft)}>
+          {busy ? "保存中…" : "保存修改"}
+        </IosButton>
+      }
     >
       <div className="ios-pending-edit">
         <IosField label="类型">
@@ -463,16 +498,38 @@ function PendingEditSheet({
           />
         </IosField>
         <IosField label="金额">
-          <input aria-label="金额" inputMode="decimal" value={draft.amount} onChange={(event) => setDraft((current) => ({ ...current, amount: event.currentTarget.value }))} />
+          <input
+            aria-label="金额"
+            inputMode="decimal"
+            value={draft.amount}
+            onChange={(event) => setDraft((current) => ({ ...current, amount: event.currentTarget.value }))}
+          />
         </IosField>
         <IosField label="类别">
-          <input aria-label="类别" value={draft.categoryName} onChange={(event) => setDraft((current) => ({ ...current, categoryName: event.currentTarget.value }))} />
+          <input
+            aria-label="类别"
+            value={draft.categoryName}
+            onChange={(event) =>
+              setDraft((current) => ({ ...current, categoryName: event.currentTarget.value }))
+            }
+          />
         </IosField>
         <IosField label="日期">
-          <input aria-label="日期" type="date" value={draft.occurredAt} onChange={(event) => setDraft((current) => ({ ...current, occurredAt: event.currentTarget.value }))} />
+          <input
+            aria-label="日期"
+            type="date"
+            value={draft.occurredAt}
+            onChange={(event) =>
+              setDraft((current) => ({ ...current, occurredAt: event.currentTarget.value }))
+            }
+          />
         </IosField>
         <IosField label="备注">
-          <textarea aria-label="备注" value={draft.note} onChange={(event) => setDraft((current) => ({ ...current, note: event.currentTarget.value }))} />
+          <textarea
+            aria-label="备注"
+            value={draft.note}
+            onChange={(event) => setDraft((current) => ({ ...current, note: event.currentTarget.value }))}
+          />
         </IosField>
       </div>
     </IosSheet>
@@ -490,7 +547,8 @@ function ImportJobCard({
   onRetry: () => void;
   onCancel: () => void;
 }) {
-  const tone = job.status === "failed" ? "failed" : terminalImportStatuses.has(job.status) ? "done" : "processing";
+  const tone =
+    job.status === "failed" ? "failed" : terminalImportStatuses.has(job.status) ? "done" : "processing";
   const Icon = getJobIcon();
   const statusText = formatJobStatus(job);
   return (
@@ -499,7 +557,9 @@ function ImportJobCard({
       <span>
         <b>{job.fileName}</b>
         <small>{statusText}</small>
-        {job.status === "failed" && job.errorStage && <em className="ios-import-error-stage">{job.errorStage}</em>}
+        {job.status === "failed" && job.errorStage && (
+          <em className="ios-import-error-stage">{job.errorStage}</em>
+        )}
         {job.status === "failed" && job.errorMessage && <p>{job.errorMessage}</p>}
         {!terminalImportStatuses.has(job.status) && (
           <i>
@@ -650,7 +710,8 @@ function formatJobStatus(job: Job) {
 
 function formatOcrProgress(job: Job) {
   if (job.stage === "storing_result") return "正在保存识别结果…";
-  if (typeof job.currentPage === "number" && typeof job.totalPages === "number") return `OCR 第 ${job.currentPage}/${job.totalPages} 页`;
+  if (typeof job.currentPage === "number" && typeof job.totalPages === "number")
+    return `OCR 第 ${job.currentPage}/${job.totalPages} 页`;
   if (typeof job.progress === "number") return `OCR ${job.progress}%`;
   return "OCR 正在识别…";
 }

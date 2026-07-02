@@ -69,7 +69,12 @@ export function AiSessionDirectory({
 }) {
   return (
     <div className="ios-ai-session-sheet-layer open">
-      <button className="ios-ai-session-sheet-backdrop" type="button" aria-label="关闭会话目录" onClick={onClose} />
+      <button
+        className="ios-ai-session-sheet-backdrop"
+        type="button"
+        aria-label="关闭会话目录"
+        onClick={onClose}
+      />
       <aside className="ios-ai-session-sheet" aria-label="AI 会话目录" ref={sheetRef}>
         <header>
           <span>
@@ -86,12 +91,20 @@ export function AiSessionDirectory({
         </button>
         <label className="ios-ai-session-search">
           <MagnifyingGlassIcon size={16} weight="bold" />
-          <input aria-label="搜索会话" value={searchValue} onChange={(event) => onSearchChange(event.currentTarget.value)} placeholder="搜索会话" />
+          <input
+            aria-label="搜索会话"
+            value={searchValue}
+            onChange={(event) => onSearchChange(event.currentTarget.value)}
+            placeholder="搜索会话"
+          />
         </label>
         <menu className="ios-ai-session-sheet-list" onScroll={onScroll}>
           {visibleSessions.length ? (
             visibleSessions.map((session) => (
-              <li className={`ios-ai-session-row${session.id === activeSessionId ? " active" : ""}`} key={session.id}>
+              <li
+                className={`ios-ai-session-row${session.id === activeSessionId ? " active" : ""}`}
+                key={session.id}
+              >
                 {renamingSessionId === session.id ? (
                   <label>
                     <input
@@ -102,13 +115,22 @@ export function AiSessionDirectory({
                     />
                   </label>
                 ) : (
-                  <button className="ios-ai-session-select" type="button" onClick={() => onSelectSession(session.id)}>
+                  <button
+                    className="ios-ai-session-select"
+                    type="button"
+                    onClick={() => onSelectSession(session.id)}
+                  >
                     <b>{session.title || "新会话"}</b>
                     <small>{formatSessionTime(session.updatedAt)}</small>
                   </button>
                 )}
                 {renamingSessionId === session.id ? (
-                  <button className="ios-ai-session-row-icon" type="button" aria-label="保存名称" onClick={onSaveRename}>
+                  <button
+                    className="ios-ai-session-row-icon"
+                    type="button"
+                    aria-label="保存名称"
+                    onClick={onSaveRename}
+                  >
                     <CheckIcon size={17} weight="bold" />
                   </button>
                 ) : (
@@ -130,7 +152,11 @@ export function AiSessionDirectory({
           )}
         </menu>
         {menuSession && menuPosition && (
-          <div className="ios-ai-session-menu" role="menu" style={{ top: menuPosition.top, right: menuPosition.right }}>
+          <div
+            className="ios-ai-session-menu"
+            role="menu"
+            style={{ top: menuPosition.top, right: menuPosition.right }}
+          >
             <button type="button" role="menuitem" onClick={() => onBeginRename(menuSession)}>
               <PencilSimpleIcon size={16} />
               重命名
@@ -141,7 +167,12 @@ export function AiSessionDirectory({
             </button>
           </div>
         )}
-        <button className="ios-ai-session-clear" type="button" onClick={onClearCurrent} disabled={!activeSessionId}>
+        <button
+          className="ios-ai-session-clear"
+          type="button"
+          onClick={onClearCurrent}
+          disabled={!activeSessionId}
+        >
           <TrashIcon size={16} />
           清空当前会话内容
         </button>
@@ -153,5 +184,10 @@ export function AiSessionDirectory({
 function formatSessionTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }

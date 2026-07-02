@@ -31,7 +31,11 @@ describe("D1 AI confirmation semantics", () => {
       context.env,
     );
     expect(createCategory.status).toBe(200);
-    expect(context.db.rows.categories.some((row) => row.user_id === user.id && row.name === "医疗" && !row.deleted_at)).toBe(true);
+    expect(
+      context.db.rows.categories.some(
+        (row) => row.user_id === user.id && row.name === "医疗" && !row.deleted_at,
+      ),
+    ).toBe(true);
 
     const deleteCategory = await context.app.request(
       `/ai/sessions/${session.id}/messages`,
@@ -43,11 +47,17 @@ describe("D1 AI confirmation semantics", () => {
       context.env,
     );
     const deleteBody = await deleteCategory.json<any>();
-    const confirmation = deleteBody.parts.find((part: any) => part.type === "confirmation-card")?.confirmation;
+    const confirmation = deleteBody.parts.find(
+      (part: any) => part.type === "confirmation-card",
+    )?.confirmation;
 
     expect(deleteCategory.status).toBe(200);
     expect(confirmation?.id).toBeTruthy();
-    expect(context.db.rows.categories.some((row) => row.user_id === user.id && row.name === "医疗" && !row.deleted_at)).toBe(true);
+    expect(
+      context.db.rows.categories.some(
+        (row) => row.user_id === user.id && row.name === "医疗" && !row.deleted_at,
+      ),
+    ).toBe(true);
 
     const confirm = await context.app.request(
       `/ai/confirmations/${confirmation.id}/confirm`,
@@ -58,7 +68,9 @@ describe("D1 AI confirmation semantics", () => {
     const category = context.db.rows.categories.find((row) => row.user_id === user.id && row.name === "医疗");
     expect(category?.deleted_by_user_id).toBe(user.id);
     expect(category?.deleted_at).toBeTruthy();
-    expect(context.db.rows.ai_confirmations.find((row) => row.id === confirmation.id)?.status).toBe("confirmed");
+    expect(context.db.rows.ai_confirmations.find((row) => row.id === confirmation.id)?.status).toBe(
+      "confirmed",
+    );
   });
 
   it("rejects confirmation execution for another user", async () => {
@@ -70,7 +82,11 @@ describe("D1 AI confirmation semantics", () => {
       userId: owner.id,
       bookId: book.id,
       action: "delete-category",
-      payload: { skillName: "ledger.categories", toolName: "delete-category", args: { name: "医疗", type: "expense" } },
+      payload: {
+        skillName: "ledger.categories",
+        toolName: "delete-category",
+        args: { name: "医疗", type: "expense" },
+      },
     });
     const confirmationId = context.db.rows.ai_confirmations[0].id;
 

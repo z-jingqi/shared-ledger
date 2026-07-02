@@ -32,16 +32,42 @@ describe("D1 auth session lifecycle", () => {
     expect(registeredBody.user).toMatchObject({ name: "SoundOnly", plan: "free" });
     expect(registeredCookie).toContain("ledger_session=");
     const userId = registeredBody.user.id;
-    expect(context.db.rows.books).toContainEqual(expect.objectContaining({ name: "SoundOnly", currency: "CNY", created_by_user_id: userId }));
-    expect(context.db.rows.book_members).toContainEqual(expect.objectContaining({ user_id: userId, role: "creator" }));
-    const defaultCategories = context.db.rows.categories.filter((category) => category.user_id === userId && !category.deleted_at);
+    expect(context.db.rows.books).toContainEqual(
+      expect.objectContaining({ name: "SoundOnly", currency: "CNY", created_by_user_id: userId }),
+    );
+    expect(context.db.rows.book_members).toContainEqual(
+      expect.objectContaining({ user_id: userId, role: "creator" }),
+    );
+    const defaultCategories = context.db.rows.categories.filter(
+      (category) => category.user_id === userId && !category.deleted_at,
+    );
     expect(defaultCategories).toHaveLength(17);
     expect(defaultCategories.filter((category) => category.type === "expense")).toHaveLength(10);
     expect(defaultCategories.filter((category) => category.type === "income")).toHaveLength(7);
     expect(defaultCategories.map((category) => category.name)).toEqual(
-      expect.arrayContaining(["餐饮", "交通", "购物", "水电燃气", "医疗健康", "娱乐休闲", "教育学习", "旅行出差", "宠物", "其他支出", "工资", "奖金", "兼职副业", "投资理财", "报销", "红包转账", "其他收入"]),
+      expect.arrayContaining([
+        "餐饮",
+        "交通",
+        "购物",
+        "水电燃气",
+        "医疗健康",
+        "娱乐休闲",
+        "教育学习",
+        "旅行出差",
+        "宠物",
+        "其他支出",
+        "工资",
+        "奖金",
+        "兼职副业",
+        "投资理财",
+        "报销",
+        "红包转账",
+        "其他收入",
+      ]),
     );
-    expect(defaultCategories.map((category) => category.name)).not.toEqual(expect.arrayContaining(["住房", "人情礼物", "通讯网络", "保险", "日用品"]));
+    expect(defaultCategories.map((category) => category.name)).not.toEqual(
+      expect.arrayContaining(["住房", "人情礼物", "通讯网络", "保险", "日用品"]),
+    );
 
     const duplicate = await context.app.request(
       "/auth/register",
@@ -92,14 +118,26 @@ describe("D1 auth session lifecycle", () => {
     expect(login.status).toBe(200);
     expect(loginCookie).toContain("ledger_refresh=");
 
-    const refreshed = await context.app.request("/auth/refresh", { method: "POST", headers: { Cookie: loginCookie } }, context.env);
+    const refreshed = await context.app.request(
+      "/auth/refresh",
+      { method: "POST", headers: { Cookie: loginCookie } },
+      context.env,
+    );
     expect(refreshed.status).toBe(204);
     expect(cookieHeader(refreshed)).toContain("ledger_session=");
 
-    const logout = await context.app.request("/auth/logout", { method: "POST", headers: { Cookie: loginCookie } }, context.env);
+    const logout = await context.app.request(
+      "/auth/logout",
+      { method: "POST", headers: { Cookie: loginCookie } },
+      context.env,
+    );
     expect(logout.status).toBe(204);
 
-    const refreshAfterLogout = await context.app.request("/auth/refresh", { method: "POST", headers: { Cookie: loginCookie } }, context.env);
+    const refreshAfterLogout = await context.app.request(
+      "/auth/refresh",
+      { method: "POST", headers: { Cookie: loginCookie } },
+      context.env,
+    );
     expect(refreshAfterLogout.status).toBe(401);
   });
 });

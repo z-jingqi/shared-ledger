@@ -10,7 +10,14 @@ type AddActionMenuProps = {
   onUploadFile: () => void;
 };
 
-export function AddActionMenu({ open, showUpload, uploading, onManualAdd, onOpenChange, onUploadFile }: AddActionMenuProps) {
+export function AddActionMenu({
+  open,
+  showUpload,
+  uploading,
+  onManualAdd,
+  onOpenChange,
+  onUploadFile,
+}: AddActionMenuProps) {
   return (
     <>
       {open ? (

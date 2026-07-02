@@ -34,7 +34,14 @@ type ImportRouteContext = Context<{ Bindings: Env }>;
 export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryLedgerStore) {
   const createJob = async (
     context: ImportRouteContext,
-    input: { bookId: string; userId: string; file: File; repository: D1LedgerRepository; autoConfirm?: boolean; skipQuotaCheck?: boolean },
+    input: {
+      bookId: string;
+      userId: string;
+      file: File;
+      repository: D1LedgerRepository;
+      autoConfirm?: boolean;
+      skipQuotaCheck?: boolean;
+    },
   ) => {
     const files = context.env.FILES;
     if (!files) throw new Error("导入功能需要 R2 绑定");
@@ -56,7 +63,13 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
         httpMetadata: { contentType: resolvedFileType },
         customMetadata: { importJobId: job.id, bookId: input.bookId, uploadedBy: input.userId },
       });
-      return await submitAlephOcrJob(context.env, input.repository, job, bytes, new URL(context.req.url).origin);
+      return await submitAlephOcrJob(
+        context.env,
+        input.repository,
+        job,
+        bytes,
+        new URL(context.req.url).origin,
+      );
     } catch (error) {
       await markFailed(input.repository, job.id, error, "ocr");
       throw error;
@@ -119,7 +132,8 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     const entries = [...form.getAll("files"), ...form.getAll("file")];
     const files = entries.filter((entry): entry is File => entry instanceof File && Boolean(entry.name));
     if (!files.length) return jsonError(context, "请选择要导入的文件");
-    if (files.length > maximumImageImportBatchFiles) return jsonError(context, `一次最多上传 ${maximumImageImportBatchFiles} 个文件`);
+    if (files.length > maximumImageImportBatchFiles)
+      return jsonError(context, `一次最多上传 ${maximumImageImportBatchFiles} 个文件`);
 
     const repository = new D1LedgerRepository(context.env.DB);
     try {
@@ -127,7 +141,16 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
       await assertImageOcrQuota(repository, user.id, files.length);
       const jobs = [];
       for (const file of files) {
-        jobs.push(await createJob(context, { bookId, userId: user.id, file, repository, autoConfirm, skipQuotaCheck: true }));
+        jobs.push(
+          await createJob(context, {
+            bookId,
+            userId: user.id,
+            file,
+            repository,
+            autoConfirm,
+            skipQuotaCheck: true,
+          }),
+        );
       }
       return context.json({ jobs }, 202);
     } catch (error) {
@@ -178,7 +201,13 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
       return context.json({ ok: true });
     }
     if (payload.event?.endsWith(".failed") || payload.job?.status === "failed") {
-      await failAlephOcrJob(repository, job.id, payload.error ?? payload.job?.error ?? "Aleph Tools 处理失败", sequence, phase);
+      await failAlephOcrJob(
+        repository,
+        job.id,
+        payload.error ?? payload.job?.error ?? "Aleph Tools 处理失败",
+        sequence,
+        phase,
+      );
       return context.json({ ok: true });
     }
     if (!payload.event?.endsWith(".ready") && payload.job?.status !== "ready") {
@@ -343,7 +372,8 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     if (!job) return jsonError(context, "导入任务不存在", 404);
     const denied = await requireMember(context, store, job.bookId, user);
     if (denied) return denied;
-    if (job.status !== "failed" || !job.errorRetryable) return jsonError(context, "该导入任务当前不可重试", 409);
+    if (job.status !== "failed" || !job.errorRetryable)
+      return jsonError(context, "该导入任务当前不可重试", 409);
     try {
       const result = await retryImportJob(context.env, repository, job, new URL(context.req.url).origin);
       const nextJob = Array.isArray(result) ? await repository.getImportJob(job.id) : result;
@@ -380,7 +410,9 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
       ...(await context.req.json()),
     });
     if (!candidate.success) return jsonError(context, "待确认记录数据不合法");
-    return context.json({ record: await repository.updateImportedRecord(record.id, candidate.data, undefined, user.id) });
+    return context.json({
+      record: await repository.updateImportedRecord(record.id, candidate.data, undefined, user.id),
+    });
   });
 
   const confirm = async (context: any, recordId: string) => {
@@ -408,7 +440,12 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
       occurredAt: suggested.occurredAt,
       items: [],
     } as any);
-    const updated = await repository.updateImportedRecord(record.id, record.suggestedTransaction, "confirmed", user.id);
+    const updated = await repository.updateImportedRecord(
+      record.id,
+      record.suggestedTransaction,
+      "confirmed",
+      user.id,
+    );
     return { record: updated, transaction };
   };
 
@@ -431,7 +468,12 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     if (user instanceof Response) return user;
     const denied = await requireMember(context, store, job.bookId, user);
     if (denied) return denied;
-    const updated = await repository.updateImportedRecord(record.id, record.suggestedTransaction, "ignored", user.id);
+    const updated = await repository.updateImportedRecord(
+      record.id,
+      record.suggestedTransaction,
+      "ignored",
+      user.id,
+    );
     return context.json({ record: updated });
   });
 
@@ -651,9 +693,13 @@ function sequenceFromEventId(eventId: string | undefined) {
 
 async function hmacSha256Hex(secret: string, value: string) {
   const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, [
-    "sign",
-  ]);
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
   const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(value));
   return [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
@@ -661,6 +707,7 @@ async function hmacSha256Hex(secret: string, value: string) {
 function timingSafeEqualHex(left: string, right: string) {
   if (!/^[a-f0-9]+$/i.test(left) || !/^[a-f0-9]+$/i.test(right) || left.length !== right.length) return false;
   let diff = 0;
-  for (let index = 0; index < left.length; index += 1) diff |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  for (let index = 0; index < left.length; index += 1)
+    diff |= left.charCodeAt(index) ^ right.charCodeAt(index);
   return diff === 0;
 }

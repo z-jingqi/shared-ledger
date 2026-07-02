@@ -3,7 +3,14 @@ import type { Env, WorkerServiceBinding } from "../types";
 type AlephApiResponse<T> =
   | { success: true; data: T; requestId?: string }
   | { success: false; error: AlephErrorPayload | string; requestId?: string };
-type AlephJobStatus = "queued" | "processing" | "cancel_requested" | "cancelled" | "ready" | "failed" | "deleted";
+type AlephJobStatus =
+  | "queued"
+  | "processing"
+  | "cancel_requested"
+  | "cancelled"
+  | "ready"
+  | "failed"
+  | "deleted";
 
 const internalOrigin = "https://aleph-tools.internal";
 
@@ -113,7 +120,8 @@ export class AlephToolsClient {
     const response = await this.fetchWithAuth(path, init);
     const payload = (await response.json().catch(() => null)) as AlephApiResponse<T> | null;
     if (!response.ok || !payload?.success) {
-      if (payload && !payload.success) throw this.errorFromPayload(payload.error, response, payload.requestId);
+      if (payload && !payload.success)
+        throw this.errorFromPayload(payload.error, response, payload.requestId);
       throw this.fallbackError(response);
     }
     return payload.data;

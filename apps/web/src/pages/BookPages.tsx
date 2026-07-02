@@ -1,7 +1,4 @@
-import {
-  CalendarBlankIcon,
-  CaretRightIcon,
-} from "@phosphor-icons/react";
+import { CalendarBlankIcon, CaretRightIcon } from "@phosphor-icons/react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -37,7 +34,9 @@ export function BookHomePage() {
   const { book, books, loading, setActiveBook } = useActiveBook();
   const { openSheet } = useAppSheetActions();
   const [bookSwitcherOpen, setBookSwitcherOpen] = useState(false);
-  const { data: txData, loading: transactionsLoading } = useApi<TransactionResponse>(book ? `/books/${book.id}/transactions` : undefined);
+  const { data: txData, loading: transactionsLoading } = useApi<TransactionResponse>(
+    book ? `/books/${book.id}/transactions` : undefined,
+  );
   const { data: imports } = useApi<ImportResponse>(book ? `/books/${book.id}/imports` : undefined);
   const hasBook = Boolean(book?.id);
   const displayBook = book ?? { id: "", name: "一起记", currency: "CNY" };
@@ -107,7 +106,9 @@ export function BookHomePage() {
               {todayTransactions.length} 笔 · 支出 {yuan(todayExpense, displayBook.currency)}
             </small>
           </div>
-          <button type="button" onClick={openRecordForm}>继续记账</button>
+          <button type="button" onClick={openRecordForm}>
+            继续记账
+          </button>
         </IosCard>
 
         {(processing.length > 0 || pending.length > 0 || failed.length > 0) && (
@@ -115,7 +116,11 @@ export function BookHomePage() {
             <h2>待处理</h2>
             <div className="ios-reminder-list">
               {processing.length > 0 && (
-                <button className="ios-reminder-row" type="button" onClick={() => openSheet({ type: "imports" })}>
+                <button
+                  className="ios-reminder-row"
+                  type="button"
+                  onClick={() => openSheet({ type: "imports" })}
+                >
                   <IconTile tint="#eaf1ff" color="#4c8dff">
                     {processing.length}
                   </IconTile>
@@ -127,7 +132,11 @@ export function BookHomePage() {
                 </button>
               )}
               {pending.length > 0 && (
-                <button className="ios-reminder-row" type="button" onClick={() => openSheet({ type: "pending-imports" })}>
+                <button
+                  className="ios-reminder-row"
+                  type="button"
+                  onClick={() => openSheet({ type: "pending-imports" })}
+                >
                   <IconTile>{pending.length}</IconTile>
                   <span>
                     <b>{pending.length} 条待确认记录</b>
@@ -137,7 +146,11 @@ export function BookHomePage() {
                 </button>
               )}
               {failed.length > 0 && (
-                <button className="ios-reminder-row danger" type="button" onClick={() => openSheet({ type: "imports" })}>
+                <button
+                  className="ios-reminder-row danger"
+                  type="button"
+                  onClick={() => openSheet({ type: "imports" })}
+                >
                   <IconTile tint="#fdeceb" color="#d74035">
                     {failed.length}
                   </IconTile>
@@ -155,13 +168,19 @@ export function BookHomePage() {
         <section className="ios-section">
           <header>
             <h2>最近交易</h2>
-            {hasBook ? <Link to={`/records?bookId=${book!.id}`}>查看全部</Link> : <Link to="/books/new">创建账本</Link>}
+            {hasBook ? (
+              <Link to={`/records?bookId=${book!.id}`}>查看全部</Link>
+            ) : (
+              <Link to="/books/new">创建账本</Link>
+            )}
           </header>
           <IosCard className="ios-transaction-card">
             {hasBook && transactionsLoading ? (
               <IosListSkeleton rows={3} />
             ) : recent.length ? (
-              recent.map((item) => <IosTransactionRow transaction={item} currency={displayBook.currency} key={item.id} />)
+              recent.map((item) => (
+                <IosTransactionRow transaction={item} currency={displayBook.currency} key={item.id} />
+              ))
             ) : (
               <div className="ios-transaction-empty" data-testid="recent-empty-state">
                 {hasBook ? (
@@ -203,7 +222,11 @@ function isSameMonth(value: string, now: Date) {
 
 function isSameDay(value: string, now: Date) {
   const date = new Date(value);
-  return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
+  return (
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate()
+  );
 }
 
 function isProcessingJob(job: ImportJob) {
@@ -213,9 +236,12 @@ function isProcessingJob(job: ImportJob) {
 function formatHomeImportProgress(jobs: ImportJob[]) {
   const first = jobs[0];
   if (!first) return "";
-  if (first.status === "ai_processing") return jobs.length > 1 ? `${jobs.length} 个文件，AI 分析中` : "AI 分析中";
+  if (first.status === "ai_processing")
+    return jobs.length > 1 ? `${jobs.length} 个文件，AI 分析中` : "AI 分析中";
   if (typeof first.currentPage === "number" && typeof first.totalPages === "number") {
-    return jobs.length > 1 ? `${jobs.length} 个文件，第 ${first.currentPage}/${first.totalPages} 页` : `第 ${first.currentPage}/${first.totalPages} 页`;
+    return jobs.length > 1
+      ? `${jobs.length} 个文件，第 ${first.currentPage}/${first.totalPages} 页`
+      : `第 ${first.currentPage}/${first.totalPages} 页`;
   }
   if (typeof first.progress === "number" && first.progress > 0) {
     return jobs.length > 1 ? `${jobs.length} 个文件，OCR ${first.progress}%` : `OCR ${first.progress}%`;

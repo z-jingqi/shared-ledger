@@ -61,7 +61,12 @@ export function AiMessageList({
             <div className="ai-message-index-panel" role="menu" aria-label="当前会话目录">
               <strong>当前会话</strong>
               {userMessageIndex.map((item, index) => (
-                <button type="button" role="menuitem" onClick={() => onScrollToMessage(item.id)} key={item.id}>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => onScrollToMessage(item.id)}
+                  key={item.id}
+                >
                   <span>{index + 1}</span>
                   <b>{item.label}</b>
                 </button>
@@ -79,13 +84,22 @@ export function AiMessageList({
       ) : (
         <AiConversation ref={messagesRef} onScroll={onMessagesScroll} onUserScrollIntent={onUserScrollIntent}>
           {messages.map((message, index) => (
-            <RenderedAiMessage key={message.id} message={message} streaming={isStreaming && index === messages.length - 1} />
+            <RenderedAiMessage
+              key={message.id}
+              message={message}
+              streaming={isStreaming && index === messages.length - 1}
+            />
           ))}
           {thinkingAssistantId ? <AiThinkingMessage /> : null}
         </AiConversation>
       )}
       {showJumpToBottom && (
-        <button className="ai-scroll-bottom-button icon-only" type="button" aria-label="回到底部" onClick={onScrollBottom}>
+        <button
+          className="ai-scroll-bottom-button icon-only"
+          type="button"
+          aria-label="回到底部"
+          onClick={onScrollBottom}
+        >
           <ArrowDownIcon size={18} weight="bold" />
         </button>
       )}
@@ -117,7 +131,11 @@ function RenderedAiMessage({ message, streaming }: { message: AiRenderableMessag
     <AiMessage messageRole="assistant" messageId={message.id}>
       <div className="ai-part-stack">
         {parts.map((part, index) => (
-          <RenderedAiPart key={`${part.type}_${index}`} part={part} streaming={streaming && index === parts.length - 1} />
+          <RenderedAiPart
+            key={`${part.type}_${index}`}
+            part={part}
+            streaming={streaming && index === parts.length - 1}
+          />
         ))}
       </div>
     </AiMessage>

@@ -9,7 +9,9 @@ export function AppSheetHost({ bookId, currency }: { bookId?: string; currency?:
   const { sheet, openSheet, closeSheet } = useAppSheet();
   if (!sheet) return null;
   if (sheet.type === "record-form") {
-    return <TransactionFormSheet recordId={sheet.recordId} initialType={sheet.initialType} onClose={closeSheet} />;
+    return (
+      <TransactionFormSheet recordId={sheet.recordId} initialType={sheet.initialType} onClose={closeSheet} />
+    );
   }
   if (sheet.type === "record-detail") {
     return (

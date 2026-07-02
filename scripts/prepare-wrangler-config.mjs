@@ -25,11 +25,15 @@ const values = {
   __ZONE_NAME__: "aleph-cat.com",
   __ALEPH_AI_ENV__: process.env[`ALEPH_AI_ENV_${suffix}`] ?? (isProd ? "prod" : "preview"),
   __ALEPH_AI_SERVICE__:
-    process.env[`ALEPH_AI_SERVICE_${suffix}`] ?? (isProd ? "aleph-ai-orchestrator" : "aleph-ai-orchestrator-preview"),
+    process.env[`ALEPH_AI_SERVICE_${suffix}`] ??
+    (isProd ? "aleph-ai-orchestrator" : "aleph-ai-orchestrator-preview"),
   __ALEPH_TOOLS_SERVICE__:
-    process.env[`ALEPH_TOOLS_SERVICE_${suffix}`] ?? (isProd ? "aleph-tools-gateway-prod" : "aleph-tools-gateway-preview"),
+    process.env[`ALEPH_TOOLS_SERVICE_${suffix}`] ??
+    (isProd ? "aleph-tools-gateway-prod" : "aleph-tools-gateway-preview"),
   __D1_DATABASE_ID__:
-    process.env[`CLOUDFLARE_D1_DATABASE_ID_${suffix}`] ?? defaultD1DatabaseIds[environment] ?? "__D1_DATABASE_ID__",
+    process.env[`CLOUDFLARE_D1_DATABASE_ID_${suffix}`] ??
+    defaultD1DatabaseIds[environment] ??
+    "__D1_DATABASE_ID__",
   __R2_BUCKET__: process.env[`CLOUDFLARE_R2_BUCKET_${suffix}`] ?? `shared-ledger-files-${environment}`,
 };
 if (target.startsWith("api") && values.__D1_DATABASE_ID__ === "__D1_DATABASE_ID__") {

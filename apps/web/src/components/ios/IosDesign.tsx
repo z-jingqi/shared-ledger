@@ -1,4 +1,9 @@
-import type { ButtonHTMLAttributes, CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import type {
+  ButtonHTMLAttributes,
+  CSSProperties,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+} from "react";
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 import { CaretLeftIcon } from "@phosphor-icons/react";
 
@@ -7,7 +12,10 @@ export type IosBookLike = { id?: string; name?: string; currency?: string; color
 export function BookMark({ book, size = 26 }: { book?: IosBookLike; size?: number }) {
   const color = bookColor(book);
   return (
-    <span className="ios-book-mark" style={{ "--book-color": color, width: size, height: size } as CSSProperties}>
+    <span
+      className="ios-book-mark"
+      style={{ "--book-color": color, width: size, height: size } as CSSProperties}
+    >
       {bookInitial(book)}
     </span>
   );
@@ -32,7 +40,13 @@ function LedgerPill({
       <span>{label ?? book?.name ?? "未选择账本"}</span>
       {suffix ? <em>{suffix}</em> : null}
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M7 10l5 5 5-5" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+        <path
+          d="M7 10l5 5 5-5"
+          stroke="currentColor"
+          strokeWidth="2.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
       </svg>
     </button>
   );
@@ -87,7 +101,15 @@ export function IosScroll({ children, className = "" }: { children: ReactNode; c
   return <div className={`ios-scroll ${className}`}>{children}</div>;
 }
 
-export function IosCard({ children, className = "", onClick }: { children: ReactNode; className?: string; onClick?: () => void }) {
+export function IosCard({
+  children,
+  className = "",
+  onClick,
+}: {
+  children: ReactNode;
+  className?: string;
+  onClick?: () => void;
+}) {
   if (onClick)
     return (
       <button className={`ios-card ${className}`} type="button" onClick={onClick}>
@@ -118,7 +140,15 @@ export function IosListSkeleton({ rows = 3, className = "" }: { rows?: number; c
   );
 }
 
-export function IosMetric({ label, value, tone = "neutral" }: { label: string; value: ReactNode; tone?: "neutral" | "income" | "accent" }) {
+export function IosMetric({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  label: string;
+  value: ReactNode;
+  tone?: "neutral" | "income" | "accent";
+}) {
   return (
     <div className={`ios-metric ${tone}`}>
       <small>{label}</small>
@@ -207,24 +237,33 @@ export function IosSheet({
       setDragY(0);
     }
   }, [closeAnimated]);
-  const beginDrag = useCallback((event: ReactPointerEvent<HTMLElement>) => {
-    if (disableDragClose) return;
-    startYRef.current = event.clientY;
-    latestYRef.current = dragY;
-    currentDragYRef.current = dragY;
-    draggingRef.current = true;
-    setDragging(true);
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }, [disableDragClose, dragY]);
-  const moveDrag = useCallback((event: ReactPointerEvent<HTMLElement>) => {
-    applyDrag(event.clientY);
-  }, [applyDrag]);
-  const endDrag = useCallback((event: ReactPointerEvent<HTMLElement>) => {
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    finishDrag();
-  }, [finishDrag]);
+  const beginDrag = useCallback(
+    (event: ReactPointerEvent<HTMLElement>) => {
+      if (disableDragClose) return;
+      startYRef.current = event.clientY;
+      latestYRef.current = dragY;
+      currentDragYRef.current = dragY;
+      draggingRef.current = true;
+      setDragging(true);
+      event.currentTarget.setPointerCapture(event.pointerId);
+    },
+    [disableDragClose, dragY],
+  );
+  const moveDrag = useCallback(
+    (event: ReactPointerEvent<HTMLElement>) => {
+      applyDrag(event.clientY);
+    },
+    [applyDrag],
+  );
+  const endDrag = useCallback(
+    (event: ReactPointerEvent<HTMLElement>) => {
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      finishDrag();
+    },
+    [finishDrag],
+  );
   const handleWindowDragMove = useEffectEvent((event: globalThis.PointerEvent) => applyDrag(event.clientY));
   const handleWindowDragEnd = useEffectEvent(() => finishDrag());
 
@@ -279,7 +318,12 @@ export function IosSheet({
           {left ? (
             <span className="ios-sheet-back ios-sheet-left-action">{left}</span>
           ) : back ? (
-            <button className="ios-sheet-back" type="button" onClick={onBack ?? closeAnimated} aria-label="返回">
+            <button
+              className="ios-sheet-back"
+              type="button"
+              onClick={onBack ?? closeAnimated}
+              aria-label="返回"
+            >
               <CaretLeftIcon size={22} weight="bold" aria-hidden />
             </button>
           ) : (
@@ -347,7 +391,12 @@ export function IosSegment<T extends string>({
   return (
     <div className={`ios-segment ${className}`}>
       {options.map((option) => (
-        <button className={option.value === value ? "selected" : ""} type="button" onClick={() => onChange(option.value)} key={option.value}>
+        <button
+          className={option.value === value ? "selected" : ""}
+          type="button"
+          onClick={() => onChange(option.value)}
+          key={option.value}
+        >
           {option.label}
         </button>
       ))}

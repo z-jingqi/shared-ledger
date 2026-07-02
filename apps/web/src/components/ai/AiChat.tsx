@@ -69,7 +69,12 @@ type AiChatAction =
   | { type: "session-load-error"; error: string }
   | { type: "submit-start"; userMessage: AiRenderableMessage; assistantId: string }
   | { type: "assistant-delta"; assistantId: string; delta: string }
-  | { type: "stream-finished"; assistantId: string; assistantMessage: AiRenderableMessage; pending?: PendingAiConfirmation }
+  | {
+      type: "stream-finished";
+      assistantId: string;
+      assistantMessage: AiRenderableMessage;
+      pending?: PendingAiConfirmation;
+    }
   | { type: "stream-aborted"; assistantId: string }
   | { type: "stream-error"; assistantId: string; error: string }
   | { type: "stream-stop" }
@@ -107,7 +112,10 @@ function aiChatReducer(state: AiChatState, action: AiChatAction): AiChatState {
       return { ...state, attachments: action.attachments, attachmentError: action.error ?? "" };
     case "attachments-cleared": {
       const removing = new Set(action.ids);
-      return { ...state, attachments: state.attachments.filter((attachment) => !removing.has(attachment.id)) };
+      return {
+        ...state,
+        attachments: state.attachments.filter((attachment) => !removing.has(attachment.id)),
+      };
     }
     case "attachment-error":
       return { ...state, attachmentError: action.error };
@@ -191,12 +199,7 @@ type AiChatProps = {
   onSessionActivity?: (detail: { title?: string; hasMessages?: boolean }) => void;
 };
 
-function useAiChatController({
-  bookId,
-  page,
-  sessionId,
-  onSessionActivity,
-}: Omit<AiChatProps, "compact">) {
+function useAiChatController({ bookId, page, sessionId, onSessionActivity }: Omit<AiChatProps, "compact">) {
   const [state, dispatch] = useReducer(aiChatReducer, sessionId, initialAiChatState);
   const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -225,21 +228,18 @@ function useAiChatController({
   const busy = isStreaming || loadingSession;
   const canUseImageRecognition = user?.plan === "pro";
 
-  const userMessageIndex = useMemo<AiMessageIndexItem[]>(
-    () => {
-      const index: Array<{ id: string; label: string }> = [];
-      for (const message of messages) {
-        if (message.role === "user") {
-          index.push({
-            id: message.id,
-            label: userMessageLabel(message) || `第 ${index.length + 1} 条消息`,
-          });
-        }
+  const userMessageIndex = useMemo<AiMessageIndexItem[]>(() => {
+    const index: Array<{ id: string; label: string }> = [];
+    for (const message of messages) {
+      if (message.role === "user") {
+        index.push({
+          id: message.id,
+          label: userMessageLabel(message) || `第 ${index.length + 1} 条消息`,
+        });
       }
-      return index;
-    },
-    [messages],
-  );
+    }
+    return index;
+  }, [messages]);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -247,8 +247,14 @@ function useAiChatController({
     dispatch({ type: "session-load-start" });
     api<AiSessionResponse>(`/ai/sessions/${sessionId}`)
       .then((result) => {
-        dispatch({ type: "session-loaded", messages: (result.session.messages ?? []).map(serverMessageToRenderable) });
-        onSessionActivity?.({ title: result.session.title, hasMessages: Boolean(result.session.messages?.length) });
+        dispatch({
+          type: "session-loaded",
+          messages: (result.session.messages ?? []).map(serverMessageToRenderable),
+        });
+        onSessionActivity?.({
+          title: result.session.title,
+          hasMessages: Boolean(result.session.messages?.length),
+        });
       })
       .catch((cause) => {
         const message = cause instanceof Error ? cause.message : "读取 AI 会话失败";
@@ -263,11 +269,14 @@ function useAiChatController({
     });
   }, [attachments]);
 
-  useEffect(() => () => {
-    abortControllerRef.current?.abort();
-    if (indexHideTimerRef.current) window.clearTimeout(indexHideTimerRef.current);
-    previewUrlsRef.current?.forEach((url) => URL.revokeObjectURL(url));
-  }, []);
+  useEffect(
+    () => () => {
+      abortControllerRef.current?.abort();
+      if (indexHideTimerRef.current) window.clearTimeout(indexHideTimerRef.current);
+      previewUrlsRef.current?.forEach((url) => URL.revokeObjectURL(url));
+    },
+    [],
+  );
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => textareaRef.current?.focus());
@@ -429,10 +438,16 @@ function useAiChatController({
     if (!pending) return;
     try {
       dispatch({ type: "confirmation-busy", pending });
-      const result = await api<AiChatResponse>(`/ai/confirmations/${pending.confirmationId}/confirm`, { method: "POST" });
+      const result = await api<AiChatResponse>(`/ai/confirmations/${pending.confirmationId}/confirm`, {
+        method: "POST",
+      });
       dispatch({ type: "confirmation-clear" });
       const parts = responseParts(result);
-      if (parts.length) dispatch({ type: "confirmation-message", message: assistantMessageFromResponse(result, `ai_confirmed_${crypto.randomUUID()}`) });
+      if (parts.length)
+        dispatch({
+          type: "confirmation-message",
+          message: assistantMessageFromResponse(result, `ai_confirmed_${crypto.randomUUID()}`),
+        });
       if (bookId) invalidateLedgerData({ bookId, scopes: ["all"] });
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "确认操作失败";
@@ -448,7 +463,10 @@ function useAiChatController({
     try {
       await api(`/ai/confirmations/${pending.confirmationId}/cancel`, { method: "POST" });
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "取消确认失败", { duration: 3000, closeButton: true });
+      toast.error(cause instanceof Error ? cause.message : "取消确认失败", {
+        duration: 3000,
+        closeButton: true,
+      });
     }
   };
 
@@ -599,7 +617,11 @@ function responseParts(result: AiChatResponse) {
   return result.message?.parts ?? result.parts ?? [];
 }
 
-function appendAssistantDelta(messages: AiRenderableMessage[], messageId: string, delta: string): AiRenderableMessage[] {
+function appendAssistantDelta(
+  messages: AiRenderableMessage[],
+  messageId: string,
+  delta: string,
+): AiRenderableMessage[] {
   let found = false;
   const next = messages.map((message) => {
     if (message.id !== messageId) return message;
@@ -614,7 +636,10 @@ function appendAssistantDelta(messages: AiRenderableMessage[], messageId: string
   return [...messages, { id: messageId, role: "assistant", parts: [{ type: "text", text: delta }] }];
 }
 
-function upsertAssistantMessage(messages: AiRenderableMessage[], assistantMessage: AiRenderableMessage): AiRenderableMessage[] {
+function upsertAssistantMessage(
+  messages: AiRenderableMessage[],
+  assistantMessage: AiRenderableMessage,
+): AiRenderableMessage[] {
   let found = false;
   const next = messages.map((message) => {
     if (message.id !== assistantMessage.id) return message;
@@ -717,10 +742,11 @@ function parseSseEvent(raw: string): { name: string; data: Record<string, unknow
 }
 
 function findPendingAiConfirmation(parts: unknown[]): PendingAiConfirmation | undefined {
-  const confirmation = parts.map(normalizeAiPart).find(
-    (part): part is Extract<AiStructuredPart, { type: "confirmation" }> =>
+  const confirmation = parts
+    .map(normalizeAiPart)
+    .find((part): part is Extract<AiStructuredPart, { type: "confirmation" }> =>
       Boolean(part && part.type === "confirmation" && part.confirmationId),
-  );
+    );
   if (!confirmation?.confirmationId) return undefined;
   const parsedExpiresAt = confirmation.expiresAt ? Date.parse(confirmation.expiresAt) : Number.NaN;
   return {

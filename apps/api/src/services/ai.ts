@@ -22,7 +22,10 @@ export function runtimeAlephClient(env: Env): AlephAIClient {
   if (env.ALEPH_AI_TEST_CLIENT) return env.ALEPH_AI_TEST_CLIENT;
   if (env.APP_ENV === "test" && !env.AI_ORCHESTRATOR) return createTestAlephClient();
   if (!env.AI_ORCHESTRATOR || !env.ALEPH_AI_SERVICE_TOKEN) {
-    throw new AlephAIError("validation_failed", "Aleph AI 未配置：需要 AI_ORCHESTRATOR service binding 与 ALEPH_AI_SERVICE_TOKEN");
+    throw new AlephAIError(
+      "validation_failed",
+      "Aleph AI 未配置：需要 AI_ORCHESTRATOR service binding 与 ALEPH_AI_SERVICE_TOKEN",
+    );
   }
   return createAlephAIClient({ service: env.AI_ORCHESTRATOR, serviceToken: env.ALEPH_AI_SERVICE_TOKEN });
 }
@@ -97,7 +100,11 @@ function createTestAlephClient(): AlephAIClient {
         provider: "test",
         model: "test-model",
         usage: { inputTokens: 1, outputTokens: 1, creditsCharged: 1 },
-        output: (format === "ledger_import_records" ? { records: [] } : format === "ledger_skill_selection" ? testSkillSelection(payload) : testSkillStep(payload)) as TOutput,
+        output: (format === "ledger_import_records"
+          ? { records: [] }
+          : format === "ledger_skill_selection"
+            ? testSkillSelection(payload)
+            : testSkillStep(payload)) as TOutput,
       };
     },
     async *stream(request: InvokeRequest) {
@@ -110,7 +117,11 @@ function createTestAlephClient(): AlephAIClient {
         route: { id: "test-route", name: "test.route", provider: "test", model: "test-model" },
       };
       for (const char of text) yield { type: "delta", requestId, delta: char };
-      yield { type: "usage", requestId, usage: { inputTokens: 1, outputTokens: text.length, creditsCharged: 1 } };
+      yield {
+        type: "usage",
+        requestId,
+        usage: { inputTokens: 1, outputTokens: text.length, creditsCharged: 1 },
+      };
       yield { type: "done", requestId };
     },
     async getUserUsage(params: { project: string; userId: string; plan?: string; env?: string }) {
@@ -138,7 +149,8 @@ function latestUserPayload(messages: Array<{ role: string; content?: unknown }>)
 }
 
 function latestMessageText(messages: Array<{ role: string; content?: unknown }>) {
-  const message = [...messages].reverse().find((item) => item.role === "user") ?? messages[messages.length - 1];
+  const message =
+    [...messages].reverse().find((item) => item.role === "user") ?? messages[messages.length - 1];
   return typeof message?.content === "string" ? message.content : "";
 }
 
@@ -152,13 +164,23 @@ function responseFormatName(format: unknown) {
 function testSkillSelection(payload: Record<string, unknown>) {
   const text = String(payload.text ?? "");
   const attachments = Array.isArray(payload.attachments) ? payload.attachments : [];
-  if (text.includes("不合理") || text.includes("分析")) return { skillName: "ledger.analysis", confidence: 1 };
+  if (text.includes("不合理") || text.includes("分析"))
+    return { skillName: "ledger.analysis", confidence: 1 };
   if (text.includes("分类")) return { skillName: "ledger.categories", confidence: 1 };
-  if (text.includes("记录") || text.includes("打车") || text.includes("mock")) return { skillName: "ledger.records", confidence: 1 };
+  if (text.includes("记录") || text.includes("打车") || text.includes("mock"))
+    return { skillName: "ledger.records", confidence: 1 };
   if (text.includes("用户名") || text.includes("头像")) return { skillName: "ledger.profile", confidence: 1 };
   if (text.includes("邀请")) return { skillName: "ledger.members", confidence: 1 };
-  if (attachments.length && (text.includes("导入") || text.includes("保存") || text.includes("入账"))) return { skillName: "ledger.imports", confidence: 1 };
-  if (text.includes("小于") || text.includes("大于") || text.includes("所有") || text.includes("收入") || text.includes("支出")) return { skillName: "ledger.search", confidence: 1 };
+  if (attachments.length && (text.includes("导入") || text.includes("保存") || text.includes("入账")))
+    return { skillName: "ledger.imports", confidence: 1 };
+  if (
+    text.includes("小于") ||
+    text.includes("大于") ||
+    text.includes("所有") ||
+    text.includes("收入") ||
+    text.includes("支出")
+  )
+    return { skillName: "ledger.search", confidence: 1 };
   return { skillName: "general.chat", confidence: 1 };
 }
 
@@ -166,7 +188,10 @@ function testSkillStep(payload: Record<string, unknown>) {
   const text = String(payload.text ?? "");
   const attachments = Array.isArray(payload.attachments) ? payload.attachments : [];
   const hasAttachments = attachments.length > 0;
-  const skill = typeof payload.selectedSkill === "object" && payload.selectedSkill ? String((payload.selectedSkill as { name?: unknown }).name ?? "general.chat") : "general.chat";
+  const skill =
+    typeof payload.selectedSkill === "object" && payload.selectedSkill
+      ? String((payload.selectedSkill as { name?: unknown }).name ?? "general.chat")
+      : "general.chat";
   if (text.includes("打车") && text.includes("38")) {
     return {
       skillName: "ledger.records",
@@ -186,31 +211,72 @@ function testSkillStep(payload: Record<string, unknown>) {
     };
   }
   if (text.includes("不合理") || text.includes("分析")) {
-    return { skillName: "ledger.analysis", toolName: "analyze-records", args: { type: "expense", sort: "amount_desc" }, confidence: 1, requiresConfirmation: false };
+    return {
+      skillName: "ledger.analysis",
+      toolName: "analyze-records",
+      args: { type: "expense", sort: "amount_desc" },
+      confidence: 1,
+      requiresConfirmation: false,
+    };
   }
   if (text.includes("删除") && text.includes("分类")) {
-    return { skillName: "ledger.categories", toolName: "delete-category", args: { name: "医疗", type: "expense" }, confidence: 1, requiresConfirmation: true };
+    return {
+      skillName: "ledger.categories",
+      toolName: "delete-category",
+      args: { name: "医疗", type: "expense" },
+      confidence: 1,
+      requiresConfirmation: true,
+    };
   }
   if (text.includes("创建") && text.includes("分类")) {
-    return { skillName: "ledger.categories", toolName: "create-category", args: { name: "医疗", type: "expense" }, confidence: 1, requiresConfirmation: false };
+    return {
+      skillName: "ledger.categories",
+      toolName: "create-category",
+      args: { name: "医疗", type: "expense" },
+      confidence: 1,
+      requiresConfirmation: false,
+    };
   }
   if (text.includes("大于100") || text.includes("所有的支出") || text.includes("支出")) {
     return {
       skillName: "ledger.search",
       toolName: "search-records",
-      args: { type: "expense", minAmount: text.includes("大于100") ? 100 : undefined, minStrict: text.includes("大于100"), sort: "date_desc" },
+      args: {
+        type: "expense",
+        minAmount: text.includes("大于100") ? 100 : undefined,
+        minStrict: text.includes("大于100"),
+        sort: "date_desc",
+      },
       confidence: 1,
       requiresConfirmation: false,
     };
   }
   if (text.includes("收入")) {
-    return { skillName: "ledger.search", toolName: "search-records", args: { type: "income", sort: "date_desc" }, confidence: 1, requiresConfirmation: false };
+    return {
+      skillName: "ledger.search",
+      toolName: "search-records",
+      args: { type: "income", sort: "date_desc" },
+      confidence: 1,
+      requiresConfirmation: false,
+    };
   }
   if (text.includes("用户名")) {
-    return { skillName: "ledger.profile", toolName: "update-profile", args: { name: "SoundOnly2" }, confidence: 1, requiresConfirmation: false };
+    return {
+      skillName: "ledger.profile",
+      toolName: "update-profile",
+      args: { name: "SoundOnly2" },
+      confidence: 1,
+      requiresConfirmation: false,
+    };
   }
   if (text.includes("头像") && hasAttachments) {
-    return { skillName: "ledger.profile", toolName: "update-profile", args: { avatarFromAttachment: true }, confidence: 1, requiresConfirmation: false };
+    return {
+      skillName: "ledger.profile",
+      toolName: "update-profile",
+      args: { avatarFromAttachment: true },
+      confidence: 1,
+      requiresConfirmation: false,
+    };
   }
   const inviteEmail = emailLikeToken(text);
   if (text.includes("邀请") && inviteEmail) {
@@ -237,12 +303,31 @@ function testSkillStep(payload: Record<string, unknown>) {
     };
   }
   if (text.includes("mock") && text.includes("删除")) {
-    return { skillName: "ledger.records", toolName: "delete-record", args: { q: "mock" }, confidence: 1, requiresConfirmation: true };
+    return {
+      skillName: "ledger.records",
+      toolName: "delete-record",
+      args: { q: "mock" },
+      confidence: 1,
+      requiresConfirmation: true,
+    };
   }
   if (hasAttachments && (text.includes("导入") || text.includes("保存") || text.includes("入账"))) {
-    return { skillName: "ledger.imports", toolName: "save-attachments", args: { autoConfirm: false }, confidence: 1, requiresConfirmation: false };
+    return {
+      skillName: "ledger.imports",
+      toolName: "save-attachments",
+      args: { autoConfirm: false },
+      confidence: 1,
+      requiresConfirmation: false,
+    };
   }
-  return { skillName: skill, toolName: "chat", args: {}, userMessage: testChatText(text), confidence: 1, requiresConfirmation: false };
+  return {
+    skillName: skill,
+    toolName: "chat",
+    args: {},
+    userMessage: testChatText(text),
+    confidence: 1,
+    requiresConfirmation: false,
+  };
 }
 
 function testChatText(text: string) {

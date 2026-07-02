@@ -20,7 +20,9 @@ function getViewedInvitationIds(userId?: string) {
   if (!key || !storage) return new Set<string>();
   try {
     const value = JSON.parse(storage.getItem(key) || "[]");
-    return new Set(Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []);
+    return new Set(
+      Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [],
+    );
   } catch {
     return new Set<string>();
   }

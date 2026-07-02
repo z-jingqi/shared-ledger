@@ -213,7 +213,9 @@ export function createAlephAiProvider(runtime: LedgerAiRuntime): AiProvider {
           maxTokens: 2400,
         }),
       );
-      return importRecordsOutputSchema.parse(response.output).records.map((record) => aiImportRecordSchema.parse(record));
+      return importRecordsOutputSchema
+        .parse(response.output)
+        .records.map((record) => aiImportRecordSchema.parse(record));
     },
   };
 }
@@ -228,7 +230,11 @@ function toAlephMessage(message: AiChatMessage): ChatMessage {
 async function* streamDeltas(events: AsyncIterable<StreamEvent>) {
   for await (const event of events) {
     if (event.type === "delta") yield event.delta;
-    if (event.type === "error") throw new AlephAIError(event.error.code, event.error.message, { requestId: event.requestId, details: event.error.details });
+    if (event.type === "error")
+      throw new AlephAIError(event.error.code, event.error.message, {
+        requestId: event.requestId,
+        details: event.error.details,
+      });
   }
 }
 

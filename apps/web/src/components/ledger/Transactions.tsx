@@ -46,6 +46,7 @@ export function IosTransactionRow({
 
 function getCategoryLabel(transaction: LedgerTransaction, categoryNames?: Record<string, string>) {
   if (transaction.categoryName) return transaction.categoryName;
-  if (transaction.categoryId && categoryNames?.[transaction.categoryId]) return categoryNames[transaction.categoryId];
+  if (transaction.categoryId && categoryNames?.[transaction.categoryId])
+    return categoryNames[transaction.categoryId];
   return transaction.categoryId ?? "未分类";
 }

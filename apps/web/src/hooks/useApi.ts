@@ -5,7 +5,13 @@ import { api } from "../lib";
 
 export function useApi<T>(path: string | undefined) {
   const shouldCacheBooks = path === "/books" && import.meta.env.MODE !== "test";
-  const { data, error: queryError, isFetching, isLoading, refetch } = useQuery({
+  const {
+    data,
+    error: queryError,
+    isFetching,
+    isLoading,
+    refetch,
+  } = useQuery({
     queryKey: apiQueryKey(path),
     queryFn: () => api<T>(path ?? ""),
     enabled: Boolean(path),

@@ -42,7 +42,10 @@ export async function searchTransactionsWithAi(input: AiTransactionSearchInput) 
       baseFilters: input.baseFilters,
     }),
   });
-  return aiSearchResponseFromParts(input.query, [...(response.parts ?? []), ...(response.message?.parts ?? [])]);
+  return aiSearchResponseFromParts(input.query, [
+    ...(response.parts ?? []),
+    ...(response.message?.parts ?? []),
+  ]);
 }
 
 function aiSearchResponseFromParts(query: string, rawParts: unknown[]): AiTransactionSearchResponse {
@@ -50,8 +53,12 @@ function aiSearchResponseFromParts(query: string, rawParts: unknown[]): AiTransa
     const normalized = normalizeAiPart(part);
     return normalized ? [normalized] : [];
   });
-  const filterResult = parts.find((part): part is AiStructuredPart & { type: "filter-result" } => part.type === "filter-result");
-  const searchCard = parts.find((part): part is AiStructuredPart & { type: "search-result-card" } => part.type === "search-result-card");
+  const filterResult = parts.find(
+    (part): part is AiStructuredPart & { type: "filter-result" } => part.type === "filter-result",
+  );
+  const searchCard = parts.find(
+    (part): part is AiStructuredPart & { type: "search-result-card" } => part.type === "search-result-card",
+  );
   return {
     query,
     filters: filterResult?.filters ?? filterResult?.filter,

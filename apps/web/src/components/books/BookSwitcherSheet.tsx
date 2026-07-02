@@ -23,11 +23,18 @@ export function BookSwitcherSheet({
     <IosSheet title="切换账本" onClose={close}>
       <div className="ios-book-switcher-list">
         {books.map((item) => (
-          <button className={item.id === currentBookId ? "active" : ""} type="button" onClick={() => onSelect(item.id)} key={item.id}>
+          <button
+            className={item.id === currentBookId ? "active" : ""}
+            type="button"
+            onClick={() => onSelect(item.id)}
+            key={item.id}
+          >
             <BookMark book={item} size={44} />
             <span>
               <b>{item.name}</b>
-              <small>{item.currency} · {item.id === currentBookId ? "当前" : "点击切换"}</small>
+              <small>
+                {item.currency} · {item.id === currentBookId ? "当前" : "点击切换"}
+              </small>
             </span>
             <b>{item.id === currentBookId ? "当前" : ""}</b>
           </button>

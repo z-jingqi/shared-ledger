@@ -86,7 +86,9 @@ describe("D1 members and transaction integrity", () => {
     );
     expect(creatorExit.status).toBe(400);
 
-    const creatorMembership = context.db.rows.book_members.find((row) => row.book_id === book.id && row.user_id === creator.id);
+    const creatorMembership = context.db.rows.book_members.find(
+      (row) => row.book_id === book.id && row.user_id === creator.id,
+    );
     const removeCreator = await context.app.request(
       `/books/${book.id}/members/${creatorMembership?.id}`,
       { method: "DELETE", headers: authHeaders(admin) },
@@ -100,7 +102,9 @@ describe("D1 members and transaction integrity", () => {
       context.env,
     );
     expect(removeNormal.status).toBe(204);
-    expect(context.db.rows.book_members.find((row) => row.id === normalMembership.id)?.deleted_by_user_id).toBe(admin.id);
+    expect(
+      context.db.rows.book_members.find((row) => row.id === normalMembership.id)?.deleted_by_user_id,
+    ).toBe(admin.id);
   });
 
   it("soft-deletes transactions with actor audit fields and hides them from normal lists", async () => {
@@ -119,7 +123,11 @@ describe("D1 members and transaction integrity", () => {
       { method: "DELETE", headers: authHeaders(creator) },
       context.env,
     );
-    const list = await context.app.request(`/books/${book.id}/transactions`, { headers: authHeaders(creator) }, context.env);
+    const list = await context.app.request(
+      `/books/${book.id}/transactions`,
+      { headers: authHeaders(creator) },
+      context.env,
+    );
     const listBody = await list.json<any>();
 
     expect(deleted.status).toBe(204);

@@ -15,7 +15,9 @@ export function BooksPage() {
         {!loading && !error && books.length === 0 && (
           <div className="ios-empty">
             <b>当前还没有账本</b>
-            <Link className="ios-link-button" to="/books/new?source=manage">创建一个</Link>
+            <Link className="ios-link-button" to="/books/new?source=manage">
+              创建一个
+            </Link>
           </div>
         )}
         {books.map((item) => {
@@ -30,7 +32,9 @@ export function BooksPage() {
               <BookMark book={item} size={44} />
               <span>
                 <b>{item.name}</b>
-                <small>{item.currency} · {active ? "当前账本 · 点击管理" : "点击管理"}</small>
+                <small>
+                  {item.currency} · {active ? "当前账本 · 点击管理" : "点击管理"}
+                </small>
               </span>
               <CaretRightIcon size={18} />
             </button>

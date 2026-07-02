@@ -23,7 +23,12 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
   [Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-  interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "APP_ENV" | "WEB_ORIGIN" | "API_PUBLIC_ORIGIN" | "ALEPH_AI_ENV" | "ALEPH_TOOLS_WEBHOOK_SECRET">> {}
+  interface ProcessEnv extends StringifyValues<
+    Pick<
+      Cloudflare.Env,
+      "APP_ENV" | "WEB_ORIGIN" | "API_PUBLIC_ORIGIN" | "ALEPH_AI_ENV" | "ALEPH_TOOLS_WEBHOOK_SECRET"
+    >
+  > {}
 }
 
 // Begin runtime types

@@ -36,7 +36,11 @@ describe("D1 user categories", () => {
     expect(ownerCategoryBody.category.id).not.toBe(memberCategoryBody.category.id);
 
     const secondBook = seedBook(context.db, owner, { id: "book_second" });
-    const categoriesAfterSecondBook = await context.app.request("/me/categories", { headers: authHeaders(owner) }, context.env);
+    const categoriesAfterSecondBook = await context.app.request(
+      "/me/categories",
+      { headers: authHeaders(owner) },
+      context.env,
+    );
     const categoriesBody = await categoriesAfterSecondBook.json<any>();
     expect(categoriesBody.categories.filter((category: any) => category.name === "餐饮")).toHaveLength(1);
     expect(secondBook.createdByUserId).toBe(owner.id);

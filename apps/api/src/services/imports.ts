@@ -54,7 +54,8 @@ export async function finalizeAlephOcrJob(env: Env, repository: D1LedgerReposito
     if (job.status !== "completed" && job.status !== "pending_confirmation") {
       await repository.updateImportJob(job.id, job.autoConfirm ? "completed" : "pending_confirmation");
     }
-    if (isImageImportFileType(job.fileType)) await repository.recordImageOcrUsage(job.id, job.userId, shanghaiUsageDate());
+    if (isImageImportFileType(job.fileType))
+      await repository.recordImageOcrUsage(job.id, job.userId, shanghaiUsageDate());
     return existing;
   }
 
@@ -129,7 +130,11 @@ export async function cancelImportJob(env: Env, repository: D1LedgerRepository, 
   return repository.updateImportJob(job.id, "cancelled");
 }
 
-export async function cancelAlephOcrJob(repository: D1LedgerRepository, importJobId: string, sequence?: number) {
+export async function cancelAlephOcrJob(
+  repository: D1LedgerRepository,
+  importJobId: string,
+  sequence?: number,
+) {
   await repository.updateOcrProgress(importJobId, {
     progress: 100,
     stage: "cancelled",
@@ -153,28 +158,35 @@ export async function updateAlephSnapshot(
   alephJob: Partial<AlephOcrJob>,
   sequence?: number,
 ) {
-  return repository.updateOcrProgress(importJobId, {
-    progress: typeof alephJob.progress === "number" ? alephJob.progress : undefined,
-    stage: alephJob.stage ?? alephJob.status,
-    currentPage: alephJob.currentPage,
-    totalPages: alephJob.totalPages,
-    completedAt: alephJob.completedAt,
-    eventSequence: sequence,
-  }).then(async () =>
-    repository.updateAlephState(importJobId, {
+  return repository
+    .updateOcrProgress(importJobId, {
       progress: typeof alephJob.progress === "number" ? alephJob.progress : undefined,
       stage: alephJob.stage ?? alephJob.status,
       currentPage: alephJob.currentPage,
       totalPages: alephJob.totalPages,
       completedAt: alephJob.completedAt,
       eventSequence: sequence,
-      cancelable: alephJob.cancelable,
-      retryable: alephJob.retryable,
-    }),
-  );
+    })
+    .then(async () =>
+      repository.updateAlephState(importJobId, {
+        progress: typeof alephJob.progress === "number" ? alephJob.progress : undefined,
+        stage: alephJob.stage ?? alephJob.status,
+        currentPage: alephJob.currentPage,
+        totalPages: alephJob.totalPages,
+        completedAt: alephJob.completedAt,
+        eventSequence: sequence,
+        cancelable: alephJob.cancelable,
+        retryable: alephJob.retryable,
+      }),
+    );
 }
 
-export async function retryImportJob(env: Env, repository: D1LedgerRepository, job: ImportJob, requestOrigin?: string) {
+export async function retryImportJob(
+  env: Env,
+  repository: D1LedgerRepository,
+  job: ImportJob,
+  requestOrigin?: string,
+) {
   if (job.status !== "failed" || !job.errorRetryable) throw new Error("该导入任务当前不可重试");
   if (job.errorStage === "ai") {
     const prepared = await repository.prepareImportJobAiRetry(job.id);
@@ -229,7 +241,8 @@ async function finalizeImportJob(
     if (latest.status !== "completed" && latest.status !== "pending_confirmation") {
       await repository.updateImportJob(job.id, latest.autoConfirm ? "completed" : "pending_confirmation");
     }
-    if (isImageImportFileType(latest.fileType)) await repository.recordImageOcrUsage(job.id, latest.userId, shanghaiUsageDate());
+    if (isImageImportFileType(latest.fileType))
+      await repository.recordImageOcrUsage(job.id, latest.userId, shanghaiUsageDate());
     return existing;
   }
   await repository.updateImportJob(job.id, "ai_processing");
@@ -246,7 +259,8 @@ async function finalizeImportJob(
     throw error;
   }
   const beforeCreate = await repository.getImportJob(job.id);
-  if (!beforeCreate || terminalImportStatuses.has(beforeCreate.status)) return repository.listImportedRecords(job.id);
+  if (!beforeCreate || terminalImportStatuses.has(beforeCreate.status))
+    return repository.listImportedRecords(job.id);
   const records = await repository.createImportedRecords(job.id, suggestions);
   if (records.length && isImageImportFileType(latest.fileType)) {
     await repository.recordImageOcrUsage(job.id, latest.userId, shanghaiUsageDate());
@@ -260,7 +274,11 @@ async function finalizeImportJob(
   return records;
 }
 
-async function confirmImportedRecords(repository: D1LedgerRepository, job: ImportJob, records: ImportedRecord[]) {
+async function confirmImportedRecords(
+  repository: D1LedgerRepository,
+  job: ImportJob,
+  records: ImportedRecord[],
+) {
   for (const record of records) {
     const suggested = record.suggestedTransaction as {
       type: "expense" | "income";

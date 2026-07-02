@@ -35,7 +35,8 @@ export function registerTransactionRoutes(app: Hono<{ Bindings: Env }>, store?: 
         ? await new D1LedgerRepository(context.env.DB).createTransaction(bookId, user.id, body as any)
         : store?.createTransaction(bookId, user.id, body as any);
     } catch (error) {
-      if (error instanceof Error && error.message.includes("分类不存在")) return jsonError(context, error.message, 400);
+      if (error instanceof Error && error.message.includes("分类不存在"))
+        return jsonError(context, error.message, 400);
       throw error;
     }
     return transaction ? context.json({ transaction }, 201) : jsonError(context, "D1 运行时不可用", 503);
@@ -73,7 +74,8 @@ export function registerTransactionRoutes(app: Hono<{ Bindings: Env }>, store?: 
         ? await repository.updateTransaction(transaction.id, candidate.data as any, user.id)
         : Object.assign(transaction, candidate.data);
     } catch (error) {
-      if (error instanceof Error && error.message.includes("分类不存在")) return jsonError(context, error.message, 400);
+      if (error instanceof Error && error.message.includes("分类不存在"))
+        return jsonError(context, error.message, 400);
       throw error;
     }
     return context.json({ transaction: updated });
@@ -95,8 +97,18 @@ export function registerTransactionRoutes(app: Hono<{ Bindings: Env }>, store?: 
   });
 }
 
-function memoryCategoriesBelongToUser(store: MemoryLedgerStore, userId: string, input: { categoryId?: string; items?: Array<{ categoryId?: string }> }) {
-  const categoryIds = new Set([input.categoryId, ...(input.items ?? []).map((item) => item.categoryId)].filter((value): value is string => Boolean(value)));
+function memoryCategoriesBelongToUser(
+  store: MemoryLedgerStore,
+  userId: string,
+  input: { categoryId?: string; items?: Array<{ categoryId?: string }> },
+) {
+  const categoryIds = new Set(
+    [input.categoryId, ...(input.items ?? []).map((item) => item.categoryId)].filter(
+      (value): value is string => Boolean(value),
+    ),
+  );
   if (!categoryIds.size) return true;
-  return [...categoryIds].every((categoryId) => store.categories.some((category) => category.id === categoryId && category.userId === userId));
+  return [...categoryIds].every((categoryId) =>
+    store.categories.some((category) => category.id === categoryId && category.userId === userId),
+  );
 }

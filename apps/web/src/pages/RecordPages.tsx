@@ -177,7 +177,10 @@ function recordsPageReducer(state: RecordsPageState, action: RecordsPageAction):
   }
 }
 
-function createTransactionFormState(draft: RecordDraft | undefined, initialType: "income" | "expense"): TransactionFormState {
+function createTransactionFormState(
+  draft: RecordDraft | undefined,
+  initialType: "income" | "expense",
+): TransactionFormState {
   return {
     amount: String(draft?.amount ?? "0"),
     attachments: [],
@@ -204,7 +207,10 @@ function transactionToRecordDraft(transaction: LedgerTransaction): RecordDraft {
   };
 }
 
-function transactionFormReducer(state: TransactionFormState, action: TransactionFormAction): TransactionFormState {
+function transactionFormReducer(
+  state: TransactionFormState,
+  action: TransactionFormAction,
+): TransactionFormState {
   switch (action.type) {
     case "set-view":
       return { ...state, view: action.view };
@@ -215,9 +221,12 @@ function transactionFormReducer(state: TransactionFormState, action: Transaction
     case "append-digit":
       return {
         ...state,
-        amount: action.value === "del"
-          ? state.amount.length > 1 ? state.amount.slice(0, -1) : "0"
-          : normalizeAmountInput(state.amount, action.value),
+        amount:
+          action.value === "del"
+            ? state.amount.length > 1
+              ? state.amount.slice(0, -1)
+              : "0"
+            : normalizeAmountInput(state.amount, action.value),
       };
     case "set-category":
       return { ...state, categoryId: action.value };
@@ -236,7 +245,9 @@ function transactionFormReducer(state: TransactionFormState, action: Transaction
     case "mark-attachments-uploading":
       return {
         ...state,
-        attachments: state.attachments.map((item) => (action.ids.has(item.id) ? { ...item, status: "uploading" } : item)),
+        attachments: state.attachments.map((item) =>
+          action.ids.has(item.id) ? { ...item, status: "uploading" } : item,
+        ),
       };
     case "sync-attachment-jobs":
       return {
@@ -249,7 +260,9 @@ function transactionFormReducer(state: TransactionFormState, action: Transaction
     case "update-attachment-job":
       return {
         ...state,
-        attachments: state.attachments.map((item) => (item.jobId === action.job.id ? attachmentFromJob(item, action.job) : item)),
+        attachments: state.attachments.map((item) =>
+          item.jobId === action.job.id ? attachmentFromJob(item, action.job) : item,
+        ),
       };
     case "reset-after-save":
       return { ...state, amount: "0", attachments: [], items: [], note: "" };
@@ -258,16 +271,19 @@ function transactionFormReducer(state: TransactionFormState, action: Transaction
     case "update-line-row":
       return {
         ...state,
-        lineRows: state.lineRows.map((item) => (item.id === action.rowId ? { ...item, [action.field]: action.value } : item)),
+        lineRows: state.lineRows.map((item) =>
+          item.id === action.rowId ? { ...item, [action.field]: action.value } : item,
+        ),
       };
     case "add-line-row":
       return { ...state, lineRows: [...state.lineRows, { id: crypto.randomUUID(), name: "", amount: "" }] };
     case "remove-line-row":
       return {
         ...state,
-        lineRows: state.lineRows.length === 1
-          ? [{ ...action.row, name: "", amount: "" }]
-          : state.lineRows.filter((item) => item.id !== action.row.id),
+        lineRows:
+          state.lineRows.length === 1
+            ? [{ ...action.row, name: "", amount: "" }]
+            : state.lineRows.filter((item) => item.id !== action.row.id),
       };
     case "save-line-rows":
       return { ...state, items: normalizeLineItemRows(state.lineRows), view: "form" };
@@ -277,7 +293,12 @@ function transactionFormReducer(state: TransactionFormState, action: Transaction
 function attachmentFromJob(item: FormAttachment, job: ImportJobStatus): FormAttachment {
   return {
     ...item,
-    status: job.status === "failed" ? "failed" : terminalImportStatuses.has(job.status) ? "completed" : "processing",
+    status:
+      job.status === "failed"
+        ? "failed"
+        : terminalImportStatuses.has(job.status)
+          ? "completed"
+          : "processing",
     jobId: job.id,
     errorMessage: job.errorMessage,
     progress: job.progress,
@@ -301,9 +322,15 @@ function useRecordsPageController() {
   const { user } = useAuth();
   const { book, books, setActiveBook } = useActiveBook();
   const { openSheet } = useAppSheetActions();
-  const { data, error: transactionsError, loading: transactionsLoading } = useApi<{ transactions: LedgerTransaction[] }>(book ? `/books/${book.id}/transactions` : undefined);
+  const {
+    data,
+    error: transactionsError,
+    loading: transactionsLoading,
+  } = useApi<{ transactions: LedgerTransaction[] }>(book ? `/books/${book.id}/transactions` : undefined);
   const { data: categories } = useApi<{ categories: CategoryOption[] }>("/me/categories");
-  const { data: imports, reload: reloadImports } = useApi<{ imports: ImportJobStatus[] }>(book ? `/books/${book.id}/imports` : undefined);
+  const { data: imports, reload: reloadImports } = useApi<{ imports: ImportJobStatus[] }>(
+    book ? `/books/${book.id}/imports` : undefined,
+  );
 
   const categoryNames = useMemo(
     () => Object.fromEntries((categories?.categories ?? []).map((item) => [item.id, item.name])),
@@ -311,7 +338,10 @@ function useRecordsPageController() {
   );
   const importJobs = imports?.imports ?? emptyImportJobs;
   const activeImports = useMemo(() => importJobs.filter(isActiveImport), [importJobs]);
-  const activeImportWatchKey = useMemo(() => activeImports.map((job) => `${job.id}:${job.status}`).join(","), [activeImports]);
+  const activeImportWatchKey = useMemo(
+    () => activeImports.map((job) => `${job.id}:${job.status}`).join(","),
+    [activeImports],
+  );
   const { pendingCount, failedCount } = useMemo(() => {
     let pending = 0;
     let failed = 0;
@@ -334,7 +364,10 @@ function useRecordsPageController() {
   const hasAnyTransactions = allTransactions.length > 0;
   const hasActiveFilters = hasActiveRecordFilters(filters);
   const activeFilterChips = useMemo(
-    () => (filters.source === "ai" && filters.chips.length ? filters.chips : buildFilterChips(filters, categoryNames)),
+    () =>
+      filters.source === "ai" && filters.chips.length
+        ? filters.chips
+        : buildFilterChips(filters, categoryNames),
     [categoryNames, filters],
   );
 
@@ -376,7 +409,10 @@ function useRecordsPageController() {
       });
       setSearchParams(writeRecordFilters(searchParams, mergeAiSearchResult(filters, query, result)));
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "AI 搜索失败", { duration: 3000, closeButton: true });
+      toast.error(cause instanceof Error ? cause.message : "AI 搜索失败", {
+        duration: 3000,
+        closeButton: true,
+      });
     } finally {
       dispatchPage({ type: "ai-searching", value: false });
     }
@@ -480,19 +516,23 @@ export function RecordsPage() {
         onLedgerClick={openBookSwitcher}
         action={
           <div className="ios-top-actions">
-            <button className={`ios-filter-trigger${hasActiveFilters ? " active" : ""}`} type="button" aria-label="筛选记录" onClick={openFilters}>
+            <button
+              className={`ios-filter-trigger${hasActiveFilters ? " active" : ""}`}
+              type="button"
+              aria-label="筛选记录"
+              onClick={openFilters}
+            >
               <FunnelIcon size={21} weight="bold" />
             </button>
-            {canUseAiSearch && (
-              <AiSparkButton
-                onClick={() => openSheet({ type: "ai" })}
-              />
-            )}
+            {canUseAiSearch && <AiSparkButton onClick={() => openSheet({ type: "ai" })} />}
           </div>
         }
       />
       <IosScroll className="ios-record-scroll">
-        <form className={`ios-record-search${canUseAiSearch ? " has-ai" : ""}`} onSubmit={(event) => void submitSearch(event)}>
+        <form
+          className={`ios-record-search${canUseAiSearch ? " has-ai" : ""}`}
+          onSubmit={(event) => void submitSearch(event)}
+        >
           <input
             aria-label="搜索流水"
             placeholder={canUseAiSearch ? "搜索记录，或用 AI 说：上月餐饮大于 100" : "搜索记录"}
@@ -503,8 +543,17 @@ export function RecordsPage() {
             }}
           />
           {canUseAiSearch && (
-            <button className="ios-record-ai-search-button" type="submit" disabled={aiSearching || !book || !searchText.trim()} aria-label="AI 搜索">
-              {aiSearching ? <CircleNotchIcon size={15} className="ios-spin" /> : <SparkleIcon size={15} weight="fill" />}
+            <button
+              className="ios-record-ai-search-button"
+              type="submit"
+              disabled={aiSearching || !book || !searchText.trim()}
+              aria-label="AI 搜索"
+            >
+              {aiSearching ? (
+                <CircleNotchIcon size={15} className="ios-spin" />
+              ) : (
+                <SparkleIcon size={15} weight="fill" />
+              )}
               <span>{aiSearching ? "搜索中" : "AI 搜索"}</span>
             </button>
           )}
@@ -524,11 +573,7 @@ export function RecordsPage() {
         </div>
 
         {hasActiveFilters && (
-          <ActiveFilterResetBar
-            source={filters.source}
-            chips={activeFilterChips}
-            onReset={resetFilters}
-          />
+          <ActiveFilterResetBar source={filters.source} chips={activeFilterChips} onReset={resetFilters} />
         )}
 
         {(activeImports.length > 0 || pendingCount > 0 || failedCount > 0) && (
@@ -536,7 +581,11 @@ export function RecordsPage() {
             <h2>待处理</h2>
             <div className="ios-reminder-list">
               {activeImports.length > 0 && (
-                <button className="ios-reminder-row" type="button" onClick={() => openSheet({ type: "imports" })}>
+                <button
+                  className="ios-reminder-row"
+                  type="button"
+                  onClick={() => openSheet({ type: "imports" })}
+                >
                   <IconTile tint="#eaf1ff" color="#4c8dff">
                     {activeImports.length}
                   </IconTile>
@@ -548,7 +597,11 @@ export function RecordsPage() {
                 </button>
               )}
               {pendingCount > 0 && (
-                <button className="ios-reminder-row" type="button" onClick={() => openSheet({ type: "pending-imports" })}>
+                <button
+                  className="ios-reminder-row"
+                  type="button"
+                  onClick={() => openSheet({ type: "pending-imports" })}
+                >
                   <IconTile>{pendingCount}</IconTile>
                   <span>
                     <b>{pendingCount} 条待确认记录</b>
@@ -558,7 +611,11 @@ export function RecordsPage() {
                 </button>
               )}
               {failedCount > 0 && (
-                <button className="ios-reminder-row danger" type="button" onClick={() => openSheet({ type: "imports" })}>
+                <button
+                  className="ios-reminder-row danger"
+                  type="button"
+                  onClick={() => openSheet({ type: "imports" })}
+                >
                   <IconTile tint="#fdeceb" color="#d74035">
                     !
                   </IconTile>
@@ -594,7 +651,12 @@ export function RecordsPage() {
                 </header>
                 <IosCard className="ios-record-list">
                   {group.items.map((transaction) => (
-                    <IosTransactionRow transaction={transaction} categoryNames={categoryNames} currency={book?.currency} key={transaction.id} />
+                    <IosTransactionRow
+                      transaction={transaction}
+                      categoryNames={categoryNames}
+                      currency={book?.currency}
+                      key={transaction.id}
+                    />
                   ))}
                 </IosCard>
               </article>
@@ -723,11 +785,14 @@ export function TransactionFormSheet({
 }) {
   const id = recordId;
   const { book } = useActiveBook();
-  const { data: existing } = useApi<{ transaction: LedgerTransaction }>(id ? `/transactions/${id}` : undefined);
+  const { data: existing } = useApi<{ transaction: LedgerTransaction }>(
+    id ? `/transactions/${id}` : undefined,
+  );
   const { data: categoriesData } = useApi<{ categories: CategoryOption[] }>("/me/categories");
   const draftKey = getRecordDraftKey(id, book?.id);
   const initialDraft = readRecordDraft(draftKey);
-  const sourceDraft = initialDraft ?? (existing?.transaction ? transactionToRecordDraft(existing.transaction) : undefined);
+  const sourceDraft =
+    initialDraft ?? (existing?.transaction ? transactionToRecordDraft(existing.transaction) : undefined);
   const categories = categoriesData?.categories ?? [];
 
   if (id && !initialDraft && !existing?.transaction) {
@@ -768,7 +833,8 @@ function TransactionFormEditor({
 }) {
   const [state, dispatchForm] = useReducer(transactionFormReducer, initialState);
   const { user } = useAuth();
-  const { amount, attachments, categoryId, error, items, lineRows, note, occurredAt, saving, type, view } = state;
+  const { amount, attachments, categoryId, error, items, lineRows, note, occurredAt, saving, type, view } =
+    state;
   const canUseImageRecognition = user?.plan === "pro";
   const fileInput = useRef<HTMLInputElement>(null);
   const stopWatchingRef = useRef<(() => void) | undefined>(undefined);
@@ -777,12 +843,15 @@ function TransactionFormEditor({
   const assignedLineAmount = lineRows.reduce((sumValue, item) => sumValue + Number(item.amount || 0), 0);
   const lineItemErrors = useMemo(() => getLineItemErrors(lineRows, amountNumber), [lineRows, amountNumber]);
   const hasLineItemErrors = Object.values(lineItemErrors).some(Boolean);
-  useEffect(() => () => {
-    stopWatchingRef.current?.();
-    attachments.forEach((attachment) => {
-      if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
-    });
-  }, [attachments]);
+  useEffect(
+    () => () => {
+      stopWatchingRef.current?.();
+      attachments.forEach((attachment) => {
+        if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+      });
+    },
+    [attachments],
+  );
 
   const close = onClose;
   const appendDigit = (value: string) => {
@@ -815,11 +884,16 @@ function TransactionFormEditor({
     dispatchForm({ type: "remove-attachment", id: idToRemove });
   };
   const uploadAttachments = async () => {
-    const pending = attachments.filter((attachment) => attachment.status === "idle" || attachment.status === "failed");
+    const pending = attachments.filter(
+      (attachment) => attachment.status === "idle" || attachment.status === "failed",
+    );
     if (!book || !pending.length) return;
     const pendingIds = new Set(pending.map((item) => item.id));
     dispatchForm({ type: "mark-attachments-uploading", ids: pendingIds });
-    const { jobs } = await uploadImportFiles(book.id, pending.map((item) => item.file));
+    const { jobs } = await uploadImportFiles(
+      book.id,
+      pending.map((item) => item.file),
+    );
     const jobMap = new Map(jobs.map((job, index) => [pending[index]?.id, job]));
     dispatchForm({ type: "sync-attachment-jobs", jobs: jobMap });
     stopWatchingRef.current?.();
@@ -876,10 +950,13 @@ function TransactionFormEditor({
     };
     if (closeImmediately) close();
     try {
-      const saved = await api<{ transaction?: LedgerTransaction }>(id ? `/transactions/${id}` : `/books/${book?.id}/transactions`, {
-        method: id ? "PATCH" : "POST",
-        body: JSON.stringify(payload),
-      });
+      const saved = await api<{ transaction?: LedgerTransaction }>(
+        id ? `/transactions/${id}` : `/books/${book?.id}/transactions`,
+        {
+          method: id ? "PATCH" : "POST",
+          body: JSON.stringify(payload),
+        },
+      );
       invalidateLedgerData({
         bookId: book?.id,
         transactionId: id ?? saved.transaction?.id,
@@ -908,7 +985,9 @@ function TransactionFormEditor({
 
   return (
     <IosSheet
-      title={view === "lineItems" ? "添加明细" : id ? "编辑记录" : type === "income" ? "记一笔收入" : "记一笔支出"}
+      title={
+        view === "lineItems" ? "添加明细" : id ? "编辑记录" : type === "income" ? "记一笔收入" : "记一笔支出"
+      }
       onClose={close}
       back={view === "lineItems"}
       onBack={() => dispatchForm({ type: "set-view", view: "form" })}
@@ -924,7 +1003,15 @@ function TransactionFormEditor({
                 保存并继续
               </IosButton>
             )}
-            <IosButton disabled={saving} onClick={() => void save(false)} style={type === "income" ? { background: "#1f9d57", boxShadow: "0 9px 22px rgba(31, 157, 87, .22)" } : undefined}>
+            <IosButton
+              disabled={saving}
+              onClick={() => void save(false)}
+              style={
+                type === "income"
+                  ? { background: "#1f9d57", boxShadow: "0 9px 22px rgba(31, 157, 87, .22)" }
+                  : undefined
+              }
+            >
               {saving ? "保存中…" : id ? "保存修改" : type === "income" ? "保存收入" : "保存支出"}
             </IosButton>
           </div>
@@ -942,82 +1029,112 @@ function TransactionFormEditor({
           onUpdate={updateLineRow}
         />
       ) : (
-      <div className="ios-record-form">
-        <IosSegment
-          value={type}
-          onChange={(value) => dispatchForm({ type: "set-type", value })}
-          options={[
-            { value: "expense", label: "支出" },
-            { value: "income", label: "收入" },
-          ]}
-        />
+        <div className="ios-record-form">
+          <IosSegment
+            value={type}
+            onChange={(value) => dispatchForm({ type: "set-type", value })}
+            options={[
+              { value: "expense", label: "支出" },
+              { value: "income", label: "收入" },
+            ]}
+          />
 
-        <section className="ios-amount-panel">
-          <span>¥</span>
-          <strong className={type}>{formatAmountText(amount)}</strong>
-        </section>
+          <section className="ios-amount-panel">
+            <span>¥</span>
+            <strong className={type}>{formatAmountText(amount)}</strong>
+          </section>
 
-        <section>
-          <h3>类别</h3>
-          <div className="ios-category-strip">
-            {categories.slice(0, 8).map((category) => (
-              <button
-                aria-label={category.name}
-                className={category.id === categoryId ? "active" : ""}
-                type="button"
-                onClick={() => dispatchForm({ type: "set-category", value: category.id })}
-                key={category.id}
-              >
-                <IconTile tint={category.id === categoryId ? categoryColor(category, type) : `${categoryColor(category, type)}18`} color={category.id === categoryId ? "#fff" : categoryColor(category, type)}>
-                  {category.name[0] ?? "类"}
-                </IconTile>
-                <span>{category.name}</span>
+          <section>
+            <h3>类别</h3>
+            <div className="ios-category-strip">
+              {categories.slice(0, 8).map((category) => (
+                <button
+                  aria-label={category.name}
+                  className={category.id === categoryId ? "active" : ""}
+                  type="button"
+                  onClick={() => dispatchForm({ type: "set-category", value: category.id })}
+                  key={category.id}
+                >
+                  <IconTile
+                    tint={
+                      category.id === categoryId
+                        ? categoryColor(category, type)
+                        : `${categoryColor(category, type)}18`
+                    }
+                    color={category.id === categoryId ? "#fff" : categoryColor(category, type)}
+                  >
+                    {category.name[0] ?? "类"}
+                  </IconTile>
+                  <span>{category.name}</span>
+                </button>
+              ))}
+              {!categories.length && <p className="muted">暂无分类，可稍后在设置中维护。</p>}
+            </div>
+          </section>
+
+          <div className="ios-record-meta-row">
+            <label>
+              <CalendarBlankIcon size={17} />
+              <input
+                aria-label="日期"
+                type="date"
+                value={occurredAt}
+                onChange={(event) => dispatchForm({ type: "set-date", value: event.currentTarget.value })}
+              />
+            </label>
+            {canUseImageRecognition ? (
+              <button type="button" onClick={() => fileInput.current?.click()}>
+                <PaperclipIcon size={17} />
+                {attachments.length ? `图片 ${attachments.length}` : "图片识别"}
+              </button>
+            ) : null}
+          </div>
+          {canUseImageRecognition ? (
+            <input
+              ref={fileInput}
+              className="sr-only"
+              type="file"
+              multiple
+              aria-label="上传图片"
+              accept={supportedFileAccept}
+              onChange={(event) => addFiles(event.currentTarget.files)}
+            />
+          ) : null}
+
+          {attachments.length > 0 && (
+            <div className="ios-form-attachments">
+              {attachments.map((attachment) => (
+                <AttachmentChip
+                  attachment={attachment}
+                  onRemove={() => removeAttachment(attachment.id)}
+                  key={attachment.id}
+                />
+              ))}
+            </div>
+          )}
+
+          <input
+            className="ios-note-input"
+            aria-label="备注"
+            value={note}
+            placeholder="添加备注…"
+            onChange={(event) => dispatchForm({ type: "set-note", value: event.currentTarget.value })}
+          />
+          <button className="ios-line-item-link" type="button" onClick={openLineItems}>
+            <PlusCircleIcon size={18} weight="bold" />
+            添加明细{items.length ? `（${items.length}）` : ""}
+          </button>
+
+          <div className="ios-keypad">
+            {["1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "del"].map((key) => (
+              <button type="button" onClick={() => appendDigit(key)} key={key}>
+                {key === "del" ? "⌫" : key}
               </button>
             ))}
-            {!categories.length && <p className="muted">暂无分类，可稍后在设置中维护。</p>}
           </div>
-        </section>
-
-        <div className="ios-record-meta-row">
-          <label>
-            <CalendarBlankIcon size={17} />
-            <input aria-label="日期" type="date" value={occurredAt} onChange={(event) => dispatchForm({ type: "set-date", value: event.currentTarget.value })} />
-          </label>
-          {canUseImageRecognition ? (
-            <button type="button" onClick={() => fileInput.current?.click()}>
-              <PaperclipIcon size={17} />
-              {attachments.length ? `图片 ${attachments.length}` : "图片识别"}
-            </button>
-          ) : null}
+          {selectedCategory && <p className="ios-form-hint">当前分类：{selectedCategory.name}</p>}
+          {error && <p className="field-error">{error}</p>}
         </div>
-        {canUseImageRecognition ? (
-          <input ref={fileInput} className="sr-only" type="file" multiple aria-label="上传图片" accept={supportedFileAccept} onChange={(event) => addFiles(event.currentTarget.files)} />
-        ) : null}
-
-        {attachments.length > 0 && (
-          <div className="ios-form-attachments">
-            {attachments.map((attachment) => (
-              <AttachmentChip attachment={attachment} onRemove={() => removeAttachment(attachment.id)} key={attachment.id} />
-            ))}
-          </div>
-        )}
-
-        <input className="ios-note-input" aria-label="备注" value={note} placeholder="添加备注…" onChange={(event) => dispatchForm({ type: "set-note", value: event.currentTarget.value })} />
-        <button className="ios-line-item-link" type="button" onClick={openLineItems}>
-          <PlusCircleIcon size={18} weight="bold" />
-          添加明细{items.length ? `（${items.length}）` : ""}
-        </button>
-
-        <div className="ios-keypad">
-          {["1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "del"].map((key) => (
-            <button type="button" onClick={() => appendDigit(key)} key={key}>
-              {key === "del" ? "⌫" : key}
-            </button>
-          ))}
-        </div>
-        {selectedCategory && <p className="ios-form-hint">当前分类：{selectedCategory.name}</p>}
-        {error && <p className="field-error">{error}</p>}
-      </div>
       )}
     </IosSheet>
   );
@@ -1062,10 +1179,21 @@ function LineItemsEditor({
       {rows.map((row) => (
         <div className="ios-line-row" key={row.id}>
           <label>
-            <input aria-label="明细名称" placeholder="明细名称" value={row.name} onChange={(event) => onUpdate(row.id, "name", event.currentTarget.value)} />
+            <input
+              aria-label="明细名称"
+              placeholder="明细名称"
+              value={row.name}
+              onChange={(event) => onUpdate(row.id, "name", event.currentTarget.value)}
+            />
           </label>
           <label>
-            <input aria-label="明细金额" inputMode="decimal" placeholder="0.00" value={row.amount} onChange={(event) => onUpdate(row.id, "amount", event.currentTarget.value)} />
+            <input
+              aria-label="明细金额"
+              inputMode="decimal"
+              placeholder="0.00"
+              value={row.amount}
+              onChange={(event) => onUpdate(row.id, "amount", event.currentTarget.value)}
+            />
             {errors[row.id] ? <em>{errors[row.id]}</em> : null}
           </label>
           <button type="button" aria-label="删除明细" onClick={() => onRemove(row)}>
@@ -1107,7 +1235,11 @@ export function RecordDetailSheet({
     close();
     try {
       await api(`/transactions/${transaction.id}`, { method: "DELETE" });
-      invalidateLedgerData({ bookId, transactionId: transaction.id, scopes: ["transactions", "transaction"] });
+      invalidateLedgerData({
+        bookId,
+        transactionId: transaction.id,
+        scopes: ["transactions", "transaction"],
+      });
       toast.success("记录已删除", { duration: 2600, closeButton: true });
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : "删除失败", { duration: 3000, closeButton: true });
@@ -1121,22 +1253,20 @@ export function RecordDetailSheet({
       {transaction && (
         <div className="ios-record-detail">
           <div className="ios-record-detail-hero">
-            <strong className={transaction.type}>
-              {yuan(transaction.amount, currency)}
-            </strong>
+            <strong className={transaction.type}>{yuan(transaction.amount, currency)}</strong>
             <span>{transaction.note || "未命名记录"}</span>
             <small>{categoryLabel(transaction)}</small>
           </div>
           <IosCard className="ios-detail-rows">
             <DetailRow label="时间" value={new Date(transaction.occurredAt).toLocaleString("zh-CN")} />
             <DetailRow label="备注" value={transaction.note || "—"} />
-            <DetailRow label="明细" value={transaction.items?.length ? `${transaction.items.length} 项` : "无"} />
+            <DetailRow
+              label="明细"
+              value={transaction.items?.length ? `${transaction.items.length} 项` : "无"}
+            />
           </IosCard>
           <div className="ios-sheet-actions">
-            <IosButton
-              variant="outline"
-              onClick={() => onEdit(transaction.id)}
-            >
+            <IosButton variant="outline" onClick={() => onEdit(transaction.id)}>
               <NotePencilIcon size={18} />
               编辑
             </IosButton>
@@ -1163,14 +1293,24 @@ export function RecordDetailSheet({
 function AttachmentChip({ attachment, onRemove }: { attachment: FormAttachment; onRemove: () => void }) {
   return (
     <div className={`ios-form-attachment ${attachment.status}`}>
-      {attachment.previewUrl ? <img src={attachment.previewUrl} alt={attachment.file.name} /> : <span>{fileExtension(attachment.file.name)}</span>}
+      {attachment.previewUrl ? (
+        <img src={attachment.previewUrl} alt={attachment.file.name} />
+      ) : (
+        <span>{fileExtension(attachment.file.name)}</span>
+      )}
       <b>{attachment.file.name}</b>
       <button type="button" aria-label="移除附件" onClick={onRemove}>
         <XIcon size={13} weight="bold" />
       </button>
       {attachment.status !== "idle" && (
         <em>
-          {attachment.status === "completed" ? <CheckCircleIcon size={18} weight="fill" /> : attachment.status === "failed" ? "失败" : "处理中"}
+          {attachment.status === "completed" ? (
+            <CheckCircleIcon size={18} weight="fill" />
+          ) : attachment.status === "failed" ? (
+            "失败"
+          ) : (
+            "处理中"
+          )}
         </em>
       )}
     </div>
@@ -1181,7 +1321,11 @@ function RecordEmptyState({ filtered, onReset }: { filtered: boolean; onReset?: 
   return (
     <div className={`ios-empty ios-record-empty-state${filtered ? " filtered" : ""}`}>
       <b>{filtered ? "没有符合筛选的记录" : "还没有流水记录"}</b>
-      <p>{filtered ? "当前条件下暂时没有结果，可以调整筛选或清空条件。" : "点底部加号记下第一笔，之后这里会按日期展示流水。"}</p>
+      <p>
+        {filtered
+          ? "当前条件下暂时没有结果，可以调整筛选或清空条件。"
+          : "点底部加号记下第一笔，之后这里会按日期展示流水。"}
+      </p>
       {filtered && onReset ? (
         <button type="button" onClick={onReset}>
           清空筛选
@@ -1250,16 +1394,16 @@ function emptyRecordFilters(): RecordFilters {
 function hasActiveRecordFilters(filters: RecordFilters) {
   return Boolean(
     filters.q.trim() ||
-      filters.type !== "all" ||
-      filters.sort !== "latest" ||
-      filters.start ||
-      filters.end ||
-      filters.min ||
-      filters.max ||
-      filters.category ||
-      filters.source ||
-      filters.minStrict ||
-      filters.maxStrict,
+    filters.type !== "all" ||
+    filters.sort !== "latest" ||
+    filters.start ||
+    filters.end ||
+    filters.min ||
+    filters.max ||
+    filters.category ||
+    filters.source ||
+    filters.minStrict ||
+    filters.maxStrict,
   );
 }
 
@@ -1301,7 +1445,10 @@ function writeRecordFilters(searchParams: URLSearchParams, filters: RecordFilter
   setOrDelete("category", filters.category);
   if (filters.source) next.set("source", filters.source);
   else next.delete("source");
-  const chips = filters.source === "ai" ? writeChips(filters.chips.length ? filters.chips : buildFilterChips(filters, {})) : "";
+  const chips =
+    filters.source === "ai"
+      ? writeChips(filters.chips.length ? filters.chips : buildFilterChips(filters, {}))
+      : "";
   setOrDelete("chips", chips);
   if (filters.minStrict) next.set("minStrict", "1");
   else next.delete("minStrict");
@@ -1342,21 +1489,47 @@ function formatAmountRangeLabel(filters: RecordFilters) {
   return `金额 ${maxSign} ${filters.max}`;
 }
 
-function matchesRecordFilters(transaction: LedgerTransaction, filters: RecordFilters, categoryNames: Record<string, string>) {
+function matchesRecordFilters(
+  transaction: LedgerTransaction,
+  filters: RecordFilters,
+  categoryNames: Record<string, string>,
+) {
   if (filters.type !== "all" && transaction.type !== filters.type) return false;
   const occurredAt = transaction.occurredAt.slice(0, 10);
   if (filters.start && occurredAt < filters.start) return false;
   if (filters.end && occurredAt > filters.end) return false;
   const min = Number(filters.min);
   const max = Number(filters.max);
-  if (filters.min && Number.isFinite(min) && (filters.minStrict ? transaction.amount <= min : transaction.amount < min)) return false;
-  if (filters.max && Number.isFinite(max) && (filters.maxStrict ? transaction.amount >= max : transaction.amount > max)) return false;
+  if (
+    filters.min &&
+    Number.isFinite(min) &&
+    (filters.minStrict ? transaction.amount <= min : transaction.amount < min)
+  )
+    return false;
+  if (
+    filters.max &&
+    Number.isFinite(max) &&
+    (filters.maxStrict ? transaction.amount >= max : transaction.amount > max)
+  )
+    return false;
   const label = categoryLabel(transaction, categoryNames);
-  if (filters.category && ![transaction.categoryId, label].filter(Boolean).join(" ").toLowerCase().includes(filters.category.toLowerCase())) return false;
+  if (
+    filters.category &&
+    ![transaction.categoryId, label]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(filters.category.toLowerCase())
+  )
+    return false;
   if (filters.source === "ai") return true;
   const keyword = filters.q.trim().toLowerCase();
   if (!keyword) return true;
-  return [transaction.note, label, transaction.categoryId].filter(Boolean).join(" ").toLowerCase().includes(keyword);
+  return [transaction.note, label, transaction.categoryId]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+    .includes(keyword);
 }
 
 function compareRecordTransactions(a: LedgerTransaction, b: LedgerTransaction, sort: RecordSort) {
@@ -1392,7 +1565,11 @@ function buildAiBaseFilters(filters: RecordFilters) {
   };
 }
 
-function mergeAiSearchResult(current: RecordFilters, query: string, result: AiTransactionSearchResponse): RecordFilters {
+function mergeAiSearchResult(
+  current: RecordFilters,
+  query: string,
+  result: AiTransactionSearchResponse,
+): RecordFilters {
   const urlFilters = filtersFromAiSearchUrl(result.href ?? result.url);
   const extracted = extractAiSearchFilters(result);
   const next: RecordFilters = {
@@ -1424,7 +1601,8 @@ function extractAiSearchFilters(result: AiTransactionSearchResponse): Partial<Re
   const sort = stringValue(payload.sort);
   const min = numberStringValue(payload.min ?? payload.minAmount ?? amount?.min);
   const max = numberStringValue(payload.max ?? payload.maxAmount ?? amount?.max);
-  const category = stringValue(payload.category) ?? stringValue(payload.categoryId) ?? stringValue(payload.categoryName);
+  const category =
+    stringValue(payload.category) ?? stringValue(payload.categoryId) ?? stringValue(payload.categoryName);
   const extracted: Partial<RecordFilters> = {};
   if (type === "expense" || type === "income") extracted.type = type;
   if (sort === "latest" || sort === "date_desc") extracted.sort = "latest";
@@ -1433,8 +1611,12 @@ function extractAiSearchFilters(result: AiTransactionSearchResponse): Partial<Re
   if (max) extracted.max = max;
   const minPayload = objectValue(payload.min ?? amount?.min);
   const maxPayload = objectValue(payload.max ?? amount?.max);
-  const minStrict = booleanValue(payload.minStrict ?? payload.strictMin ?? minPayload?.strict ?? minPayload?.exclusive);
-  const maxStrict = booleanValue(payload.maxStrict ?? payload.strictMax ?? maxPayload?.strict ?? maxPayload?.exclusive);
+  const minStrict = booleanValue(
+    payload.minStrict ?? payload.strictMin ?? minPayload?.strict ?? minPayload?.exclusive,
+  );
+  const maxStrict = booleanValue(
+    payload.maxStrict ?? payload.strictMax ?? maxPayload?.strict ?? maxPayload?.exclusive,
+  );
   if (minStrict !== undefined) extracted.minStrict = minStrict;
   if (maxStrict !== undefined) extracted.maxStrict = maxStrict;
   if (category) extracted.category = category;
@@ -1448,7 +1630,9 @@ function extractAiSearchFilters(result: AiTransactionSearchResponse): Partial<Re
 }
 
 function objectValue(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
 }
 
 function stringValue(value: unknown) {
@@ -1474,11 +1658,11 @@ function booleanValue(value: unknown): boolean | undefined {
 function normalizeChips(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value.flatMap((item) => {
-        if (typeof item === "string") return item.trim();
-        const object = objectValue(item);
-        const chip = stringValue(object?.value) ?? stringValue(object?.label) ?? "";
-        return chip ? [chip] : [];
-      });
+      if (typeof item === "string") return item.trim();
+      const object = objectValue(item);
+      const chip = stringValue(object?.value) ?? stringValue(object?.label) ?? "";
+      return chip ? [chip] : [];
+    });
   }
   if (typeof value === "string") return readChips(value);
   return [];
@@ -1493,10 +1677,12 @@ function readChips(value: string | null) {
 }
 
 function writeChips(chips: string[]) {
-  return chips.flatMap((item) => {
-    const chip = item.trim();
-    return chip ? [chip] : [];
-  }).join("|");
+  return chips
+    .flatMap((item) => {
+      const chip = item.trim();
+      return chip ? [chip] : [];
+    })
+    .join("|");
 }
 
 function getClientTimeZone() {
@@ -1505,7 +1691,8 @@ function getClientTimeZone() {
 
 function categoryLabel(transaction: LedgerTransaction, categoryNames?: Record<string, string>) {
   if (transaction.categoryName) return transaction.categoryName;
-  if (transaction.categoryId && categoryNames?.[transaction.categoryId]) return categoryNames[transaction.categoryId];
+  if (transaction.categoryId && categoryNames?.[transaction.categoryId])
+    return categoryNames[transaction.categoryId];
   return transaction.categoryId ?? "未分类";
 }
 
@@ -1525,11 +1712,15 @@ function isActiveImport(job: ImportJobStatus) {
 function formatActiveImportSummary(imports: ImportJobStatus[]) {
   const first = imports[0];
   if (!first) return "";
-  if (first.status === "ai_processing") return imports.length > 1 ? `${imports.length} 个文件，AI 分析中` : "AI 分析中";
+  if (first.status === "ai_processing")
+    return imports.length > 1 ? `${imports.length} 个文件，AI 分析中` : "AI 分析中";
   if (typeof first.currentPage === "number" && typeof first.totalPages === "number") {
-    return imports.length > 1 ? `${imports.length} 个文件，第 ${first.currentPage}/${first.totalPages} 页` : `第 ${first.currentPage}/${first.totalPages} 页`;
+    return imports.length > 1
+      ? `${imports.length} 个文件，第 ${first.currentPage}/${first.totalPages} 页`
+      : `第 ${first.currentPage}/${first.totalPages} 页`;
   }
-  if (typeof first.progress === "number" && first.progress > 0) return imports.length > 1 ? `${imports.length} 个文件，OCR ${first.progress}%` : `OCR ${first.progress}%`;
+  if (typeof first.progress === "number" && first.progress > 0)
+    return imports.length > 1 ? `${imports.length} 个文件，OCR ${first.progress}%` : `OCR ${first.progress}%`;
   return `${imports.length} 张图片正在识别`;
 }
 
@@ -1601,8 +1792,12 @@ function normalizeLineItemPayload(items: unknown): LineItemValue[] {
       {
         name,
         amount,
-        ...(typeof candidate.categoryId === "string" && candidate.categoryId ? { categoryId: candidate.categoryId } : {}),
-        ...(typeof candidate.note === "string" && candidate.note.trim() ? { note: candidate.note.trim() } : {}),
+        ...(typeof candidate.categoryId === "string" && candidate.categoryId
+          ? { categoryId: candidate.categoryId }
+          : {}),
+        ...(typeof candidate.note === "string" && candidate.note.trim()
+          ? { note: candidate.note.trim() }
+          : {}),
       },
     ];
   });
@@ -1618,7 +1813,10 @@ function getLineItemErrors(rows: Array<{ id: string; amount: string }>, total: n
       if (!row.amount) return [row.id, ""];
       const amount = Number(row.amount);
       if (!Number.isFinite(amount) || amount < 0) return [row.id, "请输入有效金额"];
-      const otherAssigned = rows.reduce((sumValue, item) => (item.id === row.id ? sumValue : sumValue + Number(item.amount || 0)), 0);
+      const otherAssigned = rows.reduce(
+        (sumValue, item) => (item.id === row.id ? sumValue : sumValue + Number(item.amount || 0)),
+        0,
+      );
       const remaining = Math.max(0, total - otherAssigned);
       if (amount > remaining) return [row.id, `不能超过剩余 ${yuan(remaining)}`];
       return [row.id, ""];

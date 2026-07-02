@@ -46,9 +46,9 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
 );
 Button.displayName = "Button";
 
-export const Card = forwardRef<HTMLElement, HTMLAttributes<HTMLElement>>(
-  ({ className, ...props }, ref) => <section ref={ref} className={cn("ui-card", className)} {...props} />,
-);
+export const Card = forwardRef<HTMLElement, HTMLAttributes<HTMLElement>>(({ className, ...props }, ref) => (
+  <section ref={ref} className={cn("ui-card", className)} {...props} />
+));
 Card.displayName = "Card";
 
 export const CardHeader = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
@@ -88,7 +88,9 @@ export const Input = forwardRef<HTMLInputElement, ComponentPropsWithoutRef<"inpu
 Input.displayName = "Input";
 
 export const Textarea = forwardRef<HTMLTextAreaElement, ComponentPropsWithoutRef<"textarea">>(
-  ({ className, ...props }, ref) => <textarea ref={ref} className={cn("ui-textarea", className)} {...props} />,
+  ({ className, ...props }, ref) => (
+    <textarea ref={ref} className={cn("ui-textarea", className)} {...props} />
+  ),
 );
 Textarea.displayName = "Textarea";
 
@@ -155,7 +157,12 @@ export const SelectContent = forwardRef<
   ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
 >(({ className, children, ...props }, ref) => (
   <SelectPrimitive.Portal>
-    <SelectPrimitive.Content ref={ref} className={cn("ui-select-content", className)} position="popper" {...props}>
+    <SelectPrimitive.Content
+      ref={ref}
+      className={cn("ui-select-content", className)}
+      position="popper"
+      {...props}
+    >
       <SelectPrimitive.Viewport className="ui-select-viewport">{children}</SelectPrimitive.Viewport>
     </SelectPrimitive.Content>
   </SelectPrimitive.Portal>
@@ -203,15 +210,7 @@ export const RadioGroupItem = forwardRef<
 ));
 RadioGroupItem.displayName = RadioGroupPrimitive.Item.displayName;
 
-export function PageTitle({
-  title,
-  left,
-  action,
-}: {
-  title: string;
-  left?: ReactNode;
-  action?: ReactNode;
-}) {
+export function PageTitle({ title, left, action }: { title: string; left?: ReactNode; action?: ReactNode }) {
   return (
     <header className="page-title">
       <div className="page-title-side">{left}</div>

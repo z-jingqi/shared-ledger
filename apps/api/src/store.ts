@@ -190,7 +190,10 @@ export class MemoryLedgerStore {
   }
   findCategoryByName(userId: string, name?: string, type?: string) {
     return name
-      ? this.categories.find((category) => category.userId === userId && category.name === name && (!type || category.type === type))
+      ? this.categories.find(
+          (category) =>
+            category.userId === userId && category.name === name && (!type || category.type === type),
+        )
       : undefined;
   }
   findMember(bookId: string, userId: string) {

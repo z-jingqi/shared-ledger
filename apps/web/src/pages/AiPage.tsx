@@ -1,9 +1,21 @@
 import { ListIcon, XIcon } from "@phosphor-icons/react";
-import { useCallback, useEffect, useMemo, useReducer, useRef, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent,
+} from "react";
 import { Navigate } from "react-router-dom";
 import { toast } from "sonner";
 import { AiChat } from "../components/ai/AiChat";
-import { AiSessionDirectory, type AiSession, type SessionMenuPosition } from "../components/ai/AiSessionDirectory";
+import {
+  AiSessionDirectory,
+  type AiSession,
+  type SessionMenuPosition,
+} from "../components/ai/AiSessionDirectory";
 import { IosSheet } from "../components/ios/IosDesign";
 import { useActiveBook } from "../hooks/useActiveBook";
 import { api } from "../lib";
@@ -54,7 +66,12 @@ function aiSheetReducer(state: AiSheetState, action: AiSheetAction): AiSheetStat
     case "load-start":
       return { ...state, loading: true };
     case "load-success":
-      return { ...state, sessions: action.sessions, activeSessionId: state.activeSessionId ?? action.sessions[0]?.id, loading: false };
+      return {
+        ...state,
+        sessions: action.sessions,
+        activeSessionId: state.activeSessionId ?? action.sessions[0]?.id,
+        loading: false,
+      };
     case "load-failure":
       return { ...state, loading: false };
     case "session-created":
@@ -63,7 +80,10 @@ function aiSheetReducer(state: AiSheetState, action: AiSheetAction): AiSheetStat
         activeSessionId: action.session.id,
         menuPosition: undefined,
         menuSessionId: undefined,
-        sessions: [action.session, ...state.sessions.filter((session) => session.id !== action.session.id)].slice(0, 20),
+        sessions: [
+          action.session,
+          ...state.sessions.filter((session) => session.id !== action.session.id),
+        ].slice(0, 20),
         showSessions: false,
       };
     case "session-activity":
@@ -72,12 +92,22 @@ function aiSheetReducer(state: AiSheetState, action: AiSheetAction): AiSheetStat
         ...state,
         sessions: state.sessions.map((session) =>
           session.id === state.activeSessionId
-            ? { ...session, title: action.title || (action.hasMessages ? session.title : "新会话"), updatedAt: new Date().toISOString() }
+            ? {
+                ...session,
+                title: action.title || (action.hasMessages ? session.title : "新会话"),
+                updatedAt: new Date().toISOString(),
+              }
             : session,
         ),
       };
     case "select-session":
-      return { ...state, activeSessionId: action.sessionId, menuPosition: undefined, menuSessionId: undefined, showSessions: false };
+      return {
+        ...state,
+        activeSessionId: action.sessionId,
+        menuPosition: undefined,
+        menuSessionId: undefined,
+        showSessions: false,
+      };
     case "show-sessions":
       return { ...state, showSessions: true };
     case "close-session-sheet":
@@ -87,7 +117,13 @@ function aiSheetReducer(state: AiSheetState, action: AiSheetAction): AiSheetStat
     case "open-menu":
       return { ...state, menuPosition: action.position, menuSessionId: action.sessionId };
     case "begin-rename":
-      return { ...state, menuPosition: undefined, menuSessionId: undefined, renamingSessionId: action.session.id, renameValue: action.session.title };
+      return {
+        ...state,
+        menuPosition: undefined,
+        menuSessionId: undefined,
+        renamingSessionId: action.session.id,
+        renameValue: action.session.title,
+      };
     case "rename-value":
       return { ...state, renameValue: action.value };
     case "rename-cancel":
@@ -97,7 +133,9 @@ function aiSheetReducer(state: AiSheetState, action: AiSheetAction): AiSheetStat
         ...state,
         renameValue: "",
         renamingSessionId: undefined,
-        sessions: state.sessions.map((session) => (session.id === action.session.id ? action.session : session)),
+        sessions: state.sessions.map((session) =>
+          session.id === action.session.id ? action.session : session,
+        ),
       };
     case "delete-session": {
       const sessions = state.sessions.filter((session) => session.id !== action.sessionId);
@@ -157,7 +195,10 @@ export function AiSheet({ onClose }: { onClose: () => void }) {
       } catch (cause) {
         if (!alive) return;
         dispatch({ type: "load-failure" });
-        toast.error(cause instanceof Error ? cause.message : "读取 AI 会话失败", { duration: 3000, closeButton: true });
+        toast.error(cause instanceof Error ? cause.message : "读取 AI 会话失败", {
+          duration: 3000,
+          closeButton: true,
+        });
       }
     };
     void load();
@@ -174,7 +215,10 @@ export function AiSheet({ onClose }: { onClose: () => void }) {
       });
       dispatch({ type: "session-created", session: result.session });
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "创建会话失败", { duration: 3000, closeButton: true });
+      toast.error(cause instanceof Error ? cause.message : "创建会话失败", {
+        duration: 3000,
+        closeButton: true,
+      });
     }
   };
 
@@ -198,7 +242,10 @@ export function AiSheet({ onClose }: { onClose: () => void }) {
       });
       dispatch({ type: "rename-saved", session: result.session });
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "重命名失败", { duration: 3000, closeButton: true });
+      toast.error(cause instanceof Error ? cause.message : "重命名失败", {
+        duration: 3000,
+        closeButton: true,
+      });
     }
   };
 
@@ -208,7 +255,10 @@ export function AiSheet({ onClose }: { onClose: () => void }) {
       dispatch({ type: "delete-session", sessionId });
       if (!silent) toast.success("会话已删除", { duration: 2200, closeButton: true });
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "删除会话失败", { duration: 3000, closeButton: true });
+      toast.error(cause instanceof Error ? cause.message : "删除会话失败", {
+        duration: 3000,
+        closeButton: true,
+      });
     }
   };
 
@@ -230,8 +280,8 @@ export function AiSheet({ onClose }: { onClose: () => void }) {
         type: "open-menu",
         sessionId,
         position: {
-        top,
-        right: Math.max(sheetRect.right - buttonRect.right + 2, 16),
+          top,
+          right: Math.max(sheetRect.right - buttonRect.right + 2, 16),
         },
       });
     } else {
@@ -275,7 +325,12 @@ export function AiSheet({ onClose }: { onClose: () => void }) {
       disableDragClose
       disableBackdropClose
       left={
-        <button className="ios-ai-session-trigger" type="button" aria-label="切换 AI 会话" onClick={() => dispatch({ type: "show-sessions" })}>
+        <button
+          className="ios-ai-session-trigger"
+          type="button"
+          aria-label="切换 AI 会话"
+          onClick={() => dispatch({ type: "show-sessions" })}
+        >
           <ListIcon size={20} weight="bold" />
         </button>
       }

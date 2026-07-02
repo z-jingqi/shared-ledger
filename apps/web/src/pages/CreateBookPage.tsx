@@ -1,7 +1,16 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { WalletIcon } from "@phosphor-icons/react";
 import { createBookSchema } from "@shared-ledger/shared";
-import { Input, Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue, Textarea } from "@shared-ledger/ui";
+import {
+  Input,
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Textarea,
+} from "@shared-ledger/ui";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -51,7 +60,12 @@ export function CreateBookPage() {
             <Input placeholder="例如：家庭账本" {...form.register("name")} />
           </IosField>
           <IosField label="默认货币">
-            <Select value={currency} onValueChange={(value) => form.setValue("currency", value, { shouldDirty: true, shouldValidate: true })}>
+            <Select
+              value={currency}
+              onValueChange={(value) =>
+                form.setValue("currency", value, { shouldDirty: true, shouldValidate: true })
+              }
+            >
               <SelectTrigger aria-label="默认货币">
                 <SelectValue placeholder="请选择货币" />
               </SelectTrigger>

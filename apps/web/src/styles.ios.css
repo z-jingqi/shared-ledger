@@ -17,7 +17,8 @@
   --ios-radius-xl: 24px;
   --ios-shadow: 0 6px 22px rgba(36, 48, 74, 0.08);
   --ios-shadow-strong: 0 16px 34px rgba(255, 104, 28, 0.2);
-  --ios-font: Inter, "PingFang SC", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --ios-font:
+    Inter, "PingFang SC", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --ios-safe-area-top: 0px;
   --ios-safe-area-bottom: 0px;
   --ios-bottom-nav-height: 56px;
@@ -30,23 +31,43 @@ html.is-ios {
 }
 
 @keyframes iosFadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes iosSheetUp {
-  from { transform: translateY(100%); }
-  to { transform: translateY(0); }
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
 }
 
 @keyframes iosPopIn {
-  from { opacity: 0; transform: scale(.94); }
-  to { opacity: 1; transform: scale(1); }
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 @keyframes iosAddMenuIn {
-  from { opacity: 0; transform: translate(-50%, 8px) scale(.98); }
-  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
 }
 
 .phone {
@@ -229,8 +250,12 @@ html.is-ios {
   font-weight: 800;
 }
 
-.ios-metric.income b { color: var(--ios-income); }
-.ios-metric.accent b { color: var(--ios-accent); }
+.ios-metric.income b {
+  color: var(--ios-income);
+}
+.ios-metric.accent b {
+  color: var(--ios-accent);
+}
 
 .ios-icon-tile {
   width: 38px;
@@ -334,7 +359,9 @@ html.is-ios {
   justify-content: center;
   box-shadow: none;
   cursor: pointer;
-  transition: transform .2s ease, box-shadow .2s ease;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .ios-fab.open {
@@ -367,7 +394,7 @@ html.is-ios {
   box-shadow: 0 14px 32px rgba(27, 38, 59, 0.16);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
-  animation: iosAddMenuIn .18s ease;
+  animation: iosAddMenuIn 0.18s ease;
 }
 
 .ios-add-menu button {
@@ -385,7 +412,7 @@ html.is-ios {
 }
 
 .ios-add-menu button:disabled {
-  opacity: .62;
+  opacity: 0.62;
   cursor: not-allowed;
 }
 
@@ -418,11 +445,11 @@ html.is-ios {
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  animation: iosFadeIn .2s;
+  animation: iosFadeIn 0.2s;
 }
 
 .ios-overlay.closing {
-  animation: iosFadeOut .19s ease forwards;
+  animation: iosFadeOut 0.19s ease forwards;
 }
 
 .ios-overlay.full {
@@ -448,8 +475,8 @@ html.is-ios {
   border-radius: 26px 26px 0 0;
   background: var(--ios-bg-2);
   box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.18);
-  animation: iosSheetUp .3s cubic-bezier(.22, 1, .36, 1);
-  transition: transform .22s cubic-bezier(.22, 1, .36, 1);
+  animation: iosSheetUp 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
   touch-action: none;
   will-change: transform;
 }
@@ -465,7 +492,7 @@ html.is-ios {
 }
 
 .ios-sheet.closing {
-  transition: transform .19s ease-in;
+  transition: transform 0.19s ease-in;
 }
 
 .ios-sheet-header {
@@ -692,7 +719,7 @@ html.is-ios {
   align-items: center;
   justify-content: center;
   padding: 28px;
-  animation: iosFadeIn .18s;
+  animation: iosFadeIn 0.18s;
 }
 
 .ios-dialog {
@@ -705,8 +732,8 @@ html.is-ios {
   padding: 24px 22px 18px;
   background: #fff;
   text-align: center;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, .3);
-  animation: iosPopIn .22s;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+  animation: iosPopIn 0.22s;
 }
 
 .ios-dialog h2 {
@@ -838,11 +865,19 @@ html.is-ios {
 }
 
 @keyframes iosSkeletonShimmer {
-  from { background-position: 120% 0; }
-  to { background-position: -120% 0; }
+  from {
+    background-position: 120% 0;
+  }
+  to {
+    background-position: -120% 0;
+  }
 }
 
 @keyframes iosFadeOut {
-  from { opacity: 1; }
-  to { opacity: 0; }
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
 }

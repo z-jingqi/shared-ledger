@@ -63,15 +63,23 @@ export const accounts = sqliteTable("accounts", {
   type: text("type").notNull(),
   ...fullAudit,
 });
-export const categories = sqliteTable("categories", {
-  id: text("id").primaryKey(),
-  userId: text("user_id").notNull(),
-  name: text("name").notNull(),
-  type: text("type").notNull(),
-  icon: text("icon").notNull(),
-  sortOrder: integer("sort_order").notNull().default(0),
-  ...fullAudit,
-}, (t) => [uniqueIndex("categories_user_type_name_active").on(t.userId, t.type, t.name).where(sql`${t.deletedAt} IS NULL`)]);
+export const categories = sqliteTable(
+  "categories",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    name: text("name").notNull(),
+    type: text("type").notNull(),
+    icon: text("icon").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    ...fullAudit,
+  },
+  (t) => [
+    uniqueIndex("categories_user_type_name_active")
+      .on(t.userId, t.type, t.name)
+      .where(sql`${t.deletedAt} IS NULL`),
+  ],
+);
 export const transactions = sqliteTable(
   "transactions",
   {
@@ -210,7 +218,10 @@ export const aiRuns = sqliteTable(
     errorMessage: text("error_message"),
     ...fullAudit,
   },
-  (t) => [index("ai_runs_session_created").on(t.sessionId, t.createdAt), index("ai_runs_user_status").on(t.userId, t.status)],
+  (t) => [
+    index("ai_runs_session_created").on(t.sessionId, t.createdAt),
+    index("ai_runs_user_status").on(t.userId, t.status),
+  ],
 );
 export const aiSteps = sqliteTable(
   "ai_steps",
@@ -262,7 +273,10 @@ export const aiToolCalls = sqliteTable(
     errorMessage: text("error_message"),
     ...fullAudit,
   },
-  (t) => [index("ai_tool_calls_session").on(t.sessionId), index("ai_tool_calls_user_status").on(t.userId, t.status)],
+  (t) => [
+    index("ai_tool_calls_session").on(t.sessionId),
+    index("ai_tool_calls_user_status").on(t.userId, t.status),
+  ],
 );
 export const refreshTokens = sqliteTable(
   "refresh_tokens",

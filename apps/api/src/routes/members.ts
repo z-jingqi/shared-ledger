@@ -44,7 +44,8 @@ export function registerMemberRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
       ? await repository.removeMemberByUser(bookId, user.id)
       : store?.members.find((item) => item.bookId === bookId && item.userId === user.id);
     if (!member || member.role === "creator") return jsonError(context, "创建者不能退出账本", 400);
-    if (!repository && store) store.members = store.members.filter((item) => !(item.bookId === bookId && item.userId === user.id));
+    if (!repository && store)
+      store.members = store.members.filter((item) => !(item.bookId === bookId && item.userId === user.id));
     return context.body(null, 204);
   });
 
@@ -60,7 +61,8 @@ export function registerMemberRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
       ? await repository.removeMember(bookId, memberId, actor.id)
       : store?.members.find((item) => item.id === memberId && item.bookId === bookId);
     if (!member || member.role === "creator") return jsonError(context, "成员不存在或不能移除创建者", 404);
-    if (!repository && store) store.members = store.members.filter((item) => !(item.id === memberId && item.bookId === bookId));
+    if (!repository && store)
+      store.members = store.members.filter((item) => !(item.id === memberId && item.bookId === bookId));
     return context.body(null, 204);
   });
 }

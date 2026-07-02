@@ -23,11 +23,13 @@ import type { MemoryLedgerStore, SimpleEntity } from "../store";
 import type { LedgerUser, Transaction } from "../types";
 import type { Env } from "../types";
 import { updateUserAvatar, updateUserProfile } from "./auth";
+import { markFailed, submitAlephOcrJob } from "./imports";
 import {
-  markFailed,
-  submitAlephOcrJob,
-} from "./imports";
-import { assertImageImportFile, assertImageOcrQuota, imageImportFileType, maximumImageImportBatchFiles } from "./import-validation";
+  assertImageImportFile,
+  assertImageOcrQuota,
+  imageImportFileType,
+  maximumImageImportBatchFiles,
+} from "./import-validation";
 
 export type AiToolRepository = D1LedgerRepository | MemoryLedgerStore;
 
@@ -150,7 +152,9 @@ export async function executeAiTool(
   options: { confirmed?: boolean; toolCallId?: string } = {},
 ): Promise<ToolExecutionResult> {
   const registryTool = getLedgerTool(plan.toolName, plan.skillName);
-  const definition = runtimeToolDefinitions.find((tool) => tool.name === plan.toolName && tool.skillName === plan.skillName);
+  const definition = runtimeToolDefinitions.find(
+    (tool) => tool.name === plan.toolName && tool.skillName === plan.skillName,
+  );
   if (!registryTool) return textResult(`暂不支持 Skill 工具：${plan.skillName}.${plan.toolName}`);
   if (!definition) return textResult(`暂不支持工具：${plan.toolName}`);
   if (definition.name === "chat") return textResult(plan.userMessage || "我在。");
@@ -182,7 +186,13 @@ export async function executeAiTool(
         userId: runtime.user.id,
         bookId,
         action: definition.name,
-        payload: { skillName: definition.skillName, toolName: definition.name, args: plan.args, sessionId: runtime.sessionId, toolCallId: toolCall?.id },
+        payload: {
+          skillName: definition.skillName,
+          toolName: definition.name,
+          args: plan.args,
+          sessionId: runtime.sessionId,
+          toolCallId: toolCall?.id,
+        },
       });
       const parts: AiChatPart[] = [
         {
@@ -198,7 +208,11 @@ export async function executeAiTool(
     }
     const result = await executeConfirmedTool(runtime, definition.name, plan.args, bookId);
     if (toolCall && runtime.repository instanceof D1LedgerRepository) {
-      await runtime.repository.updateAiToolCall(toolCall.id, { status: "completed", result: result.result }, runtime.user.id);
+      await runtime.repository.updateAiToolCall(
+        toolCall.id,
+        { status: "completed", result: result.result },
+        runtime.user.id,
+      );
     }
     return result;
   } catch (error) {
@@ -238,12 +252,23 @@ export async function confirmAiTool(runtime: AiToolRuntime, confirmationId: stri
     });
     return { status: 409, body: { confirmation: cancelled, expired: true } };
   }
-  const payload = confirmation.payload as { skillName?: LedgerSkillName; toolName?: AiActionName; args?: Record<string, unknown>; sessionId?: string; toolCallId?: string };
+  const payload = confirmation.payload as {
+    skillName?: LedgerSkillName;
+    toolName?: AiActionName;
+    args?: Record<string, unknown>;
+    sessionId?: string;
+    toolCallId?: string;
+  };
   if (!payload.toolName) return { status: 400, body: { error: "确认项缺少工具信息" } };
-  const skillName = payload.skillName ?? (getLedgerTool(payload.toolName)?.skillName as LedgerSkillName | undefined);
+  const skillName =
+    payload.skillName ?? (getLedgerTool(payload.toolName)?.skillName as LedgerSkillName | undefined);
   if (!skillName) return { status: 400, body: { error: "确认项缺少 Skill 信息" } };
   const result = await executeAiTool(
-    { ...runtime, sessionId: payload.sessionId ?? runtime.sessionId, bookId: confirmation.bookId ?? runtime.bookId },
+    {
+      ...runtime,
+      sessionId: payload.sessionId ?? runtime.sessionId,
+      bookId: confirmation.bookId ?? runtime.bookId,
+    },
     {
       skillName,
       toolName: payload.toolName,
@@ -262,7 +287,11 @@ export async function confirmAiTool(runtime: AiToolRuntime, confirmationId: stri
   return { status: 200, body: { confirmation: updated, parts: result.parts, result: result.result } };
 }
 
-export async function cancelAiToolConfirmation(repository: AiToolRepository, userId: string, confirmationId: string) {
+export async function cancelAiToolConfirmation(
+  repository: AiToolRepository,
+  userId: string,
+  confirmationId: string,
+) {
   const confirmation = await getConfirmation(repository, userId, confirmationId);
   if (!confirmation) return { status: 404, body: { error: "确认项不存在" } };
   if (confirmation.status !== "pending") return { status: 409, body: { confirmation } };
@@ -315,7 +344,12 @@ async function executeConfirmedTool(
       return {
         parts: [
           { type: "text", text: "可以，下面是导出入口。" },
-          { type: "navigation-card", pageName: "导出账本", href: `/books/${bookId}/export`, description: "下载当前账本 JSON 数据" },
+          {
+            type: "navigation-card",
+            pageName: "导出账本",
+            href: `/books/${bookId}/export`,
+            description: "下载当前账本 JSON 数据",
+          },
         ],
       };
     case "save-attachments":
@@ -334,8 +368,12 @@ async function searchRecords(runtime: AiToolRuntime, bookId: string, rawArgs: Re
   const args = searchArgsSchema.parse(rawArgs);
   const transactions = await searchTransactions(runtime.repository, bookId, args);
   const limited = transactions.slice(0, args.limit);
-  const expense = transactions.filter((item) => item.type === "expense").reduce((sum, item) => sum + item.amount, 0);
-  const income = transactions.filter((item) => item.type === "income").reduce((sum, item) => sum + item.amount, 0);
+  const expense = transactions
+    .filter((item) => item.type === "expense")
+    .reduce((sum, item) => sum + item.amount, 0);
+  const income = transactions
+    .filter((item) => item.type === "income")
+    .reduce((sum, item) => sum + item.amount, 0);
   return {
     parts: [
       {
@@ -384,7 +422,9 @@ async function analyzeRecords(runtime: AiToolRuntime, bookId: string, rawArgs: R
           { label: "支出", value: `¥${expense.toFixed(2)}` },
           { label: "结余", value: `¥${(income - expense).toFixed(2)}` },
           { label: "记录数", value: transactions.length },
-          ...(largest ? [{ label: "最大支出", value: `¥${largest.amount.toFixed(2)}`, hint: largest.note ?? "无备注" }] : []),
+          ...(largest
+            ? [{ label: "最大支出", value: `¥${largest.amount.toFixed(2)}`, hint: largest.note ?? "无备注" }]
+            : []),
         ],
       },
     ],
@@ -415,7 +455,10 @@ async function createRecord(runtime: AiToolRuntime, bookId: string, rawArgs: Rec
             ? `已保存${first.type === "income" ? "收入" : "支出"} ¥${first.amount.toFixed(2)}。`
             : `已创建 ${transactions.length} 笔记录。`,
       },
-      recordCard(first, await categoryName(runtime.repository, first.categoryId)) as unknown as Record<string, unknown>,
+      recordCard(first, await categoryName(runtime.repository, first.categoryId)) as unknown as Record<
+        string,
+        unknown
+      >,
     ],
     result: { transactionId: first.id, transactionIds: transactions.map((transaction) => transaction.id) },
     changed: ["transactions"],
@@ -426,8 +469,15 @@ async function updateRecord(runtime: AiToolRuntime, bookId: string, rawArgs: Rec
   const args = updateRecordArgsSchema.parse(rawArgs);
   const transaction = await resolveTransaction(runtime.repository, runtime.user.id, bookId, args);
   if (!transaction) return textResult("我没有找到要修改的那笔记录。");
-  if (!canMutateTransaction(runtime.user.id, transaction.createdByUserId)) return textResult("只能修改你自己创建的记录。");
-  const patch = await transactionInput(runtime.repository, runtime.user.id, { ...transaction, ...args } as any, runtime.today, transaction);
+  if (!canMutateTransaction(runtime.user.id, transaction.createdByUserId))
+    return textResult("只能修改你自己创建的记录。");
+  const patch = await transactionInput(
+    runtime.repository,
+    runtime.user.id,
+    { ...transaction, ...args } as any,
+    runtime.today,
+    transaction,
+  );
   const parsed = createTransactionSchema.parse(patch);
   const updated =
     runtime.repository instanceof D1LedgerRepository
@@ -436,7 +486,10 @@ async function updateRecord(runtime: AiToolRuntime, bookId: string, rawArgs: Rec
   return {
     parts: [
       { type: "text", text: "已更新这笔记录。" },
-      recordCard(updated as Transaction, await categoryName(runtime.repository, (updated as Transaction).categoryId)) as unknown as Record<string, unknown>,
+      recordCard(
+        updated as Transaction,
+        await categoryName(runtime.repository, (updated as Transaction).categoryId),
+      ) as unknown as Record<string, unknown>,
     ],
     result: { transactionId: transaction.id },
     changed: ["transactions"],
@@ -447,16 +500,27 @@ async function deleteRecord(runtime: AiToolRuntime, bookId: string, rawArgs: Rec
   const args = targetRecordArgsSchema.parse(rawArgs);
   const transactions = await resolveTransactionsForDelete(runtime.repository, runtime.user.id, bookId, args);
   if (!transactions.length) return textResult("我没有找到要删除的记录。");
-  const forbidden = transactions.find((transaction) => !canMutateTransaction(runtime.user.id, transaction.createdByUserId));
+  const forbidden = transactions.find(
+    (transaction) => !canMutateTransaction(runtime.user.id, transaction.createdByUserId),
+  );
   if (forbidden) return textResult("只能删除你自己创建的记录。");
   if (runtime.repository instanceof D1LedgerRepository) {
-    for (const transaction of transactions) await runtime.repository.deleteTransaction(transaction.id, runtime.user.id);
+    for (const transaction of transactions)
+      await runtime.repository.deleteTransaction(transaction.id, runtime.user.id);
   } else {
     const ids = new Set(transactions.map((transaction) => transaction.id));
     runtime.repository.transactions = runtime.repository.transactions.filter((item) => !ids.has(item.id));
   }
   return {
-    parts: [{ type: "text", text: transactions.length === 1 ? `已删除记录「${transactions[0]!.note ?? transactions[0]!.id}」。` : `已删除 ${transactions.length} 笔记录。` }],
+    parts: [
+      {
+        type: "text",
+        text:
+          transactions.length === 1
+            ? `已删除记录「${transactions[0]!.note ?? transactions[0]!.id}」。`
+            : `已删除 ${transactions.length} 笔记录。`,
+      },
+    ],
     result: { transactionIds: transactions.map((transaction) => transaction.id) },
     changed: ["transactions"],
   };
@@ -471,9 +535,15 @@ async function createCategory(runtime: AiToolRuntime, _bookId: string, rawArgs: 
     sortOrder: args.sortOrder ?? 0,
   });
   const existing = await findCategory(runtime.repository, runtime.user.id, parsed.name, parsed.type);
-  const category = existing ?? (await createCategoryEntity(runtime.repository, runtime.user.id, parsed, runtime.user.id));
+  const category =
+    existing ?? (await createCategoryEntity(runtime.repository, runtime.user.id, parsed, runtime.user.id));
   return {
-    parts: [{ type: "text", text: existing ? `分类「${category.name}」已经存在。` : `已创建分类「${category.name}」。` }],
+    parts: [
+      {
+        type: "text",
+        text: existing ? `分类「${category.name}」已经存在。` : `已创建分类「${category.name}」。`,
+      },
+    ],
     result: { category },
     changed: ["categories"],
   };
@@ -490,7 +560,11 @@ async function updateCategory(runtime: AiToolRuntime, _bookId: string, rawArgs: 
     sortOrder: args.sortOrder ?? category.sortOrder ?? 0,
   });
   const updated = await updateCategoryEntity(runtime.repository, category.id, parsed, runtime.user.id);
-  return { parts: [{ type: "text", text: `已更新分类「${updated?.name ?? parsed.name}」。` }], result: { category: updated }, changed: ["categories"] };
+  return {
+    parts: [{ type: "text", text: `已更新分类「${updated?.name ?? parsed.name}」。` }],
+    result: { category: updated },
+    changed: ["categories"],
+  };
 }
 
 async function deleteCategory(runtime: AiToolRuntime, _bookId: string, rawArgs: Record<string, unknown>) {
@@ -498,7 +572,11 @@ async function deleteCategory(runtime: AiToolRuntime, _bookId: string, rawArgs: 
   const category = await resolveCategory(runtime.repository, runtime.user.id, args.id, args.name, args.type);
   if (!category) return textResult("我没有找到这个分类。");
   await deleteCategoryEntity(runtime.repository, category.id, runtime.user.id);
-  return { parts: [{ type: "text", text: `已删除分类「${category.name}」，关联记录已保留。` }], result: { categoryId: category.id }, changed: ["categories", "transactions"] };
+  return {
+    parts: [{ type: "text", text: `已删除分类「${category.name}」，关联记录已保留。` }],
+    result: { categoryId: category.id },
+    changed: ["categories", "transactions"],
+  };
 }
 
 async function createBook(runtime: AiToolRuntime, rawArgs: Record<string, unknown>) {
@@ -518,37 +596,60 @@ async function createBook(runtime: AiToolRuntime, rawArgs: Record<string, unknow
 }
 
 async function updateBook(runtime: AiToolRuntime, bookId: string, rawArgs: Record<string, unknown>) {
-  const input = z.object({ id: z.string().optional(), name: z.string().min(1).max(60).optional(), currency: z.string().length(3).optional() }).parse(rawArgs);
+  const input = z
+    .object({
+      id: z.string().optional(),
+      name: z.string().min(1).max(60).optional(),
+      currency: z.string().length(3).optional(),
+    })
+    .parse(rawArgs);
   const targetBookId = input.id ?? bookId;
-  if (!(await canManageBook(runtime.repository, targetBookId, runtime.user.id))) return textResult("你需要是账本创建者或管理员才能修改账本。");
+  if (!(await canManageBook(runtime.repository, targetBookId, runtime.user.id)))
+    return textResult("你需要是账本创建者或管理员才能修改账本。");
   const book =
     runtime.repository instanceof D1LedgerRepository
       ? await runtime.repository.updateBook(targetBookId, input, runtime.user.id)
       : updateMemoryBook(runtime.repository, targetBookId, input);
-  return { parts: [{ type: "text", text: `已更新账本「${book?.name ?? targetBookId}」。` }], result: { book }, changed: ["book"] };
+  return {
+    parts: [{ type: "text", text: `已更新账本「${book?.name ?? targetBookId}」。` }],
+    result: { book },
+    changed: ["book"],
+  };
 }
 
 async function deleteBook(runtime: AiToolRuntime, bookId: string, rawArgs: Record<string, unknown>) {
   const targetBookId = String(rawArgs.id ?? bookId);
   const userRole = await bookRoleFor(runtime.repository, targetBookId, runtime.user.id);
   if (!canDeleteBook(userRole ?? "member")) return textResult("只有账本创建者可以删除账本。");
-  if (runtime.repository instanceof D1LedgerRepository) await runtime.repository.deleteBook(targetBookId, runtime.user.id);
+  if (runtime.repository instanceof D1LedgerRepository)
+    await runtime.repository.deleteBook(targetBookId, runtime.user.id);
   else runtime.repository.books = runtime.repository.books.filter((book) => book.id !== targetBookId);
-  return { parts: [{ type: "text", text: "账本已删除。" }], result: { bookId: targetBookId }, changed: ["book"] };
+  return {
+    parts: [{ type: "text", text: "账本已删除。" }],
+    result: { bookId: targetBookId },
+    changed: ["book"],
+  };
 }
 
 async function updateProfile(runtime: AiToolRuntime, rawArgs: Record<string, unknown>) {
-  const parsed = updateProfileSchema.partial().extend({ avatarFromAttachment: z.boolean().optional() }).parse(rawArgs);
+  const parsed = updateProfileSchema
+    .partial()
+    .extend({ avatarFromAttachment: z.boolean().optional() })
+    .parse(rawArgs);
   let user = runtime.user;
   if (parsed.avatarFromAttachment) {
     const avatar = runtime.attachments.find((file) => file.type.startsWith("image/"));
     if (!avatar) return textResult("请先上传一张图片，我才能把它设置为头像。");
     if (avatar.size > 1024 * 1024) return textResult("头像不能超过 1MB。");
-    if (!["image/jpeg", "image/png", "image/webp"].includes(avatar.type)) return textResult("头像仅支持 JPG、PNG 或 WebP。");
+    if (!["image/jpeg", "image/png", "image/webp"].includes(avatar.type))
+      return textResult("头像仅支持 JPG、PNG 或 WebP。");
     const avatarUrl = await dataUrlFromFile(avatar);
     if (runtime.env.DB) await updateUserAvatar(runtime.env.DB, runtime.user.id, avatarUrl);
     else {
-      const stored = runtime.repository instanceof D1LedgerRepository ? undefined : runtime.repository.users.find((item) => item.id === runtime.user.id);
+      const stored =
+        runtime.repository instanceof D1LedgerRepository
+          ? undefined
+          : runtime.repository.users.find((item) => item.id === runtime.user.id);
       if (stored) stored.avatarUrl = avatarUrl;
     }
     user = { ...user, avatarUrl };
@@ -565,7 +666,13 @@ async function updateProfile(runtime: AiToolRuntime, rawArgs: Record<string, unk
   return {
     parts: [
       { type: "text", text: "资料已更新。" },
-      { type: "profile-card", title: "当前资料", name: user.name, email: user.email, avatarUrl: user.avatarUrl },
+      {
+        type: "profile-card",
+        title: "当前资料",
+        name: user.name,
+        email: user.email,
+        avatarUrl: user.avatarUrl,
+      },
     ],
     result: { user },
     changed: ["profile"],
@@ -575,27 +682,40 @@ async function updateProfile(runtime: AiToolRuntime, rawArgs: Record<string, unk
 async function updateMember(runtime: AiToolRuntime, bookId: string, rawArgs: Record<string, unknown>) {
   const args = memberArgsSchema.parse(rawArgs);
   if (!args.role) return textResult("请告诉我要把成员设置为管理员还是普通成员。");
-  if (!(await canManageBook(runtime.repository, bookId, runtime.user.id))) return textResult("你需要是账本创建者或管理员才能修改成员。");
+  if (!(await canManageBook(runtime.repository, bookId, runtime.user.id)))
+    return textResult("你需要是账本创建者或管理员才能修改成员。");
   const member = await resolveMember(runtime.repository, bookId, args);
   if (!member || member.role === "creator") return textResult("成员不存在或不能修改创建者。");
   const updated =
     runtime.repository instanceof D1LedgerRepository
       ? await runtime.repository.updateMemberRole(bookId, member.id, args.role, runtime.user.id)
       : Object.assign(member, { role: args.role });
-  return { parts: [{ type: "member-card", title: "成员权限已更新", name: updated?.name, role: updated?.role }], result: { member: updated }, changed: ["members"] };
+  return {
+    parts: [{ type: "member-card", title: "成员权限已更新", name: updated?.name, role: updated?.role }],
+    result: { member: updated },
+    changed: ["members"],
+  };
 }
 
 async function removeMember(runtime: AiToolRuntime, bookId: string, rawArgs: Record<string, unknown>) {
   const args = memberArgsSchema.parse(rawArgs);
   const self = args.self || args.userId === runtime.user.id;
-  if (!self && !(await canManageBook(runtime.repository, bookId, runtime.user.id))) return textResult("你需要是账本创建者或管理员才能移除成员。");
-  const member = self ? await memberByUser(runtime.repository, bookId, runtime.user.id) : await resolveMember(runtime.repository, bookId, args);
-  if (!member || member.role === "creator") return textResult(self ? "创建者不能退出账本。" : "成员不存在或不能移除创建者。");
+  if (!self && !(await canManageBook(runtime.repository, bookId, runtime.user.id)))
+    return textResult("你需要是账本创建者或管理员才能移除成员。");
+  const member = self
+    ? await memberByUser(runtime.repository, bookId, runtime.user.id)
+    : await resolveMember(runtime.repository, bookId, args);
+  if (!member || member.role === "creator")
+    return textResult(self ? "创建者不能退出账本。" : "成员不存在或不能移除创建者。");
   if (runtime.repository instanceof D1LedgerRepository) {
     if (self) await runtime.repository.removeMemberByUser(bookId, runtime.user.id);
     else await runtime.repository.removeMember(bookId, member.id, runtime.user.id);
   } else runtime.repository.members = runtime.repository.members.filter((item) => item.id !== member.id);
-  return { parts: [{ type: "text", text: self ? "已退出账本。" : `已移除成员「${member.name}」。` }], result: { memberId: member.id }, changed: ["members"] };
+  return {
+    parts: [{ type: "text", text: self ? "已退出账本。" : `已移除成员「${member.name}」。` }],
+    result: { memberId: member.id },
+    changed: ["members"],
+  };
 }
 
 async function inviteMember(runtime: AiToolRuntime, bookId: string, rawArgs: Record<string, unknown>) {
@@ -610,7 +730,8 @@ async function inviteMember(runtime: AiToolRuntime, bookId: string, rawArgs: Rec
     .parse(rawArgs);
   const userRole = await bookRoleFor(runtime.repository, bookId, runtime.user.id);
   if (!canInvite(userRole ?? "member")) return textResult("你需要是账本创建者或管理员才能邀请成员。");
-  if (!args.email && !args.phone && !args.userId && !args.target) return textResult("请提供要邀请的邮箱、手机号、用户名或用户 ID。");
+  if (!args.email && !args.phone && !args.userId && !args.target)
+    return textResult("请提供要邀请的邮箱、手机号、用户名或用户 ID。");
   const invitation =
     runtime.repository instanceof D1LedgerRepository
       ? await runtime.repository.createInvitation({
@@ -625,7 +746,13 @@ async function inviteMember(runtime: AiToolRuntime, bookId: string, rawArgs: Rec
   return {
     parts: [
       { type: "text", text: "邀请已创建。" },
-      { type: "member-card", title: "成员邀请", name: args.target ?? args.email ?? args.phone ?? args.userId, role: args.role, status: invitation.status },
+      {
+        type: "member-card",
+        title: "成员邀请",
+        name: args.target ?? args.email ?? args.phone ?? args.userId,
+        role: args.role,
+        status: invitation.status,
+      },
     ],
     result: { invitation },
     changed: ["members"],
@@ -634,7 +761,8 @@ async function inviteMember(runtime: AiToolRuntime, bookId: string, rawArgs: Rec
 
 async function saveAttachments(runtime: AiToolRuntime, bookId: string, rawArgs: Record<string, unknown>) {
   if (!runtime.attachments.length) return textResult("请先上传图片。");
-  if (!(runtime.repository instanceof D1LedgerRepository) || !runtime.env.FILES) return textResult("导入功能需要 D1 与 R2 绑定。");
+  if (!(runtime.repository instanceof D1LedgerRepository) || !runtime.env.FILES)
+    return textResult("导入功能需要 D1 与 R2 绑定。");
   const args = z.object({ autoConfirm: z.boolean().default(false) }).parse(rawArgs);
   if (runtime.attachments.length > maximumImageImportBatchFiles) {
     return textResult(`一次最多上传 ${maximumImageImportBatchFiles} 张图片。`);
@@ -644,12 +772,21 @@ async function saveAttachments(runtime: AiToolRuntime, bookId: string, rawArgs: 
   await assertImageOcrQuota(runtime.repository, runtime.user.id, files.length);
   const jobs = [];
   for (const file of files) {
-    jobs.push(await createImportJobFromFile(runtime, bookId, file, args.autoConfirm, { skipQuotaCheck: true }));
+    jobs.push(
+      await createImportJobFromFile(runtime, bookId, file, args.autoConfirm, { skipQuotaCheck: true }),
+    );
   }
   return {
     parts: [
       { type: "text", text: `已提交 ${jobs.length} 个文件，正在处理。` },
-      { type: "import-job-card", title: "图片识别", message: "可以在待确认/图片识别任务中查看进度。", jobs: jobs as any, pageName: "图片识别", href: "/records/imports" } as any,
+      {
+        type: "import-job-card",
+        title: "图片识别",
+        message: "可以在待确认/图片识别任务中查看进度。",
+        jobs: jobs as any,
+        pageName: "图片识别",
+        href: "/records/imports",
+      } as any,
     ],
     result: { jobs },
     changed: ["imports"],
@@ -665,11 +802,15 @@ async function transactionInput(
 ) {
   const type = args.type ?? current?.type ?? "expense";
   const category =
-    args.categoryId || !args.categoryName ? undefined : await findCategory(repository, userId, args.categoryName, type);
+    args.categoryId || !args.categoryName
+      ? undefined
+      : await findCategory(repository, userId, args.categoryName, type);
   const items = await Promise.all(
     (args.items ?? current?.items ?? []).map(async (item) => {
       const itemCategory =
-        item.categoryId || !item.categoryName ? undefined : await findCategory(repository, userId, item.categoryName, type);
+        item.categoryId || !item.categoryName
+          ? undefined
+          : await findCategory(repository, userId, item.categoryName, type);
       return { ...item, categoryId: item.categoryId ?? itemCategory?.id };
     }),
   );
@@ -684,18 +825,43 @@ async function transactionInput(
   };
 }
 
-async function searchTransactions(repository: AiToolRepository, bookId: string, args: z.infer<typeof searchArgsSchema>) {
+async function searchTransactions(
+  repository: AiToolRepository,
+  bookId: string,
+  args: z.infer<typeof searchArgsSchema>,
+) {
   if (repository instanceof D1LedgerRepository) return repository.searchTransactions(bookId, args);
   return repository.transactions
     .filter((transaction) => transaction.bookId === bookId)
     .filter((transaction) => !args.type || transaction.type === args.type)
-    .filter((transaction) => args.minAmount === undefined || (args.minStrict ? transaction.amount > args.minAmount : transaction.amount >= args.minAmount))
-    .filter((transaction) => args.maxAmount === undefined || (args.maxStrict ? transaction.amount < args.maxAmount : transaction.amount <= args.maxAmount))
+    .filter(
+      (transaction) =>
+        args.minAmount === undefined ||
+        (args.minStrict ? transaction.amount > args.minAmount : transaction.amount >= args.minAmount),
+    )
+    .filter(
+      (transaction) =>
+        args.maxAmount === undefined ||
+        (args.maxStrict ? transaction.amount < args.maxAmount : transaction.amount <= args.maxAmount),
+    )
     .filter((transaction) => !args.from || transaction.occurredAt >= args.from)
     .filter((transaction) => !args.to || transaction.occurredAt <= args.to)
     .filter((transaction) => !args.categoryId || transaction.categoryId === args.categoryId)
-    .filter((transaction) => !args.categoryName || repository.categories.some((category) => category.id === transaction.categoryId && category.name === args.categoryName))
-    .filter((transaction) => !args.q || [transaction.note, ...transaction.items.map((item) => item.name)].filter(Boolean).join(" ").includes(args.q!))
+    .filter(
+      (transaction) =>
+        !args.categoryName ||
+        repository.categories.some(
+          (category) => category.id === transaction.categoryId && category.name === args.categoryName,
+        ),
+    )
+    .filter(
+      (transaction) =>
+        !args.q ||
+        [transaction.note, ...transaction.items.map((item) => item.name)]
+          .filter(Boolean)
+          .join(" ")
+          .includes(args.q!),
+    )
     .sort((left, right) => sortTransactions(left, right, args.sort));
 }
 
@@ -712,10 +878,17 @@ async function resolveTransaction(
         : repository.transactions.find((item) => item.id === args.transactionId);
     return transaction?.bookId === bookId ? transaction : undefined;
   }
-  const transactions = repository instanceof D1LedgerRepository ? await repository.listTransactions(bookId) : repository.transactions.filter((item) => item.bookId === bookId);
+  const transactions =
+    repository instanceof D1LedgerRepository
+      ? await repository.listTransactions(bookId)
+      : repository.transactions.filter((item) => item.bookId === bookId);
   const own = transactions.filter((item) => item.createdByUserId === userId);
   if (args.relative) return own[0];
-  return own.find((item) => (args.amount === undefined || Math.abs(item.amount - args.amount) < 0.001) && (!args.note || item.note?.includes(args.note)));
+  return own.find(
+    (item) =>
+      (args.amount === undefined || Math.abs(item.amount - args.amount) < 0.001) &&
+      (!args.note || item.note?.includes(args.note)),
+  );
 }
 
 async function resolveTransactionsForDelete(
@@ -724,9 +897,14 @@ async function resolveTransactionsForDelete(
   bookId: string,
   args: z.infer<typeof targetRecordArgsSchema>,
 ) {
-  const all = repository instanceof D1LedgerRepository ? await repository.listTransactions(bookId) : repository.transactions.filter((item) => item.bookId === bookId);
+  const all =
+    repository instanceof D1LedgerRepository
+      ? await repository.listTransactions(bookId)
+      : repository.transactions.filter((item) => item.bookId === bookId);
   if (args.transactionIds.length || args.transactionId) {
-    const ids = new Set([args.transactionId, ...args.transactionIds].filter((value): value is string => Boolean(value)));
+    const ids = new Set(
+      [args.transactionId, ...args.transactionIds].filter((value): value is string => Boolean(value)),
+    );
     return all.filter((transaction) => ids.has(transaction.id));
   }
   if (args.q || args.note) {
@@ -751,8 +929,14 @@ async function resolveBookId(repository: AiToolRepository, userId: string, bookI
   return repository.books.find((book) => repository.role(book.id, userId))?.id;
 }
 
-async function bookRoleFor(repository: AiToolRepository, bookId: string, userId: string): Promise<Role | undefined> {
-  return repository instanceof D1LedgerRepository ? await repository.role(bookId, userId) : repository.role(bookId, userId);
+async function bookRoleFor(
+  repository: AiToolRepository,
+  bookId: string,
+  userId: string,
+): Promise<Role | undefined> {
+  return repository instanceof D1LedgerRepository
+    ? await repository.role(bookId, userId)
+    : repository.role(bookId, userId);
 }
 
 async function canManageBook(repository: AiToolRepository, bookId: string, userId: string) {
@@ -761,29 +945,56 @@ async function canManageBook(repository: AiToolRepository, bookId: string, userI
 
 async function categoryName(repository: AiToolRepository, categoryId?: string) {
   if (!categoryId) return undefined;
-  const category = repository instanceof D1LedgerRepository ? await repository.getCategory(categoryId) : repository.categories.find((item) => item.id === categoryId);
+  const category =
+    repository instanceof D1LedgerRepository
+      ? await repository.getCategory(categoryId)
+      : repository.categories.find((item) => item.id === categoryId);
   return category?.name;
 }
 
 async function findCategory(repository: AiToolRepository, userId: string, name?: string, type?: string) {
   if (!name) return undefined;
-  const values = repository instanceof D1LedgerRepository ? await repository.listCategories(userId) : repository.categories.filter((item) => item.userId === userId);
+  const values =
+    repository instanceof D1LedgerRepository
+      ? await repository.listCategories(userId)
+      : repository.categories.filter((item) => item.userId === userId);
   return values.find((item) => item.name === name && (!type || !item.type || item.type === type));
 }
 
-async function resolveCategory(repository: AiToolRepository, userId: string, idValue?: string, name?: string, type?: string) {
+async function resolveCategory(
+  repository: AiToolRepository,
+  userId: string,
+  idValue?: string,
+  name?: string,
+  type?: string,
+) {
   if (idValue) {
-    const entity = repository instanceof D1LedgerRepository ? await repository.getCategory(idValue) : repository.categories.find((item) => item.id === idValue);
+    const entity =
+      repository instanceof D1LedgerRepository
+        ? await repository.getCategory(idValue)
+        : repository.categories.find((item) => item.id === idValue);
     return entity?.userId === userId ? entity : undefined;
   }
   return findCategory(repository, userId, name, type);
 }
 
-async function createCategoryEntity(repository: AiToolRepository, userId: string, data: Omit<SimpleEntity, "id" | "userId">, actorId: string) {
-  return repository instanceof D1LedgerRepository ? repository.createCategory(userId, data, actorId) : repository.createCategory(userId, data);
+async function createCategoryEntity(
+  repository: AiToolRepository,
+  userId: string,
+  data: Omit<SimpleEntity, "id" | "userId">,
+  actorId: string,
+) {
+  return repository instanceof D1LedgerRepository
+    ? repository.createCategory(userId, data, actorId)
+    : repository.createCategory(userId, data);
 }
 
-async function updateCategoryEntity(repository: AiToolRepository, entityId: string, data: Omit<SimpleEntity, "id" | "userId">, actorId: string) {
+async function updateCategoryEntity(
+  repository: AiToolRepository,
+  entityId: string,
+  data: Omit<SimpleEntity, "id" | "userId">,
+  actorId: string,
+) {
   if (repository instanceof D1LedgerRepository) return repository.updateCategory(entityId, data, actorId);
   const entity = repository.categories.find((item) => item.id === entityId);
   return entity ? Object.assign(entity, data) : undefined;
@@ -808,15 +1019,32 @@ async function memberByUser(repository: AiToolRepository, bookId: string, userId
   return repository.members.find((member) => member.bookId === bookId && member.userId === userId);
 }
 
-async function resolveMember(repository: AiToolRepository, bookId: string, args: z.infer<typeof memberArgsSchema>) {
-  const members = repository instanceof D1LedgerRepository ? await repository.listMembers(bookId) : repository.members.filter((member) => member.bookId === bookId);
-  return members.find((member) => member.id === args.memberId || member.userId === args.userId || member.name === args.name);
+async function resolveMember(
+  repository: AiToolRepository,
+  bookId: string,
+  args: z.infer<typeof memberArgsSchema>,
+) {
+  const members =
+    repository instanceof D1LedgerRepository
+      ? await repository.listMembers(bookId)
+      : repository.members.filter((member) => member.bookId === bookId);
+  return members.find(
+    (member) => member.id === args.memberId || member.userId === args.userId || member.name === args.name,
+  );
 }
 
-function updateMemoryBook(store: MemoryLedgerStore, bookId: string, input: { name?: string; currency?: string }) {
+function updateMemoryBook(
+  store: MemoryLedgerStore,
+  bookId: string,
+  input: { name?: string; currency?: string },
+) {
   const book = store.books.find((item) => item.id === bookId);
   if (!book) return undefined;
-  Object.assign(book, { name: input.name ?? book.name, currency: input.currency ?? book.currency, updatedAt: now() });
+  Object.assign(book, {
+    name: input.name ?? book.name,
+    currency: input.currency ?? book.currency,
+    updatedAt: now(),
+  });
   return book;
 }
 
@@ -881,7 +1109,11 @@ function normalizeOccurredAt(value: string | undefined, today: string) {
   return value.includes("T") ? value : `${value}T12:00:00.000Z`;
 }
 
-function sortTransactions(left: Transaction, right: Transaction, sort: z.infer<typeof searchArgsSchema>["sort"]) {
+function sortTransactions(
+  left: Transaction,
+  right: Transaction,
+  sort: z.infer<typeof searchArgsSchema>["sort"],
+) {
   if (sort === "date_asc") return left.occurredAt.localeCompare(right.occurredAt);
   if (sort === "amount_desc") return right.amount - left.amount;
   if (sort === "amount_asc") return left.amount - right.amount;
@@ -943,7 +1175,15 @@ function confirmationSummary(toolName: AiActionName, args: Record<string, unknow
   return labels[toolName] ?? "执行这个操作？";
 }
 
-function confirmationPart(confirmation: { id: string; action: string; status: "pending" | "confirmed" | "cancelled"; expiresAt: string }, toolName: AiActionName): AiChatPart {
+function confirmationPart(
+  confirmation: {
+    id: string;
+    action: string;
+    status: "pending" | "confirmed" | "cancelled";
+    expiresAt: string;
+  },
+  toolName: AiActionName,
+): AiChatPart {
   return {
     type: "confirmation-card",
     confirmation: {
@@ -981,17 +1221,31 @@ async function createConfirmation(
 
 async function getConfirmation(repository: AiToolRepository, userId: string, confirmationId: string) {
   if (repository instanceof D1LedgerRepository) return repository.getAiConfirmation(userId, confirmationId);
-  return repository.aiConfirmations.find((confirmation) => confirmation.id === confirmationId && confirmation.userId === userId) ?? null;
+  return (
+    repository.aiConfirmations.find(
+      (confirmation) => confirmation.id === confirmationId && confirmation.userId === userId,
+    ) ?? null
+  );
 }
 
 async function updateConfirmation(
   repository: AiToolRepository,
   confirmation: Awaited<ReturnType<typeof getConfirmation>> extends infer T ? NonNullable<T> : never,
-  fields: { status: "pending" | "confirmed" | "cancelled"; result?: Record<string, unknown>; confirmedAt?: string; cancelledAt?: string },
+  fields: {
+    status: "pending" | "confirmed" | "cancelled";
+    result?: Record<string, unknown>;
+    confirmedAt?: string;
+    cancelledAt?: string;
+  },
 ) {
   if (repository instanceof D1LedgerRepository) {
     await repository.updateAiConfirmation(confirmation.id, fields, confirmation.userId);
-    return (await repository.getAiConfirmation(confirmation.userId, confirmation.id)) ?? { ...confirmation, ...fields };
+    return (
+      (await repository.getAiConfirmation(confirmation.userId, confirmation.id)) ?? {
+        ...confirmation,
+        ...fields,
+      }
+    );
   }
   Object.assign(confirmation, { ...fields, updatedAt: now() });
   return confirmation;

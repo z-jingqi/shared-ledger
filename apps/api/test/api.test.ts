@@ -59,8 +59,13 @@ function recordingAlephClient(options?: {
         requestId: "test-stream",
         route: { id: "test-route", name: "test-route", provider: "test", model: "test-model" },
       };
-      for (const char of options?.streamText ?? "Aleph says hi") yield { type: "delta", requestId: "test-stream", delta: char };
-      yield { type: "usage", requestId: "test-stream", usage: { inputTokens: 1, outputTokens: 1, creditsCharged: 1 } };
+      for (const char of options?.streamText ?? "Aleph says hi")
+        yield { type: "delta", requestId: "test-stream", delta: char };
+      yield {
+        type: "usage",
+        requestId: "test-stream",
+        usage: { inputTokens: 1, outputTokens: 1, creditsCharged: 1 },
+      };
       yield { type: "done", requestId: "test-stream" };
     },
     async getUserUsage(params: { project: string; userId: string; plan?: string; env?: string }) {
@@ -83,12 +88,21 @@ function recordingAlephClient(options?: {
 function defaultAiInvokeOutput(request: InvokeRequest) {
   const name = responseFormatName(request);
   if (name === "ledger_skill_selection") return { skillName: "general.chat", confidence: 1 };
-  if (name === "ledger_skill_step") return { skillName: "general.chat", toolName: "chat", args: {}, userMessage: "ok", confidence: 1, requiresConfirmation: false };
+  if (name === "ledger_skill_step")
+    return {
+      skillName: "general.chat",
+      toolName: "chat",
+      args: {},
+      userMessage: "ok",
+      confidence: 1,
+      requiresConfirmation: false,
+    };
   return { records: [] };
 }
 
 function responseFormatName(request: InvokeRequest) {
-  return (request.input.response_format as { json_schema?: { name?: string } } | undefined)?.json_schema?.name;
+  return (request.input.response_format as { json_schema?: { name?: string } } | undefined)?.json_schema
+    ?.name;
 }
 
 async function createAiSession(app: ReturnType<typeof createApp>, bookId = "book_home") {
@@ -101,7 +115,12 @@ async function createAiSession(app: ReturnType<typeof createApp>, bookId = "book
   return (await response.json<any>()).session as { id: string; title: string };
 }
 
-async function sendAiMessage(app: ReturnType<typeof createApp>, sessionId: string, message: string, bookId = "book_home") {
+async function sendAiMessage(
+  app: ReturnType<typeof createApp>,
+  sessionId: string,
+  message: string,
+  bookId = "book_home",
+) {
   const response = await app.request(
     `/ai/sessions/${sessionId}/messages`,
     { method: "POST", body: JSON.stringify({ bookId, message, page: "test" }), headers: aiHeaders },
@@ -111,11 +130,19 @@ async function sendAiMessage(app: ReturnType<typeof createApp>, sessionId: strin
   return response.json<any>();
 }
 
-async function searchWithAgent(app: ReturnType<typeof createApp>, query: string, env: Record<string, unknown> = { APP_ENV: "test" }) {
+async function searchWithAgent(
+  app: ReturnType<typeof createApp>,
+  query: string,
+  env: Record<string, unknown> = { APP_ENV: "test" },
+) {
   const session = await createAiSession(app);
   return app.request(
     `/ai/sessions/${session.id}/messages`,
-    { method: "POST", body: JSON.stringify({ bookId: "book_home", message: query, page: "records" }), headers: aiHeaders },
+    {
+      method: "POST",
+      body: JSON.stringify({ bookId: "book_home", message: query, page: "records" }),
+      headers: aiHeaders,
+    },
     env,
   );
 }
@@ -125,7 +152,11 @@ async function readSse(response: Response) {
   expect(reader).toBeTruthy();
   let output = "";
   try {
-    for (let attempt = 0; attempt < 80 && !output.includes("event: done") && !output.includes("event: error"); attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 80 && !output.includes("event: done") && !output.includes("event: error");
+      attempt += 1
+    ) {
       const chunk = await readStreamChunk(reader!, 1000);
       if (chunk.done) break;
       output += decodeStreamChunk(chunk.value);
@@ -138,7 +169,11 @@ async function readSse(response: Response) {
 
 describe("Hono REST API", () => {
   it("strips the /api prefix at the worker edge", async () => {
-    const response = await worker.fetch(new Request("https://dev.leger.aleph-cat.com/api/health") as any, { APP_ENV: "test" } as any, {} as any);
+    const response = await worker.fetch(
+      new Request("https://dev.leger.aleph-cat.com/api/health") as any,
+      { APP_ENV: "test" } as any,
+      {} as any,
+    );
     const body = await response.json<any>();
 
     expect(response.status).toBe(200);
@@ -200,7 +235,11 @@ describe("Hono REST API", () => {
     const renamedBody = await renamed.json<any>();
 
     expect(renamed.status).toBe(200);
-    expect(renamedBody.user).toMatchObject({ id: "user_demo", name: "SoundOnly", email: "soundonly@example.com" });
+    expect(renamedBody.user).toMatchObject({
+      id: "user_demo",
+      name: "SoundOnly",
+      email: "soundonly@example.com",
+    });
     expect(store.users[0]).toMatchObject({ name: "SoundOnly", email: "soundonly@example.com" });
 
     const duplicateName = await app.request(
@@ -266,7 +305,10 @@ describe("Hono REST API", () => {
 
     expect((await app.request("/books/book_home/invitations", init, { APP_ENV: "test" })).status).toBe(201);
     expect((await app.request("/books/book_home/invitations", init, { APP_ENV: "test" })).status).toBe(409);
-    expect((await createApp().request("/imports/status-stream?ids=import_test", undefined, { APP_ENV: "test" })).status).toBe(401);
+    expect(
+      (await createApp().request("/imports/status-stream?ids=import_test", undefined, { APP_ENV: "test" }))
+        .status,
+    ).toBe(401);
   });
 
   it("creates, lists, renames, reads, and deletes AI sessions for free users", async () => {
@@ -278,8 +320,16 @@ describe("Hono REST API", () => {
       { method: "PATCH", body: JSON.stringify({ title: "账本分析" }), headers: aiHeaders },
       { APP_ENV: "test" },
     );
-    const fetched = await app.request(`/ai/sessions/${session.id}`, { headers: aiHeaders }, { APP_ENV: "test" });
-    const deleted = await app.request(`/ai/sessions/${session.id}`, { method: "DELETE", headers: aiHeaders }, { APP_ENV: "test" });
+    const fetched = await app.request(
+      `/ai/sessions/${session.id}`,
+      { headers: aiHeaders },
+      { APP_ENV: "test" },
+    );
+    const deleted = await app.request(
+      `/ai/sessions/${session.id}`,
+      { method: "DELETE", headers: aiHeaders },
+      { APP_ENV: "test" },
+    );
 
     expect(listed.status).toBe(200);
     expect((await listed.json<any>()).sessions).toHaveLength(1);
@@ -294,7 +344,9 @@ describe("Hono REST API", () => {
     const session = await createAiSession(app);
 
     const created = await sendAiMessage(app, session.id, "昨天打车 38");
-    expect(store.transactions.some((transaction) => transaction.note === "打车" && transaction.amount === 38)).toBe(true);
+    expect(
+      store.transactions.some((transaction) => transaction.note === "打车" && transaction.amount === 38),
+    ).toBe(true);
     expect(created.parts.some((part: any) => part.type === "record-card")).toBe(true);
 
     store.transactions.push({
@@ -336,16 +388,26 @@ describe("Hono REST API", () => {
     const session = await createAiSession(app);
 
     const invite = await sendAiMessage(app, session.id, "邀请 confirm@example.com");
-    const inviteConfirmationId = invite.parts.find((part: any) => part.type === "confirmation-card").confirmation.id;
+    const inviteConfirmationId = invite.parts.find((part: any) => part.type === "confirmation-card")
+      .confirmation.id;
     expect(store.invitations).toHaveLength(0);
-    const confirmed = await app.request(`/ai/confirmations/${inviteConfirmationId}/confirm`, { method: "POST", headers: aiHeaders }, { APP_ENV: "test" });
+    const confirmed = await app.request(
+      `/ai/confirmations/${inviteConfirmationId}/confirm`,
+      { method: "POST", headers: aiHeaders },
+      { APP_ENV: "test" },
+    );
     expect(confirmed.status).toBe(200);
     expect(store.invitations).toHaveLength(1);
 
     await sendAiMessage(app, session.id, "创建一个支出分类 医疗");
     const deleteCategory = await sendAiMessage(app, session.id, "删除分类 医疗");
-    const deleteConfirmationId = deleteCategory.parts.find((part: any) => part.type === "confirmation-card").confirmation.id;
-    const cancelled = await app.request(`/ai/confirmations/${deleteConfirmationId}/cancel`, { method: "POST", headers: aiHeaders }, { APP_ENV: "test" });
+    const deleteConfirmationId = deleteCategory.parts.find((part: any) => part.type === "confirmation-card")
+      .confirmation.id;
+    const cancelled = await app.request(
+      `/ai/confirmations/${deleteConfirmationId}/cancel`,
+      { method: "POST", headers: aiHeaders },
+      { APP_ENV: "test" },
+    );
     expect(cancelled.status).toBe(200);
     expect(store.categories.some((item) => item.name === "医疗")).toBe(true);
 
@@ -358,7 +420,11 @@ describe("Hono REST API", () => {
     const session = await createAiSession(app);
     const response = await app.request(
       `/ai/sessions/${session.id}/messages/stream`,
-      { method: "POST", body: JSON.stringify({ bookId: "book_home", message: "讲个笑话" }), headers: aiHeaders },
+      {
+        method: "POST",
+        body: JSON.stringify({ bookId: "book_home", message: "讲个笑话" }),
+        headers: aiHeaders,
+      },
       { APP_ENV: "test" },
     );
     const reader = response.body?.getReader();
@@ -399,7 +465,11 @@ describe("Hono REST API", () => {
     const session = (await sessionResponse.json<any>()).session;
     const response = await app.request(
       `/ai/sessions/${session.id}/messages/stream`,
-      { method: "POST", body: JSON.stringify({ bookId: "book_home", message: "讲个笑话" }), headers: aiHeaders },
+      {
+        method: "POST",
+        body: JSON.stringify({ bookId: "book_home", message: "讲个笑话" }),
+        headers: aiHeaders,
+      },
       env,
     );
     const output = await readSse(response);
@@ -409,8 +479,18 @@ describe("Hono REST API", () => {
     expect(response.status).toBe(200);
     expect(output).toContain("event: message_delta");
     expect(output).toContain("来自");
-    expect(objectRequest).toMatchObject({ project: "shared-ledger", env: "test", task: "ledger.skill_select", mode: "object" });
-    expect(streamRequest).toMatchObject({ project: "shared-ledger", env: "test", task: "ledger.chat", mode: "stream" });
+    expect(objectRequest).toMatchObject({
+      project: "shared-ledger",
+      env: "test",
+      task: "ledger.skill_select",
+      mode: "object",
+    });
+    expect(streamRequest).toMatchObject({
+      project: "shared-ledger",
+      env: "test",
+      task: "ledger.chat",
+      mode: "stream",
+    });
     expect(JSON.stringify(requests)).not.toContain("legacy-model");
     expect(JSON.stringify(requests)).not.toContain("openrouter");
     expect(objectRequest.input.model).toBeUndefined();
@@ -444,7 +524,10 @@ describe("Hono REST API", () => {
               requiresConfirmation: false,
             },
     });
-    const response = await searchWithAgent(app, "金额小于30的数据", { APP_ENV: "test", ALEPH_AI_TEST_CLIENT: client });
+    const response = await searchWithAgent(app, "金额小于30的数据", {
+      APP_ENV: "test",
+      ALEPH_AI_TEST_CLIENT: client,
+    });
     const selectRequest = requests.find((item) => item.task === "ledger.skill_select");
     const stepRequest = requests.find((item) => item.task === "ledger.skill_step");
     const body = await response.json<any>();
@@ -452,8 +535,16 @@ describe("Hono REST API", () => {
 
     expect(response.status).toBe(200);
     expect(filterPart.filters).toMatchObject({ maxAmount: 30, maxStrict: true, sort: "date_desc" });
-    expect(selectRequest).toMatchObject({ project: "shared-ledger", task: "ledger.skill_select", mode: "object" });
-    expect(stepRequest).toMatchObject({ project: "shared-ledger", task: "ledger.skill_step", mode: "object" });
+    expect(selectRequest).toMatchObject({
+      project: "shared-ledger",
+      task: "ledger.skill_select",
+      mode: "object",
+    });
+    expect(stepRequest).toMatchObject({
+      project: "shared-ledger",
+      task: "ledger.skill_step",
+      mode: "object",
+    });
     expect(responseFormatName(stepRequest)).toBe("ledger_skill_step");
     expect(stepRequest.input.model).toBeUndefined();
     expect(stepRequest.input.metadata).toBeUndefined();
@@ -472,11 +563,19 @@ describe("Hono REST API", () => {
         requests: { used: 4, limit: 30, remaining: 26 },
       },
     });
-    const response = await app.request("/me/ai-usage", { headers: aiHeaders }, { APP_ENV: "test", ALEPH_AI_TEST_CLIENT: client });
+    const response = await app.request(
+      "/me/ai-usage",
+      { headers: aiHeaders },
+      { APP_ENV: "test", ALEPH_AI_TEST_CLIENT: client },
+    );
     const body = await response.json<any>();
 
     expect(response.status).toBe(200);
-    expect(body).toMatchObject({ project: "shared-ledger", userId: "user_demo", credits: { used: 8, remaining: 92 } });
+    expect(body).toMatchObject({
+      project: "shared-ledger",
+      userId: "user_demo",
+      credits: { used: 8, remaining: 92 },
+    });
   });
 
   it("propagates Aleph quota_exceeded for JSON and SSE AI endpoints", async () => {
@@ -487,19 +586,31 @@ describe("Hono REST API", () => {
     const session = await createAiSession(app);
     const json = await app.request(
       `/ai/sessions/${session.id}/messages`,
-      { method: "POST", body: JSON.stringify({ bookId: "book_home", message: "查一下" }), headers: aiHeaders },
+      {
+        method: "POST",
+        body: JSON.stringify({ bookId: "book_home", message: "查一下" }),
+        headers: aiHeaders,
+      },
       env,
     );
     const stream = await app.request(
       `/ai/sessions/${session.id}/messages/stream`,
-      { method: "POST", body: JSON.stringify({ bookId: "book_home", message: "讲个笑话" }), headers: aiHeaders },
+      {
+        method: "POST",
+        body: JSON.stringify({ bookId: "book_home", message: "讲个笑话" }),
+        headers: aiHeaders,
+      },
       env,
     );
     const jsonBody = await json.json<any>();
     const output = await readSse(stream);
 
     expect(json.status).toBe(429);
-    expect(jsonBody).toMatchObject({ error: "额度已用完", code: "quota_exceeded", requestId: "aleph_quota_1" });
+    expect(jsonBody).toMatchObject({
+      error: "额度已用完",
+      code: "quota_exceeded",
+      requestId: "aleph_quota_1",
+    });
     expect(output).toContain("event: error");
     expect(output).toContain("quota_exceeded");
     expect(output).toContain("aleph_quota_1");
@@ -508,10 +619,22 @@ describe("Hono REST API", () => {
   it("routes import structuring through Aleph object planning", async () => {
     const { client, requests } = recordingAlephClient({
       invokeOutput: {
-        records: [{ type: "expense", amount: 12, occurredAt: "2026-06-27", note: "早餐", confidence: 0.9, warnings: [] }],
+        records: [
+          {
+            type: "expense",
+            amount: 12,
+            occurredAt: "2026-06-27",
+            note: "早餐",
+            confidence: 0.9,
+            warnings: [],
+          },
+        ],
       },
     });
-    const ai = runtimeAiProvider({ APP_ENV: "test", ALEPH_AI_TEST_CLIENT: client }, { id: "user_demo", plan: "pro" });
+    const ai = runtimeAiProvider(
+      { APP_ENV: "test", ALEPH_AI_TEST_CLIENT: client },
+      { id: "user_demo", plan: "pro" },
+    );
     const records = await structureForConfirmation({
       bookId: "book_home",
       userId: "user_demo",
@@ -521,7 +644,12 @@ describe("Hono REST API", () => {
     const request = requests[0];
 
     expect(records[0]).toMatchObject({ type: "expense", amount: 12, warnings: ["OCR 置信度较低"] });
-    expect(request).toMatchObject({ project: "shared-ledger", task: "ledger.skill_step", mode: "object", user: { id: "user_demo", plan: "pro" } });
+    expect(request).toMatchObject({
+      project: "shared-ledger",
+      task: "ledger.skill_step",
+      mode: "object",
+      user: { id: "user_demo", plan: "pro" },
+    });
     expect(responseFormatName(request)).toBe("ledger_import_records");
     expect(request.input.model).toBeUndefined();
   });
