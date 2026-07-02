@@ -43,7 +43,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.web == 'true' || needs.changes.outputs.shared == 'true' || needs.changes.outputs.infrastructure == 'true'
     runs-on: ubuntu-latest
-    environment: ${{ github.ref_name == 'main' && 'production' || 'preview' }}
+    environment: preview
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -54,7 +54,7 @@ jobs:
       - run: pnpm --filter @shared-ledger/web build
         env:
           VITE_API_URL: /api
-      - run: node ../../scripts/prepare-wrangler-config.mjs web ${{ github.ref_name == 'main' && 'prod' || 'preview' }} && ../../apps/api/node_modules/.bin/wrangler deploy --config wrangler.generated-web-${{ github.ref_name == 'main' && 'prod' || 'preview' }}.json
+      - run: node ../../scripts/prepare-wrangler-config.mjs web preview && ../../apps/api/node_modules/.bin/wrangler deploy --config wrangler.generated-web-preview.json
         working-directory: apps/web
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -63,7 +63,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.migration == 'true'
     runs-on: ubuntu-latest
-    environment: ${{ github.ref_name == 'main' && 'production' || 'preview' }}
+    environment: preview
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -71,12 +71,11 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - run: node ../../scripts/prepare-wrangler-config.mjs api ${{ github.ref_name == 'main' && 'prod' || 'preview' }} && ../../apps/api/node_modules/.bin/wrangler d1 migrations apply shared-ledger-${{ github.ref_name == 'main' && 'prod' || 'preview' }} --remote --config wrangler.generated-api-${{ github.ref_name == 'main' && 'prod' || 'preview' }}.json
+      - run: node ../../scripts/prepare-wrangler-config.mjs api preview && ../../apps/api/node_modules/.bin/wrangler d1 migrations apply shared-ledger-preview --remote --config wrangler.generated-api-preview.json
         working-directory: apps/api
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_D1_DATABASE_ID_PROD: ${{ vars.CLOUDFLARE_D1_DATABASE_ID_PROD }}
   deploy-api:
     needs: [changes, migrate-database]
     if: |
@@ -84,7 +83,7 @@ jobs:
       (needs.changes.outputs.api == 'true' || needs.changes.outputs.shared == 'true' || needs.changes.outputs.infrastructure == 'true') &&
       (needs.migrate-database.result == 'success' || needs.migrate-database.result == 'skipped')
     runs-on: ubuntu-latest
-    environment: ${{ github.ref_name == 'main' && 'production' || 'preview' }}
+    environment: preview
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -92,25 +91,21 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - run: node ../../scripts/prepare-wrangler-config.mjs api ${{ github.ref_name == 'main' && 'prod' || 'preview' }}
+      - run: node ../../scripts/prepare-wrangler-config.mjs api preview
         working-directory: apps/api
         env:
-          CLOUDFLARE_D1_DATABASE_ID_PROD: ${{ vars.CLOUDFLARE_D1_DATABASE_ID_PROD }}
           ALEPH_AI_SERVICE_PREVIEW: ${{ vars.ALEPH_AI_SERVICE_PREVIEW || 'aleph-ai-orchestrator-preview' }}
-          ALEPH_AI_SERVICE_PROD: ${{ vars.ALEPH_AI_SERVICE_PROD || 'aleph-ai-orchestrator' }}
           ALEPH_AI_ENV_PREVIEW: ${{ vars.ALEPH_AI_ENV_PREVIEW || 'preview' }}
-          ALEPH_AI_ENV_PROD: ${{ vars.ALEPH_AI_ENV_PROD || 'prod' }}
           ALEPH_TOOLS_SERVICE_PREVIEW: ${{ vars.ALEPH_TOOLS_SERVICE_PREVIEW || 'aleph-tools-gateway-preview' }}
-          ALEPH_TOOLS_SERVICE_PROD: ${{ vars.ALEPH_TOOLS_SERVICE_PROD || 'aleph-tools-gateway-prod' }}
       - run: |
           if [ -n "$ALEPH_AI_SERVICE_TOKEN" ]; then
-            printf "%s" "$ALEPH_AI_SERVICE_TOKEN" | ../../apps/api/node_modules/.bin/wrangler secret put ALEPH_AI_SERVICE_TOKEN --config wrangler.generated-api-${{ github.ref_name == 'main' && 'prod' || 'preview' }}.json
+            printf "%s" "$ALEPH_AI_SERVICE_TOKEN" | ../../apps/api/node_modules/.bin/wrangler secret put ALEPH_AI_SERVICE_TOKEN --config wrangler.generated-api-preview.json
           fi
           if [ -n "$ALEPH_TOOLS_API_KEY" ]; then
-            printf "%s" "$ALEPH_TOOLS_API_KEY" | ../../apps/api/node_modules/.bin/wrangler secret put ALEPH_TOOLS_API_KEY --config wrangler.generated-api-${{ github.ref_name == 'main' && 'prod' || 'preview' }}.json
+            printf "%s" "$ALEPH_TOOLS_API_KEY" | ../../apps/api/node_modules/.bin/wrangler secret put ALEPH_TOOLS_API_KEY --config wrangler.generated-api-preview.json
           fi
           if [ -n "$ALEPH_TOOLS_WEBHOOK_SECRET" ]; then
-            printf "%s" "$ALEPH_TOOLS_WEBHOOK_SECRET" | ../../apps/api/node_modules/.bin/wrangler secret put ALEPH_TOOLS_WEBHOOK_SECRET --config wrangler.generated-api-${{ github.ref_name == 'main' && 'prod' || 'preview' }}.json
+            printf "%s" "$ALEPH_TOOLS_WEBHOOK_SECRET" | ../../apps/api/node_modules/.bin/wrangler secret put ALEPH_TOOLS_WEBHOOK_SECRET --config wrangler.generated-api-preview.json
           fi
         working-directory: apps/api
         env:
@@ -119,7 +114,7 @@ jobs:
           ALEPH_AI_SERVICE_TOKEN: ${{ secrets.ALEPH_AI_SERVICE_TOKEN }}
           ALEPH_TOOLS_API_KEY: ${{ secrets.ALEPH_TOOLS_API_KEY }}
           ALEPH_TOOLS_WEBHOOK_SECRET: ${{ secrets.ALEPH_TOOLS_WEBHOOK_SECRET }}
-      - run: ../../apps/api/node_modules/.bin/wrangler deploy --config wrangler.generated-api-${{ github.ref_name == 'main' && 'prod' || 'preview' }}.json
+      - run: ../../apps/api/node_modules/.bin/wrangler deploy --config wrangler.generated-api-preview.json
         working-directory: apps/api
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

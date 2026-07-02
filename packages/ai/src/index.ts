@@ -1,5 +1,14 @@
-import { createAlephAIClient, type AlephAIClient } from "@aleph-ai-platform/ai-client";
-import { AlephAIError, type ChatMessage, type ErrorCode, type InvokeRequest, type JsonObject, type StreamEvent, type UserUsageResponse } from "@aleph-ai-platform/shared";
+import {
+  AlephAIError,
+  createAlephAIClient,
+  type AlephAIClient,
+  type ChatMessage,
+  type ErrorCode,
+  type InvokeRequest,
+  type JsonObject,
+  type StreamEvent,
+  type UserUsageResponse,
+} from "./platform-client";
 import {
   ledgerSkillNames,
   ledgerSkillSelectionSchema,

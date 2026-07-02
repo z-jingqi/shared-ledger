@@ -160,12 +160,6 @@ importers:
 
   packages/ai:
     dependencies:
-      '@aleph-ai-platform/ai-client':
-        specifier: link:../../../aleph-ai-platform/packages/ai-client
-        version: link:../../../aleph-ai-platform/packages/ai-client
-      '@aleph-ai-platform/shared':
-        specifier: link:../../../aleph-ai-platform/packages/shared
-        version: link:../../../aleph-ai-platform/packages/shared
       '@shared-ledger/ledger-skills':
         specifier: workspace:*
         version: link:../ledger-skills

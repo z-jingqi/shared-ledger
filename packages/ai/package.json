@@ -9,8 +9,6 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@aleph-ai-platform/ai-client": "link:../../../aleph-ai-platform/packages/ai-client",
-    "@aleph-ai-platform/shared": "link:../../../aleph-ai-platform/packages/shared",
     "@shared-ledger/ledger-skills": "workspace:*",
     "@shared-ledger/shared": "workspace:*",
     "zod": "^3.24.3"
