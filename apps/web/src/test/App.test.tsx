@@ -2126,6 +2126,30 @@ describe("shared ledger mobile UI", () => {
     expect(window.location.pathname).toBe("/login");
     expect(window.location.search).toContain("redirect=%2Frecords");
   });
+  it("redirects signed-in users away from login", async () => {
+    window.history.pushState({}, "", "/login?redirect=%2F");
+    render(<App />);
+
+    expect(await findBookSwitcher()).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/home");
+    expect(window.location.search).toContain("bookId=book_test");
+    expect(screen.queryByRole("heading", { name: "欢迎回来" })).not.toBeInTheDocument();
+  });
+  it("continues to the requested redirect after successful login", async () => {
+    const user = userEvent.setup();
+    authMode = "signed-out";
+    window.history.pushState({}, "", "/login?redirect=%2Frecords%3FbookId%3Dbook_test");
+    const { container } = render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "欢迎回来" })).toBeInTheDocument();
+    await user.type(screen.getByLabelText("用户名"), "test");
+    await user.type(screen.getByLabelText("密码"), "123456");
+    await user.click(screen.getByRole("button", { name: "登录" }));
+
+    await waitFor(() => expect(window.location.pathname).toBe("/records"));
+    expect(window.location.search).toContain("bookId=book_test");
+    await waitFor(() => expect(recordRow(container, "tx_home")).toBeInTheDocument());
+  });
   it("refreshes an expired access session before rendering protected pages", async () => {
     authMode = "expired-once";
     render(<App />);
@@ -2172,6 +2196,7 @@ describe("shared ledger mobile UI", () => {
   });
   it("keeps login and register form state separate", async () => {
     const user = userEvent.setup();
+    authMode = "signed-out";
     loginError = "用户名或密码错误";
     window.history.pushState({}, "", "/login");
     render(<App />);
@@ -2189,6 +2214,7 @@ describe("shared ledger mobile UI", () => {
   });
   it("toggles password visibility on login and register forms", async () => {
     const user = userEvent.setup();
+    authMode = "signed-out";
     window.history.pushState({}, "", "/login");
     render(<App />);
 

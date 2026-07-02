@@ -11,6 +11,7 @@ import { InvitationRecordsPage, InviteMemberPage, MemberRolePage, MembersPage } 
 import { AddLineItemsPage, RecordDetailPage, RecordsPage, TransactionFormPage } from "../pages/RecordPages";
 import { ManagementSettingsPage, SettingsPage } from "../pages/SettingsPages";
 import { useAuth } from "../features/auth/AuthProvider";
+import { authRedirectTarget } from "../features/auth/redirect";
 import { useActiveBook } from "../hooks/useActiveBook";
 import { IosCard, IosListSkeleton, IosPage, IosScroll } from "../components/ios/IosDesign";
 
@@ -18,8 +19,8 @@ export function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<Protected element={<HomeEntry />} />} />
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/register" element={<RegisterPage />} />
+      <Route path="/login" element={<AuthOnly element={<LoginPage />} />} />
+      <Route path="/register" element={<AuthOnly element={<RegisterPage />} />} />
       <Route path="/home" element={<Protected element={<BookHomePage />} />} />
       <Route path="/books" element={<Protected element={<BooksPage />} />} />
       <Route path="/books/manage" element={<Protected element={<BooksPage />} />} />
@@ -68,6 +69,14 @@ function LegacyBookHomeRedirect() {
 
 function Protected({ element }: { element: ReactNode }) {
   return <RequireAuth>{element}</RequireAuth>;
+}
+
+function AuthOnly({ element }: { element: ReactNode }) {
+  const { loading, user } = useAuth();
+  const location = useLocation();
+  if (loading) return <RouteLoadingSkeleton />;
+  if (user) return <Navigate to={authRedirectTarget(location.search)} replace />;
+  return element;
 }
 
 function RequireAuth({ children }: { children: ReactNode }) {

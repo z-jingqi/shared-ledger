@@ -11,7 +11,7 @@ import type { ReactNode } from "react";
 import { useReducer, useState } from "react";
 import { useForm } from "react-hook-form";
 import type { UseFormRegisterReturn } from "react-hook-form";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
   IconTile,
@@ -23,6 +23,7 @@ import {
   IosTopBar,
 } from "../components/ios/IosDesign";
 import { useAuth, type SessionUser } from "../features/auth/AuthProvider";
+import { authRedirectTarget } from "../features/auth/redirect";
 import { api } from "../lib";
 
 type LoginForm = { identifier: string; password: string };
@@ -246,6 +247,7 @@ export function SubscriptionPage() {
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { setUser } = useAuth();
   const form = useForm<LoginForm>({ defaultValues: { identifier: "", password: "" } });
   const submit = form.handleSubmit(async (value) => {
@@ -255,7 +257,7 @@ export function LoginPage() {
         body: JSON.stringify({ identifier: value.identifier, password: value.password }),
       });
       setUser(result.user);
-      navigate("/", { replace: true });
+      navigate(authRedirectTarget(location.search), { replace: true });
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : "认证失败", {
         duration: 3000,
