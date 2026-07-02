@@ -38,7 +38,7 @@ describe("D1 auth session lifecycle", () => {
     expect(registeredCookie).toContain("ledger_session=");
     const userId = registeredBody.user.id;
     expect(context.db.rows.books).toContainEqual(
-      expect.objectContaining({ name: "SoundOnly", currency: "CNY", created_by_user_id: userId }),
+      expect.objectContaining({ name: "SoundOnly的账本", currency: "CNY", created_by_user_id: userId }),
     );
     expect(context.db.rows.book_members).toContainEqual(
       expect.objectContaining({ user_id: userId, role: "creator" }),

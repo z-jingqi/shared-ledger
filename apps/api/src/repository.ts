@@ -1,4 +1,4 @@
-import type { Book, Member, Transaction } from "./types";
+import type { Book, LedgerUser, Member, Transaction } from "./types";
 import type { AiConfirmation, ImportedRecord, ImportJob, Invitation, SimpleEntity } from "./store";
 
 type Row = Record<string, any>;
@@ -48,6 +48,44 @@ const mapInvitation = (row: Row): Invitation => ({
   status: row.status,
   expiresAt: row.expiresAt,
   ...(row.lastRemindedAt ? { lastRemindedAt: row.lastRemindedAt } : {}),
+  ...(row.createdAt ? { createdAt: row.createdAt } : {}),
+  ...(row.updatedAt ? { updatedAt: row.updatedAt } : {}),
+});
+
+const mapUserSummary = (row: Row): InvitationUserSummary => ({
+  id: row.id,
+  name: row.name,
+  ...(row.email ? { email: row.email } : {}),
+  ...(row.avatarUrl ? { avatarUrl: row.avatarUrl } : {}),
+  plan: row.plan === "pro" ? "pro" : "free",
+});
+
+const mapInvitationDetail = (row: Row, viewerUserId: string): InvitationDetail => ({
+  ...mapInvitation(row),
+  book: {
+    id: row.bookId,
+    name: row.bookName,
+    currency: row.bookCurrency,
+  },
+  direction: row.inviterUserId === viewerUserId ? "sent" : "received",
+  inviter: mapUserSummary({
+    id: row.inviterId,
+    name: row.inviterName,
+    email: row.inviterEmail,
+    avatarUrl: row.inviterAvatarUrl,
+    plan: row.inviterPlan,
+  }),
+  ...(row.inviteeId
+    ? {
+        invitee: mapUserSummary({
+          id: row.inviteeId,
+          name: row.inviteeName,
+          email: row.inviteeEmailDisplay,
+          avatarUrl: row.inviteeAvatarUrl,
+          plan: row.inviteePlan,
+        }),
+      }
+    : {}),
 });
 
 const parseJson = (value: unknown) => {
@@ -124,6 +162,25 @@ const aiSessionColumns =
 const aiMessageColumns = "id,session_id AS sessionId,role,content,parts,attachments,created_at AS createdAt";
 const aiToolCallColumns =
   "id,session_id AS sessionId,user_id AS userId,book_id AS bookId,skill_name AS skillName,tool_name AS toolName,status,args,result,error_message AS errorMessage,created_at AS createdAt,updated_at AS updatedAt";
+const invitationColumns =
+  "id,book_id AS bookId,inviter_user_id AS inviterUserId,invitee_email AS inviteeEmail,invitee_phone AS inviteePhone,invitee_user_id AS inviteeUserId,role,status,expires_at AS expiresAt,last_reminded_at AS lastRemindedAt,created_at AS createdAt,updated_at AS updatedAt";
+
+export type InvitationUserSummary = Pick<LedgerUser, "id" | "name" | "plan"> & {
+  avatarUrl?: string;
+  email?: string;
+};
+export type InvitationBookSummary = Pick<Book, "id" | "name" | "currency">;
+export type InvitationDetail = Invitation & {
+  book: InvitationBookSummary;
+  direction: "sent" | "received";
+  inviter: InvitationUserSummary;
+  invitee?: InvitationUserSummary;
+};
+export type InviteBlockDetail = {
+  id: string;
+  createdAt: string;
+  user: InvitationUserSummary;
+};
 
 const mapRecord = (row: Row): ImportedRecord => ({
   id: row.id,
@@ -703,11 +760,32 @@ export class D1LedgerRepository {
   async listInvitations(bookId: string) {
     const result = await this.db
       .prepare(
-        "SELECT id,book_id AS bookId,inviter_user_id AS inviterUserId,invitee_email AS inviteeEmail,invitee_phone AS inviteePhone,invitee_user_id AS inviteeUserId,role,status,expires_at AS expiresAt,last_reminded_at AS lastRemindedAt FROM invitations WHERE book_id=? AND deleted_at IS NULL ORDER BY created_at DESC",
+        `SELECT ${invitationColumns} FROM invitations WHERE book_id=? AND deleted_at IS NULL ORDER BY created_at DESC`,
       )
       .bind(bookId)
       .all<Row>();
     return result.results.map(mapInvitation);
+  }
+
+  async listInvitationDetailsForBook(bookId: string, viewerUserId: string) {
+    const result = await this.db
+      .prepare(
+        `SELECT i.${invitationColumns.replaceAll(",", ",i.")},
+                b.name AS bookName,b.currency AS bookCurrency,
+                inviter.id AS inviterId,inviter.name AS inviterName,inviter.email AS inviterEmail,inviter.avatar_url AS inviterAvatarUrl,inviter_plan.plan AS inviterPlan,
+                invitee.id AS inviteeId,invitee.name AS inviteeName,invitee.email AS inviteeEmailDisplay,invitee.avatar_url AS inviteeAvatarUrl,invitee_plan.plan AS inviteePlan
+         FROM invitations i
+         JOIN books b ON b.id = i.book_id
+         JOIN users inviter ON inviter.id = i.inviter_user_id
+         LEFT JOIN subscriptions inviter_plan ON inviter_plan.user_id = inviter.id AND inviter_plan.status = 'active'
+         LEFT JOIN users invitee ON invitee.id = i.invitee_user_id
+         LEFT JOIN subscriptions invitee_plan ON invitee_plan.user_id = invitee.id AND invitee_plan.status = 'active'
+         WHERE i.book_id=? AND i.deleted_at IS NULL
+         ORDER BY i.created_at DESC`,
+      )
+      .bind(bookId)
+      .all<Row>();
+    return result.results.map((row) => mapInvitationDetail(row, viewerUserId));
   }
 
   async listReceivedInvitations(userId: string) {
@@ -717,17 +795,48 @@ export class D1LedgerRepository {
       .first<{ email: string | null; phone: string | null }>();
     const result = await this.db
       .prepare(
-        "SELECT id,book_id AS bookId,inviter_user_id AS inviterUserId,invitee_email AS inviteeEmail,invitee_phone AS inviteePhone,invitee_user_id AS inviteeUserId,role,status,expires_at AS expiresAt,last_reminded_at AS lastRemindedAt FROM invitations WHERE deleted_at IS NULL AND (invitee_user_id=? OR (invitee_email IS NOT NULL AND invitee_email=?) OR (invitee_phone IS NOT NULL AND invitee_phone=?)) ORDER BY created_at DESC",
+        `SELECT ${invitationColumns} FROM invitations WHERE deleted_at IS NULL AND (invitee_user_id=? OR (invitee_email IS NOT NULL AND invitee_email=?) OR (invitee_phone IS NOT NULL AND invitee_phone=?)) ORDER BY created_at DESC`,
       )
       .bind(userId, user?.email ?? "", user?.phone ?? "")
       .all<Row>();
     return result.results.map(mapInvitation);
   }
 
+  async listInvitationDetailsForUser(userId: string) {
+    const user = await this.db
+      .prepare("SELECT email,phone FROM users WHERE id = ?")
+      .bind(userId)
+      .first<{ email: string | null; phone: string | null }>();
+    const result = await this.db
+      .prepare(
+        `SELECT i.${invitationColumns.replaceAll(",", ",i.")},
+                b.name AS bookName,b.currency AS bookCurrency,
+                inviter.id AS inviterId,inviter.name AS inviterName,inviter.email AS inviterEmail,inviter.avatar_url AS inviterAvatarUrl,inviter_plan.plan AS inviterPlan,
+                invitee.id AS inviteeId,invitee.name AS inviteeName,invitee.email AS inviteeEmailDisplay,invitee.avatar_url AS inviteeAvatarUrl,invitee_plan.plan AS inviteePlan
+         FROM invitations i
+         JOIN books b ON b.id = i.book_id
+         JOIN users inviter ON inviter.id = i.inviter_user_id
+         LEFT JOIN subscriptions inviter_plan ON inviter_plan.user_id = inviter.id AND inviter_plan.status = 'active'
+         LEFT JOIN users invitee ON invitee.id = i.invitee_user_id
+         LEFT JOIN subscriptions invitee_plan ON invitee_plan.user_id = invitee.id AND invitee_plan.status = 'active'
+         WHERE i.deleted_at IS NULL
+           AND (
+             i.inviter_user_id=?
+             OR i.invitee_user_id=?
+             OR (i.invitee_email IS NOT NULL AND i.invitee_email=?)
+             OR (i.invitee_phone IS NOT NULL AND i.invitee_phone=?)
+           )
+         ORDER BY i.created_at DESC`,
+      )
+      .bind(userId, userId, user?.email ?? "", user?.phone ?? "")
+      .all<Row>();
+    return result.results.map((row) => mapInvitationDetail(row, userId));
+  }
+
   async getInvitation(invitationId: string) {
     const row = await this.db
       .prepare(
-        "SELECT id,book_id AS bookId,inviter_user_id AS inviterUserId,invitee_email AS inviteeEmail,invitee_phone AS inviteePhone,invitee_user_id AS inviteeUserId,role,status,expires_at AS expiresAt,last_reminded_at AS lastRemindedAt FROM invitations WHERE id=? AND deleted_at IS NULL",
+        `SELECT ${invitationColumns} FROM invitations WHERE id=? AND deleted_at IS NULL`,
       )
       .bind(invitationId)
       .first<Row>();
@@ -768,7 +877,7 @@ export class D1LedgerRepository {
   async findPendingInvitation(bookId: string, email?: string, phone?: string, userId?: string) {
     return this.db
       .prepare(
-        "SELECT id,book_id AS bookId,inviter_user_id AS inviterUserId,invitee_email AS inviteeEmail,invitee_phone AS inviteePhone,invitee_user_id AS inviteeUserId,role,status,expires_at AS expiresAt,last_reminded_at AS lastRemindedAt FROM invitations WHERE book_id=? AND status='pending' AND deleted_at IS NULL AND ((? != '' AND invitee_email=?) OR (? != '' AND invitee_phone=?) OR (? != '' AND invitee_user_id=?)) LIMIT 1",
+        `SELECT ${invitationColumns} FROM invitations WHERE book_id=? AND status='pending' AND deleted_at IS NULL AND ((? != '' AND invitee_email=?) OR (? != '' AND invitee_phone=?) OR (? != '' AND invitee_user_id=?)) LIMIT 1`,
       )
       .bind(bookId, email ?? "", email ?? "", phone ?? "", phone ?? "", userId ?? "", userId ?? "")
       .first<Row>()
@@ -796,6 +905,113 @@ export class D1LedgerRepository {
       )
       .run();
     return changed;
+  }
+
+  async deleteInvitation(invitationId: string, actorId = systemActorId) {
+    const invitation = await this.getInvitation(invitationId);
+    if (!invitation || invitation.status === "pending") return null;
+    const timestamp = now();
+    await this.db
+      .prepare(
+        "UPDATE invitations SET deleted_at=?,deleted_by_user_id=?,updated_at=?,updated_by_user_id=? WHERE id=?",
+      )
+      .bind(timestamp, actorId, timestamp, actorId, invitationId)
+      .run();
+    return invitation;
+  }
+
+  async searchUsersForInvitation(query: string, viewerUserId: string) {
+    const normalized = query.trim().toLowerCase();
+    const result = await this.db
+      .prepare(
+        `SELECT u.id,u.name,u.email,u.avatar_url AS avatarUrl,s.plan
+         FROM users u
+         LEFT JOIN subscriptions s ON s.user_id = u.id AND s.status = 'active'
+         WHERE u.deleted_at IS NULL
+           AND u.id != ?
+           AND (LOWER(u.name) = ? OR LOWER(u.email) = ? OR LOWER(u.phone) = ?)
+           AND NOT EXISTS (
+             SELECT 1 FROM user_invite_blocks b
+             WHERE b.blocker_user_id = u.id AND b.blocked_user_id = ? AND b.deleted_at IS NULL
+           )
+         ORDER BY u.name COLLATE NOCASE
+         LIMIT 1`,
+      )
+      .bind(viewerUserId, normalized, normalized, normalized, viewerUserId)
+      .all<Row>();
+    return result.results.map(mapUserSummary);
+  }
+
+  async getUserSummary(userId: string) {
+    const row = await this.db
+      .prepare(
+        `SELECT u.id,u.name,u.email,u.avatar_url AS avatarUrl,s.plan
+         FROM users u
+         LEFT JOIN subscriptions s ON s.user_id = u.id AND s.status = 'active'
+         WHERE u.id=? AND u.deleted_at IS NULL
+         LIMIT 1`,
+      )
+      .bind(userId)
+      .first<Row>();
+    return row ? mapUserSummary(row) : null;
+  }
+
+  async isInviteBlocked(blockerUserId: string, blockedUserId: string) {
+    const row = await this.db
+      .prepare(
+        "SELECT id FROM user_invite_blocks WHERE blocker_user_id=? AND blocked_user_id=? AND deleted_at IS NULL LIMIT 1",
+      )
+      .bind(blockerUserId, blockedUserId)
+      .first<{ id: string }>();
+    return Boolean(row);
+  }
+
+  async blockInvites(blockerUserId: string, blockedUserId: string) {
+    const existing = await this.db
+      .prepare(
+        "SELECT id FROM user_invite_blocks WHERE blocker_user_id=? AND blocked_user_id=? AND deleted_at IS NULL LIMIT 1",
+      )
+      .bind(blockerUserId, blockedUserId)
+      .first<{ id: string }>();
+    if (existing) return existing.id;
+    const timestamp = now();
+    const blockId = id("invite_block");
+    await this.db
+      .prepare(
+        "INSERT INTO user_invite_blocks (id,blocker_user_id,blocked_user_id,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
+      )
+      .bind(blockId, blockerUserId, blockedUserId, blockerUserId, blockerUserId, timestamp, timestamp)
+      .run();
+    return blockId;
+  }
+
+  async unblockInvites(blockerUserId: string, blockedUserId: string) {
+    const timestamp = now();
+    await this.db
+      .prepare(
+        "UPDATE user_invite_blocks SET deleted_at=?,deleted_by_user_id=?,updated_at=?,updated_by_user_id=? WHERE blocker_user_id=? AND blocked_user_id=? AND deleted_at IS NULL",
+      )
+      .bind(timestamp, blockerUserId, timestamp, blockerUserId, blockerUserId, blockedUserId)
+      .run();
+  }
+
+  async listInviteBlocks(blockerUserId: string): Promise<InviteBlockDetail[]> {
+    const result = await this.db
+      .prepare(
+        `SELECT b.id,b.created_at AS createdAt,u.id AS userId,u.name,u.email,u.avatar_url AS avatarUrl,s.plan
+         FROM user_invite_blocks b
+         JOIN users u ON u.id = b.blocked_user_id
+         LEFT JOIN subscriptions s ON s.user_id = u.id AND s.status = 'active'
+         WHERE b.blocker_user_id=? AND b.deleted_at IS NULL
+         ORDER BY b.created_at DESC`,
+      )
+      .bind(blockerUserId)
+      .all<Row>();
+    return result.results.map((row) => ({
+      id: row.id,
+      createdAt: row.createdAt,
+      user: mapUserSummary({ ...row, id: row.userId }),
+    }));
   }
   async addMember(bookId: string, userId: string, role: "admin" | "member", actorId = systemActorId) {
     const timestamp = now();

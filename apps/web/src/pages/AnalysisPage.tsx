@@ -3,6 +3,7 @@ import { useState } from "react";
 import { BookSwitcherSheet } from "../components/books/BookSwitcherSheet";
 import type { LedgerTransaction } from "../components/ledger/Transactions";
 import { IosMetric, IosPage, IosScroll, IosTopBar } from "../components/ios/IosDesign";
+import { useAuth } from "../features/auth/AuthProvider";
 import { yuan } from "../features/formatting/money";
 import { useAppSheetActions } from "../features/sheets/SheetContext";
 import { useActiveBook } from "../hooks/useActiveBook";
@@ -11,6 +12,7 @@ import { useApi } from "../hooks/useApi";
 type Range = "month" | "quarter" | "year";
 
 export function AnalysisPage() {
+  const { user } = useAuth();
   const { openSheet } = useAppSheetActions();
   const { book, books, setActiveBook } = useActiveBook();
   const [range, setRange] = useState<Range>("month");
@@ -28,6 +30,7 @@ export function AnalysisPage() {
   const expenseItems = visible.filter((item) => item.type === "expense");
   const categories = groupBy(expenseItems, (item) => item.categoryName ?? item.categoryId ?? "未分类");
   const members = groupBy(expenseItems, (item) => item.memberId ?? "我");
+  const canUseAi = user?.plan === "pro";
   const maxMonth = Math.max(
     1,
     ...monthlyBars(transactions).map((item) => Math.max(item.income, item.expense)),
@@ -66,14 +69,16 @@ export function AnalysisPage() {
         ))}
       </div>
       <IosScroll className="ios-analysis-scroll">
-        <button className="ios-analysis-ai-action" type="button" onClick={() => openSheet({ type: "ai" })}>
-          <SparkleIcon size={18} weight="fill" />
-          <span>
-            <b>用 AI 做更多分析</b>
-            <small>按分类、成员和异常继续拆解</small>
-          </span>
-          <CaretRightIcon size={17} />
-        </button>
+        {canUseAi ? (
+          <button className="ios-analysis-ai-action" type="button" onClick={() => openSheet({ type: "ai" })}>
+            <SparkleIcon size={18} weight="fill" />
+            <span>
+              <b>用 AI 做更多分析</b>
+              <small>按分类、成员和异常继续拆解</small>
+            </span>
+            <CaretRightIcon size={17} />
+          </button>
+        ) : null}
 
         <div className="ios-analysis-summary">
           <IosMetric label="收入" value={yuan(income, book?.currency)} tone="income" />

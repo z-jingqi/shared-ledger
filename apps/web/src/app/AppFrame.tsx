@@ -104,6 +104,7 @@ function AppFrameInner({ children }: { children: ReactNode }) {
             />
           ) : null}
           <AddActionMenu
+            directManual={!canUseImageRecognition}
             open={addMenuOpen}
             showUpload={canUseImageRecognition}
             uploading={uploading}

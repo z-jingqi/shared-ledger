@@ -113,16 +113,10 @@ export const createTransactionSchema = z
   });
 export const inviteSchema = z
   .object({
-    target: z.string().trim().min(1).max(120).optional(),
-    email: z.string().trim().email().optional(),
-    phone: z.string().trim().min(6).max(30).optional(),
-    userId: idSchema.optional(),
+    userId: idSchema,
     role: z.enum(["admin", "member"]).default("member"),
   })
-  .refine(
-    (data) => data.target || data.email || data.phone || data.userId,
-    "请输入邮箱、手机号、用户名或用户 ID",
-  );
+  .refine((data) => Boolean(data.userId), "请先搜索并选择要邀请的用户");
 export const categorySchema = z.object({
   name: z.string().trim().min(1).max(30),
   type: z.enum(transactionTypes),

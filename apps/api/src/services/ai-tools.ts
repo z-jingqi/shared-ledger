@@ -731,25 +731,42 @@ async function inviteMember(runtime: AiToolRuntime, bookId: string, rawArgs: Rec
   const userRole = await bookRoleFor(runtime.repository, bookId, runtime.user.id);
   if (!canInvite(userRole ?? "member")) return textResult("你需要是账本创建者或管理员才能邀请成员。");
   if (!args.email && !args.phone && !args.userId && !args.target)
-    return textResult("请提供要邀请的邮箱、手机号、用户名或用户 ID。");
+    return textResult("请先在成员与邀请页面搜索并选择要邀请的用户。");
+  const target = await resolveInviteTarget(runtime.repository, args, runtime.user.id);
+  if (!target) return textResult("没有找到可邀请的注册用户，请在成员与邀请页面搜索后再发送邀请。");
+  if (target.id === runtime.user.id) return textResult("不能邀请自己。");
+  if (await memberByUser(runtime.repository, bookId, target.id)) return textResult("该用户已经在账本中。");
+  const blocked =
+    runtime.repository instanceof D1LedgerRepository
+      ? await runtime.repository.isInviteBlocked(target.id, runtime.user.id)
+      : memoryInviteBlocked(runtime.repository, target.id, runtime.user.id);
+  if (blocked) return textResult("对方暂不接受你的邀请。");
+  const duplicate =
+    runtime.repository instanceof D1LedgerRepository
+      ? await runtime.repository.findPendingInvitation(bookId, undefined, undefined, target.id)
+      : runtime.repository.invitations.find(
+          (item) => item.bookId === bookId && item.status === "pending" && item.inviteeUserId === target.id,
+        );
+  if (duplicate) return textResult("该成员已有待处理邀请。");
   const invitation =
     runtime.repository instanceof D1LedgerRepository
       ? await runtime.repository.createInvitation({
           bookId,
           inviterUserId: runtime.user.id,
-          inviteeEmail: args.email ?? (args.target?.includes("@") ? args.target : undefined),
-          inviteePhone: args.phone,
-          inviteeUserId: args.userId,
+          inviteeUserId: target.id,
           role: args.role,
         })
-      : createMemoryInvitation(runtime.repository, bookId, runtime.user.id, args);
+      : createMemoryInvitation(runtime.repository, bookId, runtime.user.id, {
+          userId: target.id,
+          role: args.role,
+        });
   return {
     parts: [
       { type: "text", text: "邀请已创建。" },
       {
         type: "member-card",
         title: "成员邀请",
-        name: args.target ?? args.email ?? args.phone ?? args.userId,
+        name: target.name,
         role: args.role,
         status: invitation.status,
       },
@@ -1019,6 +1036,45 @@ async function memberByUser(repository: AiToolRepository, bookId: string, userId
   return repository.members.find((member) => member.bookId === bookId && member.userId === userId);
 }
 
+async function resolveInviteTarget(
+  repository: AiToolRepository,
+  args: { target?: string; email?: string; phone?: string; userId?: string },
+  actorUserId: string,
+) {
+  const query = (args.userId ?? args.email ?? args.phone ?? args.target ?? "").trim();
+  if (!query) return undefined;
+  if (repository instanceof D1LedgerRepository) {
+    if (args.userId) return repository.getUserSummary(args.userId);
+    const users = await repository.searchUsersForInvitation(query, actorUserId);
+    const exact = users.find(
+      (user) =>
+        user.name === query ||
+        user.email?.toLowerCase() === query.toLowerCase() ||
+        user.id === query,
+    );
+    return exact ?? (users.length === 1 ? users[0] : undefined);
+  }
+  const normalized = query.toLowerCase();
+  const users = repository.users.filter((user) => {
+    if (memoryInviteBlocked(repository, user.id, actorUserId)) return false;
+    return (
+      user.id === query ||
+      user.name === query ||
+      user.name.toLowerCase().includes(normalized) ||
+      user.email?.toLowerCase() === normalized ||
+      user.email?.toLowerCase().includes(normalized) ||
+      user.phone === query
+    );
+  });
+  return users.find((user) => user.id === query || user.name === query || user.email?.toLowerCase() === normalized) ?? users[0];
+}
+
+function memoryInviteBlocked(store: MemoryLedgerStore, blockerUserId: string, blockedUserId: string) {
+  return store.inviteBlocks.some(
+    (item) => item.blockerUserId === blockerUserId && item.blockedUserId === blockedUserId && !item.deletedAt,
+  );
+}
+
 async function resolveMember(
   repository: AiToolRepository,
   bookId: string,
@@ -1052,18 +1108,19 @@ function createMemoryInvitation(
   store: MemoryLedgerStore,
   bookId: string,
   inviterUserId: string,
-  args: { target?: string; email?: string; phone?: string; userId?: string; role: "admin" | "member" },
+  args: { userId: string; role: "admin" | "member" },
 ) {
+  const timestamp = now();
   const invitation = {
     id: id("invitation"),
     bookId,
     inviterUserId,
-    inviteeEmail: args.email ?? (args.target?.includes("@") ? args.target : undefined),
-    inviteePhone: args.phone,
     inviteeUserId: args.userId,
     role: args.role,
     status: "pending" as const,
     expiresAt: new Date(Date.now() + 7 * 86400000).toISOString(),
+    createdAt: timestamp,
+    updatedAt: timestamp,
   };
   store.invitations.push(invitation);
   return invitation;

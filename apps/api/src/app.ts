@@ -9,6 +9,7 @@ import { registerMeRoutes } from "./routes/me";
 import { registerMemberRoutes } from "./routes/members";
 import { registerResourceRoutes } from "./routes/resources";
 import { registerTransactionRoutes } from "./routes/transactions";
+import { registerUserRoutes } from "./routes/users";
 import type { MemoryLedgerStore } from "./store";
 import type { Env } from "./types";
 
@@ -19,6 +20,7 @@ export function createApp(store?: MemoryLedgerStore) {
     "/*",
     cors({
       origin: (origin, context) => origin || context.env?.WEB_ORIGIN || "*",
+      credentials: true,
       exposeHeaders: ["Content-Disposition"],
       allowHeaders: ["Content-Type", "X-User-Id", "X-Plan"],
       allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
@@ -31,6 +33,7 @@ export function createApp(store?: MemoryLedgerStore) {
   registerMemberRoutes(app, store);
   registerInvitationRoutes(app, store);
   registerMeRoutes(app, store);
+  registerUserRoutes(app, store);
   registerTransactionRoutes(app, store);
   registerResourceRoutes(app, store);
   registerImportRoutes(app, store);

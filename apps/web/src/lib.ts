@@ -21,8 +21,22 @@ export class ApiError extends Error {
 let refreshPromise: Promise<boolean> | undefined;
 
 async function parseError(response: Response): Promise<ApiErrorPayload> {
-  const payload = (await response.json().catch(() => ({ error: "请求失败" }))) as ApiErrorPayload;
-  return { ...payload, error: payload.error ?? "请求失败" };
+  const text = await response.text().catch(() => "");
+  if (!text) return { error: "请求失败" };
+  try {
+    const payload = JSON.parse(text) as ApiErrorPayload;
+    return { ...payload, error: payload.error ?? "请求失败" };
+  } catch {
+    return { error: readableErrorText(text) };
+  }
+}
+
+function readableErrorText(text: string) {
+  const trimmed = text.trim();
+  if (!trimmed) return "请求失败";
+  if (trimmed.includes("Error occurred while trying to proxy")) return "API 服务未启动或代理失败";
+  if (trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html")) return "请求失败";
+  return trimmed;
 }
 
 async function refreshSession() {

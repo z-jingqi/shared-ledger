@@ -79,7 +79,7 @@ export function registerAuthRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryL
         return context.json({ user }, 201);
       }
       if (context.env.APP_ENV !== "test" || !store) return jsonError(context, "认证需要 D1 运行时", 503);
-      return context.json({ user: store.createUser(body.name, "") }, 201);
+      return context.json({ user: store.createUser(body.name, "", "free", { createDefaultBook: true }) }, 201);
     } catch (error) {
       return jsonError(context, error instanceof Error ? error.message : "注册失败", 409);
     }

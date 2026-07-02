@@ -1,6 +1,8 @@
 import type { SubscriptionPlan } from "@shared-ledger/shared";
 import { createContext, type ReactNode, use, useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../../lib";
+import { ledgerQueryClient } from "../data/queryClient";
+import { clearLastActiveBookId } from "../../hooks/activeBookStorage";
 
 export type SessionUser = {
   id: string;
@@ -19,8 +21,15 @@ type AuthValue = {
 const AuthContext = createContext<AuthValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<SessionUser>();
+  const [user, setSessionUser] = useState<SessionUser>();
   const [loading, setLoading] = useState(true);
+  const setUser = useCallback((nextUser?: SessionUser) => {
+    setSessionUser((previousUser) => {
+      if (previousUser?.id !== nextUser?.id) ledgerQueryClient.clear();
+      if (!nextUser) clearLastActiveBookId(previousUser?.id);
+      return nextUser;
+    });
+  }, []);
   const refresh = useCallback(async () => {
     try {
       setUser((await api<{ user: SessionUser }>("/auth/me")).user);
@@ -29,7 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [setUser]);
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -41,7 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.addEventListener("ledger:unauthorized", unauthorized);
     return () => window.removeEventListener("ledger:unauthorized", unauthorized);
   }, []);
-  const value = useMemo(() => ({ user, loading, refresh, setUser }), [user, loading, refresh]);
+  const value = useMemo(() => ({ user, loading, refresh, setUser }), [user, loading, refresh, setUser]);
   return <AuthContext value={value}>{children}</AuthContext>;
 }
 export function useAuth() {

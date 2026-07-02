@@ -2,6 +2,7 @@ import { FileArrowUpIcon, PencilSimpleLineIcon, PlusIcon } from "@phosphor-icons
 import { IconTile } from "../components/ios/IosDesign";
 
 type AddActionMenuProps = {
+  directManual?: boolean;
   open: boolean;
   showUpload: boolean;
   uploading: boolean;
@@ -11,6 +12,7 @@ type AddActionMenuProps = {
 };
 
 export function AddActionMenu({
+  directManual = false,
   open,
   showUpload,
   uploading,
@@ -18,9 +20,10 @@ export function AddActionMenu({
   onOpenChange,
   onUploadFile,
 }: AddActionMenuProps) {
+  const menuOpen = !directManual && open;
   return (
     <>
-      {open ? (
+      {menuOpen ? (
         <button
           className="ios-add-menu-backdrop"
           type="button"
@@ -28,7 +31,7 @@ export function AddActionMenu({
           onClick={() => onOpenChange(false)}
         />
       ) : null}
-      {open ? (
+      {menuOpen ? (
         <div className="ios-add-menu" role="menu" aria-label="记账方式">
           <button type="button" role="menuitem" onClick={onManualAdd}>
             <IconTile tint="#fff0e8" color="#ff681c">
@@ -53,11 +56,11 @@ export function AddActionMenu({
         </div>
       ) : null}
       <button
-        className={`ios-fab${open ? " open" : ""}`}
+        className={`ios-fab${menuOpen ? " open" : ""}`}
         type="button"
-        aria-label={open ? "关闭添加菜单" : "打开添加菜单"}
-        aria-expanded={open}
-        onClick={() => onOpenChange(!open)}
+        aria-label={directManual ? "记一笔" : menuOpen ? "关闭添加菜单" : "打开添加菜单"}
+        aria-expanded={directManual ? undefined : menuOpen}
+        onClick={directManual ? onManualAdd : () => onOpenChange(!menuOpen)}
       >
         <PlusIcon size={26} weight="bold" />
       </button>

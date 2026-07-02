@@ -56,6 +56,21 @@ export const invitations = sqliteTable("invitations", {
   lastRemindedAt: text("last_reminded_at"),
   ...fullAudit,
 });
+export const userInviteBlocks = sqliteTable(
+  "user_invite_blocks",
+  {
+    id: text("id").primaryKey(),
+    blockerUserId: text("blocker_user_id").notNull(),
+    blockedUserId: text("blocked_user_id").notNull(),
+    ...fullAudit,
+  },
+  (t) => [
+    uniqueIndex("user_invite_blocks_pair_active")
+      .on(t.blockerUserId, t.blockedUserId)
+      .where(sql`${t.deletedAt} IS NULL`),
+    index("user_invite_blocks_blocked").on(t.blockedUserId),
+  ],
+);
 export const accounts = sqliteTable("accounts", {
   id: text("id").primaryKey(),
   bookId: text("book_id").notNull(),

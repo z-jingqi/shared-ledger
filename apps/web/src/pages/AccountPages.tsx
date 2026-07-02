@@ -11,7 +11,8 @@ import type { ReactNode } from "react";
 import { useReducer, useState } from "react";
 import { useForm } from "react-hook-form";
 import type { UseFormRegisterReturn } from "react-hook-form";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import {
   IconTile,
   IosButton,
@@ -21,7 +22,7 @@ import {
   IosScroll,
   IosTopBar,
 } from "../components/ios/IosDesign";
-import { useAuth } from "../features/auth/AuthProvider";
+import { useAuth, type SessionUser } from "../features/auth/AuthProvider";
 import { api } from "../lib";
 
 type LoginForm = { identifier: string; password: string };
@@ -245,21 +246,21 @@ export function SubscriptionPage() {
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const { refresh } = useAuth();
-  const [searchParams] = useSearchParams();
+  const { setUser } = useAuth();
   const form = useForm<LoginForm>({ defaultValues: { identifier: "", password: "" } });
-  const [error, setError] = useState("");
   const submit = form.handleSubmit(async (value) => {
-    setError("");
     try {
-      await api("/auth/login", {
+      const result = await api<{ user: SessionUser }>("/auth/login", {
         method: "POST",
         body: JSON.stringify({ identifier: value.identifier, password: value.password }),
       });
-      await refresh();
-      navigate(searchParams.get("redirect") || "/books");
+      setUser(result.user);
+      navigate("/", { replace: true });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "认证失败");
+      toast.error(cause instanceof Error ? cause.message : "认证失败", {
+        duration: 3000,
+        closeButton: true,
+      });
     }
   });
   return (
@@ -279,9 +280,13 @@ export function LoginPage() {
           value={form.watch("password")}
           onChange={(value) => form.setValue("password", value, { shouldDirty: true })}
         />
-        {error && <p className="field-error">{error}</p>}
-        <IosButton disabled={form.formState.isSubmitting} type="submit">
-          {form.formState.isSubmitting ? "登录中…" : "登录"}
+        <IosButton
+          className={form.formState.isSubmitting ? "ios-auth-submit loading" : "ios-auth-submit"}
+          disabled={form.formState.isSubmitting}
+          type="submit"
+          aria-busy={form.formState.isSubmitting}
+        >
+          <span>{form.formState.isSubmitting ? "登录中" : "登录"}</span>
         </IosButton>
       </form>
       <p className="ios-auth-switch">
@@ -293,25 +298,25 @@ export function LoginPage() {
 
 export function RegisterPage() {
   const navigate = useNavigate();
-  const { refresh } = useAuth();
-  const [searchParams] = useSearchParams();
+  const { setUser } = useAuth();
   const form = useForm<RegisterForm>({ defaultValues: { name: "", password: "", confirmPassword: "" } });
-  const [error, setError] = useState("");
   const submit = form.handleSubmit(async (value) => {
-    setError("");
     if (value.password !== value.confirmPassword) {
-      setError("两次输入的密码不一致");
+      toast.error("两次输入的密码不一致", { duration: 3000, closeButton: true });
       return;
     }
     try {
-      await api("/auth/register", {
+      const result = await api<{ user: SessionUser }>("/auth/register", {
         method: "POST",
         body: JSON.stringify({ name: value.name, password: value.password }),
       });
-      await refresh();
-      navigate(searchParams.get("redirect") || "/books");
+      setUser(result.user);
+      navigate("/", { replace: true });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "认证失败");
+      toast.error(cause instanceof Error ? cause.message : "认证失败", {
+        duration: 3000,
+        closeButton: true,
+      });
     }
   });
   return (
@@ -338,9 +343,13 @@ export function RegisterPage() {
           value={form.watch("confirmPassword")}
           onChange={(value) => form.setValue("confirmPassword", value, { shouldDirty: true })}
         />
-        {error && <p className="field-error">{error}</p>}
-        <IosButton disabled={form.formState.isSubmitting} type="submit">
-          {form.formState.isSubmitting ? "创建中…" : "创建账号"}
+        <IosButton
+          className={form.formState.isSubmitting ? "ios-auth-submit loading" : "ios-auth-submit"}
+          disabled={form.formState.isSubmitting}
+          type="submit"
+          aria-busy={form.formState.isSubmitting}
+        >
+          <span>{form.formState.isSubmitting ? "创建中" : "创建账号"}</span>
         </IosButton>
       </form>
       <p className="ios-auth-switch">

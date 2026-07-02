@@ -120,30 +120,35 @@ html.is-ios {
 }
 
 .ios-topbar.with-back {
-  justify-content: flex-start;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  gap: 0;
+  justify-content: stretch;
 }
 
 .ios-topbar-back {
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
   border: 0;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.94);
+  border-radius: 0;
+  background: transparent;
   color: var(--ios-text);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 16px rgba(29, 42, 71, 0.08);
+  box-shadow: none;
   cursor: pointer;
   flex-shrink: 0;
+  justify-self: start;
+  padding: 0;
 }
 
 .ios-topbar-spacer {
-  width: 34px;
-  height: 34px;
-  margin-left: auto;
+  width: 40px;
+  height: 40px;
+  margin-left: 0;
   flex-shrink: 0;
+  justify-self: end;
 }
 
 .ios-topbar h1 {
@@ -152,6 +157,23 @@ html.is-ios {
   line-height: 1.1;
   font-weight: 800;
   letter-spacing: -0.5px;
+}
+
+.ios-topbar.with-back h1 {
+  min-width: 0;
+  justify-self: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+  font-size: 18px;
+  line-height: 1.2;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.ios-topbar.with-back > :last-child {
+  justify-self: end;
 }
 
 .ios-ledger-pill,
@@ -466,6 +488,7 @@ html.is-ios {
 
 .ios-sheet {
   position: relative;
+  width: min(100%, 430px);
   max-height: 92%;
   display: flex;
   flex-direction: column;
@@ -858,10 +881,39 @@ html.is-ios {
 }
 
 [data-sonner-toast] [data-close-button] {
-  top: 8px !important;
-  right: 8px !important;
+  top: -11px !important;
+  right: -11px !important;
   left: auto !important;
   transform: none !important;
+  width: 30px !important;
+  height: 30px !important;
+  border-radius: 999px !important;
+  border: 1px solid #dde3ec !important;
+  background: #ffffff !important;
+  color: #6b7483 !important;
+  box-shadow: 0 8px 18px rgba(36, 48, 74, 0.12) !important;
+  z-index: 2 !important;
+}
+
+[data-sonner-toast][data-type="success"] [data-close-button] {
+  border-color: #bdf2cf !important;
+  background: #effff5 !important;
+  color: #13823f !important;
+  box-shadow: 0 8px 18px rgba(31, 157, 87, 0.12) !important;
+}
+
+[data-sonner-toast][data-type="error"] [data-close-button] {
+  border-color: #ffd2d2 !important;
+  background: #fff4f4 !important;
+  color: var(--ios-danger) !important;
+  box-shadow: 0 8px 18px rgba(215, 64, 53, 0.12) !important;
+}
+
+[data-sonner-toast][data-type="warning"] [data-close-button] {
+  border-color: #ffd9bc !important;
+  background: #fff7ef !important;
+  color: var(--ios-accent) !important;
+  box-shadow: 0 8px 18px rgba(255, 104, 28, 0.12) !important;
 }
 
 @keyframes iosSkeletonShimmer {

@@ -51,6 +51,26 @@ let aiSessionMessages: Record<
   string,
   Array<{ id: string; role: "user" | "assistant"; content: string; parts: MockAiPart[] }>
 > = {};
+let mockUsers: Array<{ id: string; name: string; email?: string; avatarUrl?: string; plan?: "free" | "pro" }> =
+  [];
+let mockInvitations: Array<{
+  id: string;
+  bookId: string;
+  inviterUserId: string;
+  inviteeUserId?: string;
+  role: "admin" | "member";
+  status: string;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+  direction: "sent" | "received";
+  book: { id: string; name: string; currency: string };
+  inviter: { id: string; name: string; email?: string; plan?: "free" | "pro" };
+  invitee?: { id: string; name: string; email?: string; plan?: "free" | "pro" };
+}> = [];
+let mockInviteBlocks: Array<{ id: string; createdAt: string; user: { id: string; name: string; email?: string } }> =
+  [];
+let userSearchRequests: string[] = [];
 const json = (data: unknown) =>
   new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/json" } });
 const errorJson = (status: number, error: string) =>
@@ -64,9 +84,12 @@ const queryAddOverlay = () =>
   screen.queryByRole("menu", { name: /添加|新增|记一笔|记账方式/ });
 const openManualAddForm = async (user: ReturnType<typeof userEvent.setup>) => {
   await findBookSwitcher();
-  await user.click(await screen.findByRole("button", { name: "打开添加菜单" }));
-  await waitFor(() => expect(queryAddOverlay()).toBeInTheDocument());
-  await user.click(screen.getByRole("menuitem", { name: /手动添加/ }));
+  const addButton =
+    screen.queryByRole("button", { name: "记一笔" }) ??
+    (await screen.findByRole("button", { name: "打开添加菜单" }));
+  await user.click(addButton);
+  const manualItem = screen.queryByRole("menuitem", { name: /手动添加/ });
+  if (manualItem) await user.click(manualItem);
   return screen.findByRole("heading", { name: "记一笔支出" });
 };
 const recordRow = (container: HTMLElement, id: string) =>
@@ -212,6 +235,14 @@ function mockAiParts(
   ];
 }
 
+function mockUserSummary(userId: string) {
+  return mockUsers.find((user) => user.id === userId) ?? { id: userId, name: "已注册用户", plan: "free" };
+}
+
+function mockBookSummary(bookId: string) {
+  return bookList.find((book) => book.id === bookId) ?? { id: bookId, name: "账本", currency: "CNY" };
+}
+
 describe("shared ledger mobile UI", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -251,6 +282,14 @@ describe("shared ledger mobile UI", () => {
     aiConfirmationRequests = [];
     aiSessions = [];
     aiSessionMessages = {};
+    mockUsers = [
+      { id: "user_test", name: "测试用户", email: "test@example.com", plan },
+      { id: "user_friend", name: "Friend", email: "friend@example.com", plan: "free" },
+      { id: "user_inviter", name: "邀请人", email: "inviter@example.com", plan: "pro" },
+    ];
+    mockInvitations = [];
+    mockInviteBlocks = [];
+    userSearchRequests = [];
     window.history.pushState({}, "", "/");
     window.localStorage.clear();
     Object.defineProperty(URL, "createObjectURL", {
@@ -278,7 +317,8 @@ describe("shared ledger mobile UI", () => {
       vi.fn(async (input: string | Request, init?: RequestInit) => {
         const path = typeof input === "string" ? input : input.url;
         const method = init?.method ?? (typeof input === "string" ? "GET" : input.method);
-        const pathname = new URL(path, "http://test.local").pathname.replace(/^\/api/, "");
+        const requestUrl = new URL(path, "http://test.local");
+        const pathname = requestUrl.pathname.replace(/^\/api/, "");
         const bodyText =
           typeof init?.body === "string"
             ? init.body
@@ -300,6 +340,26 @@ describe("shared ledger mobile UI", () => {
           );
         }
         if (path.includes("/auth/login") && loginError) return Promise.resolve(errorJson(401, loginError));
+        if (path.includes("/auth/login")) {
+          authMode = "signed-in";
+          return Promise.resolve(
+            json({ user: { id: "user_test", name: "测试用户", email: "test@example.com", plan } }),
+          );
+        }
+        if (path.includes("/auth/register")) {
+          const body = JSON.parse(bodyText ?? "{}") as { name?: string };
+          authMode = "signed-in";
+          bookList = [{ id: "book_registered", name: body.name ?? "新用户", currency: "CNY" }];
+          transactionsByBook = { book_registered: [] };
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                user: { id: "user_registered", name: body.name ?? "新用户", email: "", plan },
+              }),
+              { status: 201, headers: { "content-type": "application/json" } },
+            ),
+          );
+        }
         if (pathname === "/ai/sessions" && method === "GET") {
           return Promise.resolve(json({ sessions: aiSessions }));
         }
@@ -648,6 +708,116 @@ describe("shared ledger mobile UI", () => {
             return Promise.resolve(new Response(null, { status: 204 }));
           }
         }
+        if (pathname === "/users/search") {
+          const query = requestUrl.searchParams.get("query")?.toLowerCase() ?? "";
+          userSearchRequests.push(query);
+          return Promise.resolve(
+            json({
+              users: mockUsers
+                .filter((user) => user.id !== "user_test")
+                .filter(
+                  (user) =>
+                    user.name.toLowerCase() === query ||
+                    user.email?.toLowerCase() === query,
+                )
+                .slice(0, 1),
+            }),
+          );
+        }
+        if (pathname === "/users/invite-blocks" && method === "GET") {
+          return Promise.resolve(json({ blocks: mockInviteBlocks }));
+        }
+        const inviteBlockMatch = pathname.match(/^\/users\/([^/]+)\/invite-blocks$/);
+        if (inviteBlockMatch) {
+          const target = mockUserSummary(inviteBlockMatch[1]);
+          if (method === "POST") {
+            mockInviteBlocks = [
+              ...mockInviteBlocks,
+              { id: `block_${mockInviteBlocks.length + 1}`, createdAt: new Date().toISOString(), user: target },
+            ];
+            return Promise.resolve(json({ block: { user: target } }));
+          }
+          if (method === "DELETE") {
+            mockInviteBlocks = mockInviteBlocks.filter((block) => block.user.id !== target.id);
+            return Promise.resolve(new Response(null, { status: 204 }));
+          }
+        }
+        if (pathname === "/invitations" && method === "GET") {
+          return Promise.resolve(json({ invitations: mockInvitations }));
+        }
+        const invitationActionMatch = pathname.match(/^\/invitations\/([^/]+)\/(accept|decline|revoke|remind)$/);
+        if (invitationActionMatch) {
+          const [, invitationId, action] = invitationActionMatch;
+          const body = JSON.parse(bodyText ?? "{}") as { blockInviter?: boolean };
+          const invitation = mockInvitations.find((item) => item.id === invitationId);
+          if (!invitation) return Promise.resolve(errorJson(404, "邀请不存在"));
+          if (action === "accept") invitation.status = "accepted";
+          if (action === "decline") {
+            invitation.status = "declined";
+            if (body.blockInviter && invitation.inviter)
+              mockInviteBlocks = [
+                ...mockInviteBlocks,
+                {
+                  id: `block_${mockInviteBlocks.length + 1}`,
+                  createdAt: new Date().toISOString(),
+                  user: invitation.inviter,
+                },
+              ];
+          }
+          if (action === "revoke") invitation.status = "revoked";
+          invitation.updatedAt = new Date().toISOString();
+          return Promise.resolve(json({ invitation }));
+        }
+        const invitationDeleteMatch = pathname.match(/^\/invitations\/([^/]+)$/);
+        if (invitationDeleteMatch && method === "DELETE") {
+          const invitation = mockInvitations.find((item) => item.id === invitationDeleteMatch[1]);
+          if (invitation?.status === "pending") return Promise.resolve(errorJson(400, "进行中的邀请不能删除"));
+          mockInvitations = mockInvitations.filter((item) => item.id !== invitationDeleteMatch[1]);
+          return Promise.resolve(new Response(null, { status: 204 }));
+        }
+        const bookMembersMatch = pathname.match(/^\/books\/([^/]+)\/members$/);
+        if (bookMembersMatch && method === "GET") {
+          return Promise.resolve(
+            json({
+              members: [
+                { id: "member_test", userId: "user_test", name: "测试用户", role: "creator" },
+              ],
+            }),
+          );
+        }
+        const bookInvitationsMatch = pathname.match(/^\/books\/([^/]+)\/invitations$/);
+        if (bookInvitationsMatch) {
+          const bookId = bookInvitationsMatch[1];
+          if (method === "GET") {
+            return Promise.resolve(
+              json({ invitations: mockInvitations.filter((invitation) => invitation.bookId === bookId) }),
+            );
+          }
+          if (method === "POST") {
+            const body = JSON.parse(bodyText ?? "{}") as { userId?: string; role?: "member" | "admin" };
+            const target = body.userId ? mockUserSummary(body.userId) : undefined;
+            if (!target) return Promise.resolve(errorJson(404, "没有找到该用户，请先搜索并选择"));
+            const now = new Date().toISOString();
+            const book = mockBookSummary(bookId);
+            const invitation = {
+              id: `invite_${mockInvitations.length + 1}`,
+              bookId,
+              inviterUserId: "user_test",
+              inviteeUserId: target.id,
+              role: body.role ?? "member",
+              status: "pending",
+              expiresAt: "2026-07-09T00:00:00.000Z",
+              createdAt: now,
+              updatedAt: now,
+              direction: "sent" as const,
+              book,
+              inviter: mockUserSummary("user_test"),
+              invitee: target,
+            };
+            mockInvitations = [invitation, ...mockInvitations];
+            return Promise.resolve(new Response(JSON.stringify({ invitation }), { status: 201, headers: { "content-type": "application/json" } }));
+          }
+        }
         if (path.includes("/books/book_test/transactions") && method !== "GET") {
           if (transactionError) return Promise.resolve(errorJson(500, transactionError));
           transactionRequests.push({
@@ -661,6 +831,8 @@ describe("shared ledger mobile UI", () => {
           return Promise.resolve(json({ transactions: transactionsByBook.book_test ?? [] }));
         if (path.includes("/books/book_b/transactions"))
           return Promise.resolve(json({ transactions: transactionsByBook.book_b ?? [] }));
+        if (path.includes("/books/book_registered/transactions"))
+          return Promise.resolve(json({ transactions: transactionsByBook.book_registered ?? [] }));
         if (path.includes("/transactions/tx_home"))
           return Promise.resolve(
             json({
@@ -735,6 +907,10 @@ describe("shared ledger mobile UI", () => {
           return Promise.resolve(
             json({ book: bookList.find((item) => item.id === "book_b"), role: "creator" }),
           );
+        if (path.includes("/books/book_registered"))
+          return Promise.resolve(
+            json({ book: bookList.find((item) => item.id === "book_registered"), role: "creator" }),
+          );
         if (path.includes("/books")) return Promise.resolve(json({ books: bookList }));
         return Promise.resolve(json({}));
       }),
@@ -757,7 +933,7 @@ describe("shared ledger mobile UI", () => {
       "href",
       expect.stringMatching(/^\/records/),
     );
-    expect(screen.getByRole("button", { name: "打开添加菜单" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "记一笔" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "分析" })).toHaveAttribute(
       "href",
       expect.stringMatching(/^\/analysis/),
@@ -768,7 +944,7 @@ describe("shared ledger mobile UI", () => {
     );
     expect(screen.queryByRole("link", { name: "账本" })).not.toBeInTheDocument();
     expect(screen.getByRole("main")).toHaveClass("has-bottom-nav");
-    expect(screen.getByLabelText("打开 AI 助手")).toBeInTheDocument();
+    expect(screen.queryByLabelText("打开 AI 助手")).not.toBeInTheDocument();
   });
   it("hides bottom navigation on book creation flow pages", async () => {
     window.history.pushState({}, "", "/books/new");
@@ -1079,11 +1255,11 @@ describe("shared ledger mobile UI", () => {
     expect(importBatchRequests).toHaveLength(0);
   });
   it("falls back to the first book when the last active book is unavailable", async () => {
-    window.localStorage.setItem("shared-ledger:last-active-book-id", "missing_book");
+    window.localStorage.setItem("shared-ledger:last-active-book-id:user_test", "missing_book");
     render(<App />);
 
     expect(await findBookSwitcher()).toBeInTheDocument();
-    expect(window.localStorage.getItem("shared-ledger:last-active-book-id")).toBe("book_test");
+    expect(window.localStorage.getItem("shared-ledger:last-active-book-id:user_test")).toBe("book_test");
   });
   it("shows the first book by default on analysis and switches by URL query", async () => {
     const user = userEvent.setup();
@@ -1188,12 +1364,119 @@ describe("shared ledger mobile UI", () => {
     window.history.pushState({}, "", "/settings?bookId=book_test");
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "我的" })).toBeInTheDocument();
-    expect(screen.getByText("AI 识别 · 批量处理 · 高级分析")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /管理账本/ })).toHaveAttribute("href", "/books/manage");
-    expect(screen.getByRole("button", { name: /成员与邀请/ })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: /管理账本/ })).toHaveAttribute("href", "/books/manage");
+    expect(screen.queryByRole("heading", { name: "我的" })).not.toBeInTheDocument();
+    expect(screen.getByText("批量处理 · 高级分析")).toBeInTheDocument();
+    expect(screen.queryByText("AI 识别 · 批量处理 · 高级分析")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /成员与邀请/ })).toHaveAttribute(
+      "href",
+      "/members?bookId=book_test",
+    );
     expect(screen.queryByText("导入与识别")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /切换 \/ 管理账本/ })).not.toBeInTheDocument();
+  });
+  it("searches users explicitly before sending an invitation and never renders user ids", async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, "", "/members?bookId=book_test");
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "成员管理" })).toBeInTheDocument();
+    expect(await screen.findByText("家庭账本")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /邀请成员/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /屏蔽名单/ })).not.toBeInTheDocument();
+
+    await user.click(await screen.findByRole("button", { name: "邀请成员" }));
+    const sheet = await screen.findByRole("dialog", { name: "邀请成员" });
+    const searchInput = within(sheet).getByLabelText("搜索用户");
+    await user.type(searchInput, "Friend");
+
+    expect(userSearchRequests).toEqual([]);
+    await user.click(within(sheet).getByRole("button", { name: /搜索/ }));
+
+    expect(userSearchRequests).toEqual(["friend"]);
+    expect(await screen.findByText("Friend")).toBeInTheDocument();
+    expect(screen.getByText("可邀请")).toBeInTheDocument();
+    expect(screen.queryByText(/user_friend/)).not.toBeInTheDocument();
+
+    await user.click(within(sheet).getByRole("button", { name: "发送邀请" }));
+
+    await waitFor(() => expect(mockInvitations).toHaveLength(1));
+    expect(window.location.pathname).toBe("/members");
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "邀请成员" })).not.toBeInTheDocument());
+    expect(screen.queryByText(/user_/)).not.toBeInTheDocument();
+  });
+  it("shows inviter and book for received invitations and can decline with blocking", async () => {
+    const user = userEvent.setup();
+    mockInvitations = [
+      {
+        id: "invite_received",
+        bookId: "book_b",
+        inviterUserId: "user_inviter",
+        inviteeUserId: "user_test",
+        role: "member",
+        status: "pending",
+        expiresAt: "2026-07-09T00:00:00.000Z",
+        createdAt: "2026-07-02T00:00:00.000Z",
+        updatedAt: "2026-07-02T00:00:00.000Z",
+        direction: "received",
+        book: { id: "book_b", name: "旅行账本", currency: "CNY" },
+        inviter: mockUserSummary("user_inviter"),
+        invitee: mockUserSummary("user_test"),
+      },
+    ];
+    window.history.pushState({}, "", "/invitations?bookId=book_test");
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "邀请记录" })).toBeInTheDocument();
+    expect(await screen.findByText("邀请人")).toBeInTheDocument();
+    expect(screen.getByText(/旅行账本/)).toBeInTheDocument();
+    expect(screen.queryByText(/user_inviter/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "拒绝" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "拒绝邀请" });
+    await user.click(within(dialog).getByRole("button", { name: "拒绝并屏蔽" }));
+
+    await waitFor(() => expect(mockInvitations[0].status).toBe("declined"));
+    await user.click(screen.getByRole("button", { name: "屏蔽" }));
+    expect(await screen.findByText("对方无法搜索到你或邀请你")).toBeInTheDocument();
+  });
+  it("counts sent pending or declined invitations as badge items until the invitation page is viewed", async () => {
+    const user = userEvent.setup();
+    mockInvitations = [
+      {
+        id: "invite_declined",
+        bookId: "book_test",
+        inviterUserId: "user_test",
+        inviteeUserId: "user_friend",
+        role: "member",
+        status: "declined",
+        expiresAt: "2026-07-09T00:00:00.000Z",
+        createdAt: "2026-07-02T00:00:00.000Z",
+        updatedAt: "2026-07-02T00:00:00.000Z",
+        direction: "sent",
+        book: mockBookSummary("book_test"),
+        inviter: mockUserSummary("user_test"),
+        invitee: mockUserSummary("user_friend"),
+      },
+    ];
+    window.history.pushState({}, "", "/settings?bookId=book_test");
+    render(<App />);
+
+    const membersLink = await screen.findByRole("link", { name: /成员与邀请/ });
+    await waitFor(() => expect(within(membersLink).getByText("1")).toBeInTheDocument());
+
+    await user.click(membersLink);
+    expect(await screen.findByRole("heading", { name: "成员管理" })).toBeInTheDocument();
+    expect(within(await screen.findByRole("link", { name: /邀请记录/ })).getByText(/查看收到/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("link", { name: /邀请记录/ }));
+    expect(await screen.findByRole("heading", { name: "邀请记录" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "返回" }));
+    expect(await screen.findByRole("heading", { name: "成员管理" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "返回" }));
+
+    const viewedMembersLink = await screen.findByRole("link", { name: /成员与邀请/ });
+    expect(within(viewedMembersLink).queryByText("1")).not.toBeInTheDocument();
   });
   it("opens book management details from the manage list and supports rename and delete", async () => {
     const user = userEvent.setup();
@@ -1244,6 +1527,7 @@ describe("shared ledger mobile UI", () => {
   });
   it("navigates from the add menu manual action to the add record form", async () => {
     const user = userEvent.setup();
+    plan = "pro";
     render(<App />);
 
     await findBookSwitcher();
@@ -1286,8 +1570,10 @@ describe("shared ledger mobile UI", () => {
     render(<App />);
 
     await findBookSwitcher();
-    await user.click(await screen.findByRole("button", { name: "打开添加菜单" }));
+    await user.click(await screen.findByRole("button", { name: "记一笔" }));
 
+    expect(await screen.findByRole("heading", { name: "记一笔支出" })).toBeInTheDocument();
+    expect(queryAddOverlay()).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: /上传图片/ })).not.toBeInTheDocument();
     expect(document.querySelector<HTMLInputElement>('input[aria-label="上传图片"]')).not.toBeInTheDocument();
   });
@@ -1385,7 +1671,7 @@ describe("shared ledger mobile UI", () => {
     expect(window.location.search).not.toContain("q=");
     await waitFor(() => expect(recordRow(container, "tx_salary")).toBeInTheDocument());
   });
-  it("allows record AI search for free users", async () => {
+  it("uses ordinary record search for free users", async () => {
     const user = userEvent.setup();
     transactionsByBook = {
       ...transactionsByBook,
@@ -1409,22 +1695,23 @@ describe("shared ledger mobile UI", () => {
       ],
     };
     window.history.pushState({}, "", "/records?bookId=book_test");
-    render(<App />);
+    const { container } = render(<App />);
 
     const searchInput = await screen.findByLabelText("搜索流水");
     const searchForm = searchInput.closest("form");
 
     expect(searchForm?.firstElementChild).toBe(searchInput);
-    const aiSearchButton = within(searchForm as HTMLElement).getByRole("button", { name: "AI 搜索" });
-    expect(aiSearchButton).toBeDisabled();
-    expect(screen.getByLabelText("打开 AI 助手")).toBeInTheDocument();
+    expect(searchInput).toHaveAttribute("placeholder", "搜索记录");
+    expect(within(searchForm as HTMLElement).queryByRole("button", { name: "AI 搜索" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("打开 AI 助手")).not.toBeInTheDocument();
 
-    await user.type(searchInput, "工资");
-    await user.click(aiSearchButton);
+    await user.type(searchInput, "工资{Enter}");
 
-    await waitFor(() => expect(aiSearchRequests).toHaveLength(1));
-    expect(aiSearchRequests[0]).toMatchObject({ query: "工资", bookId: "book_test" });
-    expect(window.location.search).toContain("source=ai");
+    await waitFor(() => expect(window.location.search).toContain("q=%E5%B7%A5%E8%B5%84"));
+    expect(window.location.search).not.toContain("source=ai");
+    expect(aiSearchRequests).toHaveLength(0);
+    await waitFor(() => expect(recordRow(container, "tx_salary")).toBeInTheDocument());
+    expect(recordRow(container, "tx_breakfast")).not.toBeInTheDocument();
   });
   it("renders compact record rows with category names, note/type copy, and amount", async () => {
     transactionsByBook = {
@@ -1538,6 +1825,7 @@ describe("shared ledger mobile UI", () => {
   });
   it("applies AI record filters from URL parameters and renders the AI reset bar", async () => {
     const user = userEvent.setup();
+    plan = "pro";
     transactionsByBook = {
       ...transactionsByBook,
       book_test: [
@@ -1611,6 +1899,44 @@ describe("shared ledger mobile UI", () => {
     expect(recordRow(secondRender.container, "tx_salary")).toBeInTheDocument();
     expect(recordRow(secondRender.container, "tx_old")).toBeInTheDocument();
     expect(screen.queryByText("AI 筛选")).not.toBeInTheDocument();
+  });
+  it("hides AI filter labeling from free users when old AI filter URLs are opened", async () => {
+    transactionsByBook = {
+      ...transactionsByBook,
+      book_test: [
+        {
+          id: "tx_breakfast",
+          type: "expense",
+          amount: 100,
+          note: "早餐",
+          occurredAt: "2026-06-01",
+          categoryId: "cat_food",
+        },
+        {
+          id: "tx_salary",
+          type: "income",
+          amount: 8000,
+          note: "工资",
+          occurredAt: "2026-06-20",
+          categoryId: "cat_salary",
+        },
+      ],
+    };
+    const aiParams = new URLSearchParams({
+      bookId: "book_test",
+      q: "工资",
+      source: "ai",
+      chips: "AI 查询",
+    });
+    window.history.pushState({}, "", `/records?${aiParams.toString()}`);
+    const { container } = render(<App />);
+
+    expect(await findBookSwitcher()).toBeInTheDocument();
+    expect(screen.queryByText("AI 筛选")).not.toBeInTheDocument();
+    expect(screen.queryByText("AI 查询")).not.toBeInTheDocument();
+    expect(screen.getByText("已筛选")).toBeInTheDocument();
+    await waitFor(() => expect(recordRow(container, "tx_salary")).toBeInTheDocument());
+    expect(recordRow(container, "tx_breakfast")).not.toBeInTheDocument();
   });
   it("renders the redesigned record form with custom keypad, category strip, and pro image control", async () => {
     const user = userEvent.setup();
@@ -1788,6 +2114,44 @@ describe("shared ledger mobile UI", () => {
     expect(await findBookSwitcher()).toBeInTheDocument();
     expect(authMeCalls).toBe(2);
   });
+  it("enters the home page immediately after successful registration", async () => {
+    const user = userEvent.setup();
+    authMode = "signed-out";
+    window.localStorage.setItem("shared-ledger:last-active-book-id:user_registered", "book_test");
+    window.history.pushState({}, "", "/register");
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "创建账号" })).toBeInTheDocument();
+    await user.type(screen.getByLabelText("用户名"), "new-user");
+    await user.type(screen.getByLabelText("密码"), "123456");
+    await user.type(screen.getByLabelText("确认密码"), "123456");
+    await user.click(screen.getByRole("button", { name: "创建账号" }));
+
+    expect(await findBookSwitcher("new-user")).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/home");
+    expect(window.location.search).toContain("bookId=book_registered");
+    expect(screen.queryByText("你不是该账本成员")).not.toBeInTheDocument();
+    expect(window.localStorage.getItem("shared-ledger:last-active-book-id:user_registered")).toBe(
+      "book_registered",
+    );
+    expect(authMeCalls).toBe(1);
+  });
+  it("clears the active book state on logout", async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem("shared-ledger:last-active-book-id:user_test", "book_test");
+    window.history.pushState({}, "", "/settings?bookId=book_test");
+    render(<App />);
+
+    expect(await screen.findByRole("link", { name: /管理账本/ })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "退出登录" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "退出登录" });
+    await user.click(within(dialog).getByRole("button", { name: "退出登录" }));
+
+    await waitFor(() =>
+      expect(window.localStorage.getItem("shared-ledger:last-active-book-id:user_test")).toBeNull(),
+    );
+    expect(window.location.pathname).toBe("/login");
+  });
   it("keeps login and register form state separate", async () => {
     const user = userEvent.setup();
     loginError = "用户名或密码错误";
@@ -1800,7 +2164,7 @@ describe("shared ledger mobile UI", () => {
     expect(await screen.findByText("用户名或密码错误")).toBeInTheDocument();
 
     await user.click(screen.getByRole("link", { name: "立即注册" }));
-    expect(screen.queryByText("用户名或密码错误")).not.toBeInTheDocument();
+    expect(document.querySelector(".ios-auth-page .field-error")).not.toBeInTheDocument();
     expect(screen.getByLabelText("用户名")).toHaveValue("");
     expect(screen.getByLabelText("密码")).toHaveValue("");
     expect(screen.getByLabelText("确认密码")).toHaveValue("");

@@ -1,9 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { apiQueryKey } from "../features/data/queryClient";
+import { useAuth } from "../features/auth/AuthProvider";
 import { api } from "../lib";
 
 export function useApi<T>(path: string | undefined) {
+  const { user } = useAuth();
   const shouldCacheBooks = path === "/books" && import.meta.env.MODE !== "test";
   const {
     data,
@@ -12,7 +14,7 @@ export function useApi<T>(path: string | undefined) {
     isLoading,
     refetch,
   } = useQuery({
-    queryKey: apiQueryKey(path),
+    queryKey: apiQueryKey(path, user?.id),
     queryFn: () => api<T>(path ?? ""),
     enabled: Boolean(path),
     gcTime: shouldCacheBooks ? 10 * 60 * 1000 : undefined,

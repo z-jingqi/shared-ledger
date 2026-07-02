@@ -310,18 +310,23 @@ function attachmentFromJob(item: FormAttachment, job: ImportJobStatus): FormAtta
 
 function useRecordsPageController() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const filters = readRecordFilters(searchParams);
+  const rawFilters = readRecordFilters(searchParams);
   const [pageState, dispatchPage] = useReducer(recordsPageReducer, {
     aiSearching: false,
     bookSwitcherOpen: false,
-    draftFilters: filters,
+    draftFilters: rawFilters,
     filterOpen: false,
-    searchText: filters.q,
+    searchText: rawFilters.q,
   });
   const { aiSearching, bookSwitcherOpen, draftFilters, filterOpen, searchText } = pageState;
   const { user } = useAuth();
   const { book, books, setActiveBook } = useActiveBook();
   const { openSheet } = useAppSheetActions();
+  const canUseAiSearch = user?.plan === "pro";
+  const filters = useMemo(
+    () => normalizeRecordFiltersForPlan(rawFilters, canUseAiSearch),
+    [canUseAiSearch, rawFilters],
+  );
   const {
     data,
     error: transactionsError,
@@ -360,7 +365,6 @@ function useRecordsPageController() {
     [allTransactions, categoryNames, filters],
   );
   const groups = useMemo(() => groupTransactions(visibleTransactions), [visibleTransactions]);
-  const canUseAiSearch = Boolean(user);
   const hasAnyTransactions = allTransactions.length > 0;
   const hasActiveFilters = hasActiveRecordFilters(filters);
   const activeFilterChips = useMemo(
@@ -605,7 +609,7 @@ export function RecordsPage() {
                   <IconTile>{pendingCount}</IconTile>
                   <span>
                     <b>{pendingCount} 条待确认记录</b>
-                    <small>来自图片识别与 AI — 需你审核入账</small>
+                    <small>来自文件识别 — 需你审核入账</small>
                   </span>
                   <CaretRightIcon size={18} />
                 </button>
@@ -1357,6 +1361,11 @@ function ActiveFilterResetBar({
       </button>
     </div>
   );
+}
+
+function normalizeRecordFiltersForPlan(filters: RecordFilters, canUseAiSearch: boolean): RecordFilters {
+  if (canUseAiSearch || filters.source !== "ai") return filters;
+  return { ...filters, source: "", chips: [] };
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) {

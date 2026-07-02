@@ -13,6 +13,7 @@ import {
   IosScroll,
   IosTopBar,
 } from "../components/ios/IosDesign";
+import { useAuth } from "../features/auth/AuthProvider";
 import { yuan } from "../features/formatting/money";
 import { useAppSheetActions } from "../features/sheets/SheetContext";
 import { useActiveBook } from "../hooks/useActiveBook";
@@ -31,6 +32,7 @@ type ImportJob = {
 type ImportResponse = { imports: ImportJob[] };
 
 export function BookHomePage() {
+  const { user } = useAuth();
   const { book, books, loading, setActiveBook } = useActiveBook();
   const { openSheet } = useAppSheetActions();
   const [bookSwitcherOpen, setBookSwitcherOpen] = useState(false);
@@ -53,6 +55,7 @@ export function BookHomePage() {
   const recent = [...transactions]
     .sort((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime())
     .slice(0, 5);
+  const canUseAi = user?.plan === "pro";
 
   if (loading)
     return (
@@ -78,7 +81,7 @@ export function BookHomePage() {
         book={hasBook ? book : undefined}
         title={hasBook ? undefined : "一起记"}
         onLedgerClick={hasBook ? () => setBookSwitcherOpen(true) : undefined}
-        action={<AiSparkButton onClick={() => openSheet({ type: "ai" })} />}
+        action={canUseAi ? <AiSparkButton onClick={() => openSheet({ type: "ai" })} /> : undefined}
       />
       <IosScroll className="ios-home-scroll">
         <section className="ios-balance-hero">
@@ -140,7 +143,7 @@ export function BookHomePage() {
                   <IconTile>{pending.length}</IconTile>
                   <span>
                     <b>{pending.length} 条待确认记录</b>
-                    <small>来自图片识别与 AI — 需你审核入账</small>
+                    <small>来自文件识别 — 需你审核入账</small>
                   </span>
                   <CaretRightIcon size={18} />
                 </button>

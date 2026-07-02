@@ -1,4 +1,4 @@
-type InvitationLike = { id: string; status: string };
+export type InvitationLike = { id: string; status: string; direction?: "sent" | "received" };
 
 const eventName = "ledger:invitation-views-changed";
 
@@ -32,23 +32,40 @@ export function getViewedInvitationSnapshot(userId?: string) {
   return [...getViewedInvitationIds(userId)].sort().join("|");
 }
 
-export function countUnviewedPendingInvitations(invitations: InvitationLike[], viewedSnapshot: string) {
+function viewedToken(item: InvitationLike) {
+  return `${item.id}:${item.status}`;
+}
+
+export function isBadgeInvitation(item: InvitationLike) {
+  if (item.direction === "received") return item.status === "pending";
+  if (item.direction === "sent") return item.status === "pending" || item.status === "declined";
+  return item.status === "pending";
+}
+
+export function countUnviewedBadgeInvitations(invitations: InvitationLike[], viewedSnapshot: string) {
   const viewed = new Set(viewedSnapshot ? viewedSnapshot.split("|") : []);
   let count = 0;
   for (const item of invitations) {
-    if (item.status === "pending" && !viewed.has(item.id)) count += 1;
+    if (isBadgeInvitation(item) && !viewed.has(viewedToken(item))) count += 1;
   }
   return count;
 }
 
-export function markInvitationIdsViewed(userId: string | undefined, invitationIds: string[]) {
+export function markInvitationItemsViewed(userId: string | undefined, invitations: InvitationLike[]) {
   const key = storageKey(userId);
   const storage = safeLocalStorage();
-  if (!key || !storage || invitationIds.length === 0) return;
+  if (!key || !storage || invitations.length === 0) return;
   const viewed = getViewedInvitationIds(userId);
-  for (const id of invitationIds) viewed.add(id);
+  for (const invitation of invitations) viewed.add(viewedToken(invitation));
   storage.setItem(key, JSON.stringify([...viewed]));
   window.dispatchEvent(new Event(eventName));
+}
+
+export function markInvitationIdsViewed(userId: string | undefined, invitationIds: string[]) {
+  markInvitationItemsViewed(
+    userId,
+    invitationIds.map((id) => ({ id, status: "pending" })),
+  );
 }
 
 export function onInvitationViewsChanged(listener: () => void) {

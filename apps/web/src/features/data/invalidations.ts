@@ -49,7 +49,7 @@ function shouldReloadApiPath(path: string | undefined, detail: LedgerDataInvalid
   if (scopes.has("members") && /^\/books\/[^/]+\/members/.test(path)) return true;
   if (
     scopes.has("invitations") &&
-    (path === "/invitations/received" || /^\/books\/[^/]+\/invitations/.test(path))
+    (path === "/invitations" || path === "/invitations/received" || /^\/books\/[^/]+\/invitations/.test(path))
   )
     return true;
   if (scopes.has("categories") && path === "/me/categories") return true;

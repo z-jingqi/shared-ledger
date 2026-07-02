@@ -18,10 +18,41 @@ const seed = {
   subscriptionId: "subscription_soundonly_free",
   bookId: "book_b9b09bba-5d9c-4947-ba1a-2db10c9b97c1",
   memberId: "member_soundonly_creator",
-  bookName: "SoundOnly",
+  bookName: "SoundOnly的账本",
 };
+const defaultCategories = [
+  { name: "餐饮", type: "expense", icon: "fork-knife" },
+  { name: "交通", type: "expense", icon: "car" },
+  { name: "购物", type: "expense", icon: "shopping-bag" },
+  { name: "水电燃气", type: "expense", icon: "lightning" },
+  { name: "医疗健康", type: "expense", icon: "first-aid" },
+  { name: "娱乐休闲", type: "expense", icon: "game-controller" },
+  { name: "教育学习", type: "expense", icon: "book-open" },
+  { name: "旅行出差", type: "expense", icon: "airplane" },
+  { name: "宠物", type: "expense", icon: "paw-print" },
+  { name: "其他支出", type: "expense", icon: "dots-three" },
+  { name: "工资", type: "income", icon: "wallet" },
+  { name: "奖金", type: "income", icon: "trophy" },
+  { name: "兼职副业", type: "income", icon: "briefcase" },
+  { name: "投资理财", type: "income", icon: "trend-up" },
+  { name: "报销", type: "income", icon: "receipt" },
+  { name: "红包转账", type: "income", icon: "gift" },
+  { name: "其他收入", type: "income", icon: "plus-circle" },
+];
 
 const passwordHash = await hashPassword(seed.password);
+const categoriesSql = defaultCategories
+  .map((category, index) => {
+    const categoryId = `category_soundonly_${category.type}_${slug(category.name)}`;
+    return `
+INSERT INTO categories (id,user_id,name,type,icon,sort_order,created_by_user_id,updated_by_user_id,created_at,updated_at)
+SELECT ${q(categoryId)},${q(seed.userId)},${q(category.name)},${q(category.type)},${q(category.icon)},${index + 1},${q(seed.userId)},${q(seed.userId)},${q(timestamp)},${q(timestamp)}
+WHERE NOT EXISTS (
+  SELECT 1 FROM categories
+  WHERE user_id=${q(seed.userId)} AND type=${q(category.type)} AND name=${q(category.name)} AND deleted_at IS NULL
+);`;
+  })
+  .join("\n");
 const sql = `
 BEGIN TRANSACTION;
 
@@ -69,6 +100,8 @@ ON CONFLICT(id) DO UPDATE SET
 DELETE FROM book_members WHERE book_id=${q(seed.bookId)} AND user_id=${q(seed.userId)};
 INSERT INTO book_members (id,book_id,user_id,role,joined_at,created_by_user_id,updated_by_user_id,created_at,updated_at,deleted_at,deleted_by_user_id)
 VALUES (${q(seed.memberId)},${q(seed.bookId)},${q(seed.userId)},'creator',${q(timestamp)},${q(seed.userId)},${q(seed.userId)},${q(timestamp)},${q(timestamp)},NULL,NULL);
+
+${categoriesSql}
 
 COMMIT;
 `;
@@ -129,4 +162,8 @@ function base64(bytes) {
 
 function q(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
+}
+
+function slug(value) {
+  return [...value].map((character) => character.codePointAt(0)?.toString(16) ?? "").join("_");
 }

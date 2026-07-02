@@ -297,9 +297,10 @@ describe("Hono REST API", () => {
   it("prevents duplicate pending invitations and rejects anonymous import status streams", async () => {
     const store = new MemoryLedgerStore();
     const app = createApp(store);
+    const invitee = store.createUser("Invitee", "invitee@example.com");
     const init = {
       method: "POST",
-      body: JSON.stringify({ email: "new@example.com", role: "member" }),
+      body: JSON.stringify({ userId: invitee.id, role: "member" }),
       headers: jsonHeaders,
     };
 
@@ -307,8 +308,73 @@ describe("Hono REST API", () => {
     expect((await app.request("/books/book_home/invitations", init, { APP_ENV: "test" })).status).toBe(409);
     expect(
       (await createApp().request("/imports/status-stream?ids=import_test", undefined, { APP_ENV: "test" }))
-        .status,
+      .status,
     ).toBe(401);
+  });
+
+  it("searches registered users, blocks invite search, and deletes handled invitation history", async () => {
+    const store = new MemoryLedgerStore();
+    const app = createApp(store);
+    const invitee = store.createUser("Target User", "target@example.com");
+
+    const partialSearch = await app.request("/users/search?query=Target", undefined, { APP_ENV: "test" });
+    expect((await partialSearch.json<any>()).users).toEqual([]);
+
+    const search = await app.request("/users/search?query=Target%20User", undefined, { APP_ENV: "test" });
+    expect(search.status).toBe(200);
+    expect((await search.json<any>()).users).toEqual([
+      expect.objectContaining({ id: invitee.id, name: "Target User" }),
+    ]);
+
+    const invited = await app.request(
+      "/books/book_home/invitations",
+      { method: "POST", body: JSON.stringify({ userId: invitee.id, role: "member" }), headers: jsonHeaders },
+      { APP_ENV: "test" },
+    );
+    expect(invited.status).toBe(201);
+    const invitation = (await invited.json<any>()).invitation;
+
+    const pendingDelete = await app.request(
+      `/invitations/${invitation.id}`,
+      { method: "DELETE", headers: jsonHeaders },
+      { APP_ENV: "test" },
+    );
+    expect(pendingDelete.status).toBe(400);
+
+    const listed = await app.request("/invitations", undefined, { APP_ENV: "test" });
+    expect((await listed.json<any>()).invitations[0]).toMatchObject({
+      book: expect.objectContaining({ name: "家庭账本" }),
+      invitee: expect.objectContaining({ name: "Target User" }),
+      inviter: expect.objectContaining({ name: "张三" }),
+      direction: "sent",
+    });
+
+    const declined = await app.request(
+      `/invitations/${invitation.id}/decline`,
+      { method: "POST", body: JSON.stringify({ blockInviter: true }), headers: { ...jsonHeaders, "x-user-id": invitee.id } },
+      { APP_ENV: "test" },
+    );
+    expect(declined.status).toBe(200);
+    expect(store.inviteBlocks).toContainEqual(
+      expect.objectContaining({ blockerUserId: invitee.id, blockedUserId: "user_demo" }),
+    );
+
+    const hiddenAfterBlock = await app.request("/users/search?query=Target%20User", undefined, { APP_ENV: "test" });
+    expect((await hiddenAfterBlock.json<any>()).users).toEqual([]);
+
+    const blockedInvite = await app.request(
+      "/books/book_home/invitations",
+      { method: "POST", body: JSON.stringify({ userId: invitee.id, role: "admin" }), headers: jsonHeaders },
+      { APP_ENV: "test" },
+    );
+    expect(blockedInvite.status).toBe(403);
+
+    const deleted = await app.request(
+      `/invitations/${invitation.id}`,
+      { method: "DELETE", headers: jsonHeaders },
+      { APP_ENV: "test" },
+    );
+    expect(deleted.status).toBe(204);
   });
 
   it("creates, lists, renames, reads, and deletes AI sessions for free users", async () => {
@@ -384,6 +450,7 @@ describe("Hono REST API", () => {
 
   it("uses confirmations for destructive AI tools and invitations", async () => {
     const store = new MemoryLedgerStore();
+    store.createUser("Confirm User", "confirm@example.com");
     const app = createApp(store);
     const session = await createAiSession(app);
 

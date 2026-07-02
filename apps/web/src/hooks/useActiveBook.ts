@@ -1,32 +1,34 @@
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
+import { useAuth } from "../features/auth/AuthProvider";
+import { clearLastActiveBookId, readLastActiveBookId, writeLastActiveBookId } from "./activeBookStorage";
 import { useApi } from "./useApi";
-
-const LAST_ACTIVE_BOOK_STORAGE_KEY = "shared-ledger:last-active-book-id";
 
 type Book = { id: string; name: string; currency: string };
 const emptyBooks: Book[] = [];
 
 export function useActiveBook() {
   const [search, setSearch] = useSearchParams();
-  const { data, ...state } = useApi<{ books: Book[] }>("/books");
+  const { user } = useAuth();
+  const { data, ...state } = useApi<{ books: Book[] }>(user ? "/books" : undefined);
   const requested = search.get("bookId");
   const books = data?.books ?? emptyBooks;
-  const stored = useMemo(() => readLastActiveBookId(), []);
+  const stored = readLastActiveBookId(user?.id);
   const book =
     books.find((item) => item.id === requested) ?? books.find((item) => item.id === stored) ?? books[0];
 
   useEffect(() => {
-    if (!book) return;
-    writeLastActiveBookId(book.id);
-  }, [book]);
+    if (!book || !user) return;
+    writeLastActiveBookId(book.id, user.id);
+  }, [book, user]);
 
   useEffect(() => {
+    if (!user) return;
     if (state.loading || state.error) return;
     const requestedMissing = requested && !books.some((item) => item.id === requested);
     if (!requestedMissing && (book || !stored)) return;
     if (!book) {
-      clearLastActiveBookId();
+      clearLastActiveBookId(user.id);
       if (requested) {
         const next = new URLSearchParams(search);
         next.delete("bookId");
@@ -37,38 +39,14 @@ export function useActiveBook() {
     const next = new URLSearchParams(search);
     next.set("bookId", book.id);
     setSearch(next, { replace: true });
-  }, [book, books, requested, search, setSearch, state.error, state.loading, stored]);
+  }, [book, books, requested, search, setSearch, state.error, state.loading, stored, user]);
 
   const setActiveBook = (bookId: string) => {
-    writeLastActiveBookId(bookId);
+    writeLastActiveBookId(bookId, user?.id);
     const next = new URLSearchParams(search);
     next.set("bookId", bookId);
     setSearch(next);
   };
 
   return { ...state, book, books, setActiveBook };
-}
-
-function readLastActiveBookId() {
-  try {
-    return window.localStorage.getItem(LAST_ACTIVE_BOOK_STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function writeLastActiveBookId(bookId: string) {
-  try {
-    window.localStorage.setItem(LAST_ACTIVE_BOOK_STORAGE_KEY, bookId);
-  } catch {
-    // localStorage may be unavailable in private browsing or SSR-like tests.
-  }
-}
-
-function clearLastActiveBookId() {
-  try {
-    window.localStorage.removeItem(LAST_ACTIVE_BOOK_STORAGE_KEY);
-  } catch {
-    // localStorage may be unavailable in private browsing or SSR-like tests.
-  }
 }

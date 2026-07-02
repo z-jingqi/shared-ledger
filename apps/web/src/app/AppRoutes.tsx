@@ -7,10 +7,9 @@ import { BooksPage } from "../pages/BooksManagePage";
 import { CreateBookPage } from "../pages/CreateBookPage";
 import { AnalysisPage } from "../pages/AnalysisPage";
 import { ImportHistoryPage, PendingImportsPage } from "../pages/ImportPages";
-import { InviteMemberPage, MemberRolePage, MembersPage } from "../pages/MemberPages";
+import { InvitationRecordsPage, InviteMemberPage, MemberRolePage, MembersPage } from "../pages/MemberPages";
 import { AddLineItemsPage, RecordDetailPage, RecordsPage, TransactionFormPage } from "../pages/RecordPages";
 import { ManagementSettingsPage, SettingsPage } from "../pages/SettingsPages";
-import { ReceivedInvitationsPage, SentInvitationsPage } from "../pages/InvitationPages";
 import { useAuth } from "../features/auth/AuthProvider";
 import { useActiveBook } from "../hooks/useActiveBook";
 import { IosCard, IosListSkeleton, IosPage, IosScroll } from "../components/ios/IosDesign";
@@ -41,8 +40,9 @@ export function AppRoutes() {
       <Route path="/members" element={<Protected element={<MembersPage />} />} />
       <Route path="/members/invite" element={<Protected element={<InviteMemberPage />} />} />
       <Route path="/members/role" element={<Protected element={<MemberRolePage />} />} />
-      <Route path="/invitations/received" element={<Protected element={<ReceivedInvitationsPage />} />} />
-      <Route path="/invitations/sent" element={<Protected element={<SentInvitationsPage />} />} />
+      <Route path="/invitations" element={<Protected element={<InvitationRecordsPage />} />} />
+      <Route path="/invitations/received" element={<Navigate to="/invitations?tab=received" replace />} />
+      <Route path="/invitations/sent" element={<Navigate to="/invitations?tab=sent" replace />} />
       <Route path="/settings" element={<Protected element={<SettingsPage />} />} />
       <Route path="/settings/privacy" element={<Navigate to="/settings" replace />} />
       <Route path="/settings/notifications" element={<Navigate to="/settings" replace />} />

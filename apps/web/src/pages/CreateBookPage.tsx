@@ -15,7 +15,8 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { useLocation, useNavigate } from "react-router-dom";
 import { IconTile, IosButton, IosCard, IosField, IosScroll, IosTopBar } from "../components/ios/IosDesign";
-import { writeLastActiveBookId } from "../hooks/useActiveBook";
+import { useAuth } from "../features/auth/AuthProvider";
+import { writeLastActiveBookId } from "../hooks/activeBookStorage";
 import { api } from "../lib";
 
 type Book = { id: string; name: string; currency: string };
@@ -23,6 +24,7 @@ type Book = { id: string; name: string; currency: string };
 export function CreateBookPage() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuth();
   const source = new URLSearchParams(location.search).get("source");
   const fromManage = source === "manage";
   const form = useForm({
@@ -37,7 +39,7 @@ export function CreateBookPage() {
       if (fromManage) {
         navigate("/books/manage");
       } else {
-        writeLastActiveBookId(result.book.id);
+        writeLastActiveBookId(result.book.id, user?.id);
         navigate(`/home?bookId=${result.book.id}`);
       }
     } catch (cause) {

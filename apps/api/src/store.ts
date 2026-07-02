@@ -13,6 +13,16 @@ export type Invitation = {
   status: "pending" | "accepted" | "declined" | "expired" | "revoked";
   expiresAt: string;
   lastRemindedAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+export type UserInviteBlock = {
+  id: string;
+  blockerUserId: string;
+  blockedUserId: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
 };
 export type ImportJob = {
   id: string;
@@ -133,6 +143,7 @@ export class MemoryLedgerStore {
     },
   ];
   invitations: Invitation[] = [];
+  inviteBlocks: UserInviteBlock[] = [];
   imports: ImportJob[] = [];
   records: ImportedRecord[] = [];
   aiConfirmations: AiConfirmation[] = [];
@@ -140,9 +151,15 @@ export class MemoryLedgerStore {
     { id: "cat_food", userId: "user_demo", name: "餐饮", type: "expense", icon: "fork-knife", sortOrder: 1 },
     { id: "cat_salary", userId: "user_demo", name: "工资", type: "income", icon: "wallet", sortOrder: 1 },
   ];
-  createUser(name: string, email: string, plan: LedgerUser["plan"] = "free") {
+  createUser(
+    name: string,
+    email: string,
+    plan: LedgerUser["plan"] = "free",
+    options: { createDefaultBook?: boolean } = {},
+  ) {
     const user = { id: id("user"), name, email, plan };
     this.users.push(user);
+    if (options.createDefaultBook) this.createBook(user, `${name}的账本`, "CNY");
     return user;
   }
   createBook(user: LedgerUser, name: string, currency: string) {

@@ -70,6 +70,7 @@ function profileEditReducer(state: ProfileEditState, action: ProfileEditAction):
 export function SettingsPage() {
   const { user, setUser } = useAuth();
   const { book } = useActiveBook();
+  const location = useLocation();
   const { openSheet } = useAppSheetActions();
   const { unreadCount: invitationBadge } = useInvitationBadge(user?.id);
   const { data: importsData } = useApi<{ imports: ImportJobSummary[] }>(
@@ -79,6 +80,9 @@ export function SettingsPage() {
   const [profileOpen, setProfileOpen] = useState(false);
   const imports = importsData?.imports ?? [];
   const pendingCount = imports.filter((job) => job.status === "pending_confirmation").length;
+  const queryBookId = new URLSearchParams(location.search).get("bookId");
+  const membersBookId = book?.id ?? queryBookId;
+  const membersPath = membersBookId ? `/members?bookId=${encodeURIComponent(membersBookId)}` : "/members";
   const imageTasks = imports.filter(
     (job) =>
       job.status !== "pending_confirmation" &&
@@ -120,7 +124,6 @@ export function SettingsPage() {
 
   return (
     <IosPage className="ios-me">
-      <IosTopBar title="我的" />
       <IosScroll className="ios-me-scroll ios-main-tab-scroll">
         <IosCard className="ios-profile-card ios-me-hero" onClick={() => setProfileOpen(true)}>
           <span className="ios-profile-avatar-button" aria-hidden="true">
@@ -166,11 +169,15 @@ export function SettingsPage() {
         <Link className="ios-subscription-card" to="/subscription">
           <i />
           <IconTile tint="rgba(255,255,255,.12)" color="#fff">
-            <SparkleIcon size={22} weight="fill" />
+            {user?.plan === "pro" ? (
+              <SparkleIcon size={22} weight="fill" />
+            ) : (
+              <CheckSquareOffsetIcon size={22} weight="fill" />
+            )}
           </IconTile>
           <span>
             <b>{user?.plan === "pro" ? "Pro" : "升级 Pro"}</b>
-            <small>AI 识别 · 批量处理 · 高级分析</small>
+            <small>{user?.plan === "pro" ? "AI 识别 · 批量处理 · 高级分析" : "批量处理 · 高级分析"}</small>
           </span>
           <em>
             查看权益 <CaretRightIcon size={16} weight="bold" />
@@ -185,7 +192,7 @@ export function SettingsPage() {
             detail={book?.name}
           />
           <SettingsRow
-            sheet={{ type: "members" }}
+            to={membersPath}
             icon={<UsersThreeIcon size={18} />}
             label="成员与邀请"
             badge={invitationBadge}
@@ -418,7 +425,11 @@ function BookSettingsPage({ bookId }: { bookId: string }) {
             <span>默认货币</span>
             <small>{data?.book.currency ?? "CNY"}</small>
           </div>
-          <SettingsRow sheet={{ type: "members" }} icon={<UsersThreeIcon size={18} />} label="成员与权限" />
+          <SettingsRow
+            to={bookId ? `/members?bookId=${encodeURIComponent(bookId)}` : "/members"}
+            icon={<UsersThreeIcon size={18} />}
+            label="成员与权限"
+          />
         </SettingsSection>
         {canManageBook && (
           <IosCard className="ios-form-card ios-book-rename-card">
@@ -614,7 +625,7 @@ export function HelpSheet({ onClose }: { onClose: () => void }) {
           <h2>常见问题</h2>
           <article>
             <b>图片识别后为什么要确认？</b>
-            <p>OCR 与 AI 会先生成候选记录，确认后才会正式写入账本，避免误入账。</p>
+            <p>文件识别会先生成候选记录，确认后才会正式写入账本，避免误入账。</p>
           </article>
           <article>
             <b>成员可以看到哪些数据？</b>

@@ -1052,7 +1052,7 @@
   border-bottom: 0;
 }
 
-.ios-me .ios-topbar {
+.ios-me .ios-topbar:not(.with-back) {
   padding-bottom: 4px;
 }
 
@@ -1457,11 +1457,11 @@
   font-size: 12px;
 }
 
-.ios-me .ios-topbar {
+.ios-me .ios-topbar:not(.with-back) {
   padding-bottom: 4px;
 }
 
-.ios-me .ios-topbar h1 {
+.ios-me .ios-topbar:not(.with-back) h1 {
   font-size: 34px;
   letter-spacing: -1px;
 }

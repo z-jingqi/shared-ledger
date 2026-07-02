@@ -163,7 +163,7 @@ export async function createPasswordAccount(db: D1Database, input: { name: strin
       .prepare(
         "INSERT INTO books (id,name,currency,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
       )
-      .bind(bookId, username, "CNY", userId, userId, now, now),
+      .bind(bookId, `${username}的账本`, "CNY", userId, userId, now, now),
     db
       .prepare(
         "INSERT INTO book_members (id,book_id,user_id,role,joined_at,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
@@ -384,24 +384,6 @@ export async function changeUserPassword(
       .prepare("UPDATE users SET password_hash = ?, updated_at = ?, updated_by_user_id = ? WHERE id = ?")
       .bind(passwordHash, now, userId, userId),
   ]);
-}
-
-export async function findUserForInvitation(db: D1Database, target: string) {
-  const value = target.trim();
-  if (!value) return null;
-  const row = await db
-    .prepare(
-      `SELECT u.id, u.name, u.email, u.avatar_url AS avatarUrl, u.phone, s.plan
-       FROM users u
-       LEFT JOIN subscriptions s ON s.user_id = u.id AND s.status = 'active'
-       WHERE u.deleted_at IS NULL AND (u.id = ? OR u.name = ? OR u.email = ? OR u.phone = ?)
-       ORDER BY s.created_at DESC
-       LIMIT 1`,
-    )
-    .bind(value, value, value, value)
-    .first<UserRow>();
-  if (!row) return null;
-  return { ...toLedgerUser(row), phone: row.phone ?? undefined };
 }
 
 export async function updateUserAvatar(db: D1Database, userId: string, avatarUrl: string) {

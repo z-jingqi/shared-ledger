@@ -11,6 +11,6 @@ export const ledgerQueryClient = new QueryClient({
   },
 });
 
-export function apiQueryKey(path: string | undefined) {
-  return ["api", path ?? "disabled"] as const;
+export function apiQueryKey(path: string | undefined, userId?: string) {
+  return ["api", path ?? "disabled", userId ?? "anonymous"] as const;
 }
