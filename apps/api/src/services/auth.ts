@@ -4,6 +4,7 @@ const encoder = new TextEncoder();
 const sessionTtlMs = 15 * 60 * 1000;
 const refreshTtlMs = 30 * 24 * 60 * 60 * 1000;
 const passwordHashIterations = 100_000;
+const maxWorkerPbkdf2Iterations = 100_000;
 const id = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 const defaultCategories = [
   { name: "餐饮", type: "expense", icon: "fork-knife" },
@@ -62,9 +63,17 @@ export async function hashPassword(password: string) {
 export async function verifyPassword(password: string, encoded: string) {
   const [algorithm, iterations, salt, expected] = encoded.split("$");
   if (algorithm !== "pbkdf2" || !iterations || !salt || !expected) return false;
+  const iterationCount = Number(iterations);
+  if (
+    !Number.isInteger(iterationCount) ||
+    iterationCount <= 0 ||
+    iterationCount > maxWorkerPbkdf2Iterations
+  ) {
+    return false;
+  }
   const key = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
   const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", hash: "SHA-256", salt: encoder.encode(salt), iterations: Number(iterations) },
+    { name: "PBKDF2", hash: "SHA-256", salt: encoder.encode(salt), iterations: iterationCount },
     key,
     256,
   );

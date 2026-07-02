@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { verifyPassword } from "../../src/services/auth";
 import { createD1TestApp } from "./harness";
 
 const jsonHeaders = { "Content-Type": "application/json" };
@@ -13,6 +14,10 @@ function cookieHeader(response: Response) {
 }
 
 describe("D1 auth session lifecycle", () => {
+  it("rejects legacy PBKDF2 hashes above Workers iteration limits without throwing", async () => {
+    await expect(verifyPassword("123456", "pbkdf2$210000$legacy_salt$legacy_hash")).resolves.toBe(false);
+  });
+
   it("registers, rejects duplicate usernames, refreshes, logs out, and invalidates old passwords after change", async () => {
     const context = createD1TestApp();
 

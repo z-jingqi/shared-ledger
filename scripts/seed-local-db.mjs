@@ -9,6 +9,7 @@ import { localWranglerEnv, pnpmCommand } from "./local-wrangler-runner.mjs";
 const encoder = new TextEncoder();
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const timestamp = new Date().toISOString();
+const passwordHashIterations = 100_000;
 const seed = {
   userId: "user_c1e66e4c-20be-4f52-9e97-3dc908281db2",
   username: "SoundOnly",
@@ -109,11 +110,11 @@ async function hashPassword(password) {
     "deriveBits",
   ]);
   const bits = await webcrypto.subtle.deriveBits(
-    { name: "PBKDF2", hash: "SHA-256", salt: encoder.encode(salt), iterations: 210_000 },
+    { name: "PBKDF2", hash: "SHA-256", salt: encoder.encode(salt), iterations: passwordHashIterations },
     key,
     256,
   );
-  return `pbkdf2$210000$${salt}$${base64(new Uint8Array(bits))}`;
+  return `pbkdf2$${passwordHashIterations}$${salt}$${base64(new Uint8Array(bits))}`;
 }
 
 function randomToken(bytes = 32) {
