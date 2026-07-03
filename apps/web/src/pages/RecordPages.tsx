@@ -367,6 +367,7 @@ function useRecordsPageController() {
   const groups = useMemo(() => groupTransactions(visibleTransactions), [visibleTransactions]);
   const hasAnyTransactions = allTransactions.length > 0;
   const hasActiveFilters = hasActiveRecordFilters(filters);
+  const shouldShowResetBar = hasResettableRecordFilters(filters);
   const activeFilterChips = useMemo(
     () =>
       filters.source === "ai" && filters.chips.length
@@ -460,6 +461,7 @@ function useRecordsPageController() {
     openSheet,
     pendingCount,
     resetFilters,
+    shouldShowResetBar,
     searchParams,
     searchText,
     setDraftFilters: (update: RecordFilters | ((current: RecordFilters) => RecordFilters)) => {
@@ -507,6 +509,7 @@ export function RecordsPage() {
     setRecordTypeFilter,
     setSearchText,
     submitSearch,
+    shouldShowResetBar,
     switchBook,
     transactionsError,
     transactionsLoading,
@@ -576,7 +579,7 @@ export function RecordsPage() {
           ))}
         </div>
 
-        {hasActiveFilters && (
+        {shouldShowResetBar && (
           <ActiveFilterResetBar source={filters.source} chips={activeFilterChips} onReset={resetFilters} />
         )}
 
@@ -667,8 +670,8 @@ export function RecordsPage() {
             ))}
           {!transactionsLoading && !aiSearching && !transactionsError && !groups.length && (
             <RecordEmptyState
-              filtered={hasAnyTransactions && hasActiveFilters}
-              onReset={hasActiveFilters ? resetFilters : undefined}
+              filtered={hasAnyTransactions && shouldShowResetBar}
+              onReset={shouldShowResetBar ? resetFilters : undefined}
             />
           )}
         </section>
@@ -1404,6 +1407,21 @@ function hasActiveRecordFilters(filters: RecordFilters) {
   return Boolean(
     filters.q.trim() ||
     filters.type !== "all" ||
+    filters.sort !== "latest" ||
+    filters.start ||
+    filters.end ||
+    filters.min ||
+    filters.max ||
+    filters.category ||
+    filters.source ||
+    filters.minStrict ||
+    filters.maxStrict,
+  );
+}
+
+function hasResettableRecordFilters(filters: RecordFilters) {
+  return Boolean(
+    filters.q.trim() ||
     filters.sort !== "latest" ||
     filters.start ||
     filters.end ||

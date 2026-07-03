@@ -412,7 +412,6 @@ async function analyzeRecords(runtime: AiToolRuntime, bookId: string, rawArgs: R
     : `当前范围内支出 ¥${expense.toFixed(2)}，收入 ¥${income.toFixed(2)}。`;
   return {
     parts: [
-      { type: "text", text: summary },
       {
         type: "analysis-card",
         title: "账本分析",
@@ -420,7 +419,6 @@ async function analyzeRecords(runtime: AiToolRuntime, bookId: string, rawArgs: R
         metrics: [
           { label: "收入", value: `¥${income.toFixed(2)}` },
           { label: "支出", value: `¥${expense.toFixed(2)}` },
-          { label: "结余", value: `¥${(income - expense).toFixed(2)}` },
           { label: "记录数", value: transactions.length },
           ...(largest
             ? [{ label: "最大支出", value: `¥${largest.amount.toFixed(2)}`, hint: largest.note ?? "无备注" }]

@@ -1,5 +1,5 @@
-import { CaretRightIcon, SparkleIcon, WarningCircleIcon } from "@phosphor-icons/react";
-import { useState } from "react";
+import { CaretRightIcon, SparkleIcon } from "@phosphor-icons/react";
+import { useMemo, useState } from "react";
 import { BookSwitcherSheet } from "../components/books/BookSwitcherSheet";
 import type { LedgerTransaction } from "../components/ledger/Transactions";
 import { IosMetric, IosPage, IosScroll, IosTopBar } from "../components/ios/IosDesign";
@@ -9,21 +9,32 @@ import { useAppSheetActions } from "../features/sheets/SheetContext";
 import { useActiveBook } from "../hooks/useActiveBook";
 import { useApi } from "../hooks/useApi";
 
-type Range = "month" | "quarter" | "year";
+type Range = "week" | "month" | "year";
+type VisibleSeries = {
+  expense: boolean;
+  income: boolean;
+};
 
 export function AnalysisPage() {
   const { user } = useAuth();
   const { openSheet } = useAppSheetActions();
   const { book, books, setActiveBook } = useActiveBook();
   const [range, setRange] = useState<Range>("month");
+  const [visibleSeries, setVisibleSeries] = useState<VisibleSeries>({ expense: true, income: true });
+  const [selectedBar, setSelectedBar] = useState(0);
   const [bookSwitcherOpen, setBookSwitcherOpen] = useState(false);
   const { data } = useApi<{ transactions: LedgerTransaction[] }>(
     book ? `/books/${book.id}/transactions` : undefined,
   );
   const transactions = data?.transactions ?? [];
-  const limits = getRange(range);
-  const visible = transactions.filter(
-    (item) => item.occurredAt.slice(0, 10) >= limits.start && item.occurredAt.slice(0, 10) <= limits.end,
+  const rangeInfo = useMemo(() => getRange(range), [range]);
+  const visible = useMemo(
+    () =>
+      transactions.filter((item) => {
+        const date = item.occurredAt.slice(0, 10);
+        return date >= rangeInfo.start && date <= rangeInfo.end;
+      }),
+    [rangeInfo.end, rangeInfo.start, transactions],
   );
   const income = sum(visible, "income");
   const expense = sum(visible, "expense");
@@ -31,11 +42,17 @@ export function AnalysisPage() {
   const categories = groupBy(expenseItems, (item) => item.categoryName ?? item.categoryId ?? "未分类");
   const members = groupBy(expenseItems, (item) => item.memberId ?? "我");
   const canUseAi = user?.plan === "pro";
-  const maxMonth = Math.max(
+  const bars = useMemo(() => rangeBars(range, visible, rangeInfo), [range, rangeInfo, visible]);
+  const selected = bars[selectedBar] ?? bars[0];
+  const maxBar = Math.max(
     1,
-    ...monthlyBars(transactions).map((item) => Math.max(item.income, item.expense)),
+    ...bars.map((item) =>
+      Math.max(visibleSeries.expense ? item.expense : 0, visibleSeries.income ? item.income : 0),
+    ),
   );
-  const warnings = [...expenseItems].sort((a, b) => b.amount - a.amount).slice(0, 2);
+  const toggleSeries = (series: keyof VisibleSeries) => {
+    setVisibleSeries((current) => ({ ...current, [series]: !current[series] }));
+  };
 
   if (!book) {
     return (
@@ -54,14 +71,17 @@ export function AnalysisPage() {
       <IosTopBar book={book} onLedgerClick={() => setBookSwitcherOpen(true)} />
       <div className="ios-analysis-ranges">
         {[
+          ["week", "本周"],
           ["month", "本月"],
-          ["quarter", "3 个月"],
-          ["year", "今年"],
+          ["year", "本年"],
         ].map(([value, label]) => (
           <button
             className={range === value ? "active" : ""}
             type="button"
-            onClick={() => setRange(value as Range)}
+            onClick={() => {
+              setRange(value as Range);
+              setSelectedBar(0);
+            }}
             key={value}
           >
             {label}
@@ -74,7 +94,7 @@ export function AnalysisPage() {
             <SparkleIcon size={18} weight="fill" />
             <span>
               <b>用 AI 做更多分析</b>
-              <small>按分类、成员和异常继续拆解</small>
+              <small>按分类、成员和趋势继续拆解</small>
             </span>
             <CaretRightIcon size={17} />
           </button>
@@ -83,32 +103,62 @@ export function AnalysisPage() {
         <div className="ios-analysis-summary">
           <IosMetric label="收入" value={yuan(income, book?.currency)} tone="income" />
           <IosMetric label="支出" value={yuan(expense, book?.currency)} />
-          <IosMetric label="结余" value={yuan(income - expense, book?.currency)} tone="accent" />
         </div>
 
         <section className="ios-chart-card">
           <header>
             <h2>收支趋势</h2>
-            <p>
-              <i />
-              支出 <i className="income" />
-              收入
-            </p>
+            <div className="ios-chart-legend" aria-label="收支图例">
+              <button
+                className={visibleSeries.expense ? "" : "muted"}
+                type="button"
+                onClick={() => toggleSeries("expense")}
+              >
+                <i />
+                支出
+              </button>
+              <button
+                className={visibleSeries.income ? "" : "muted"}
+                type="button"
+                onClick={() => toggleSeries("income")}
+              >
+                <i className="income" />
+                收入
+              </button>
+            </div>
           </header>
-          <div className="ios-bar-chart">
-            {monthlyBars(transactions).map((item) => (
-              <div key={item.label}>
+          <div className={`ios-bar-chart range-${range}`}>
+            {bars.map((item, index) => (
+              <button
+                className={selectedBar === index ? "selected" : ""}
+                key={item.key}
+                type="button"
+                onClick={() => setSelectedBar(index)}
+                aria-label={`${item.label} ${yuan(item.expense, book?.currency)} ${yuan(item.income, book?.currency)}`}
+              >
                 <span>
-                  <i style={{ height: `${Math.max(4, (item.expense / maxMonth) * 100)}%` }} />
-                  <i
-                    className="income"
-                    style={{ height: `${Math.max(4, (item.income / maxMonth) * 100)}%` }}
-                  />
+                  {visibleSeries.expense && (
+                    <i style={{ height: `${Math.max(4, (item.expense / maxBar) * 100)}%` }} />
+                  )}
+                  {visibleSeries.income && (
+                    <i
+                      className="income"
+                      style={{ height: `${Math.max(4, (item.income / maxBar) * 100)}%` }}
+                    />
+                  )}
                 </span>
                 <small>{item.label}</small>
-              </div>
+              </button>
             ))}
           </div>
+          {selected && (
+            <div className="ios-chart-values" aria-live="polite">
+              {visibleSeries.expense && <span>{yuan(selected.expense, book?.currency)}</span>}
+              {visibleSeries.income && (
+                <span className="income">{yuan(selected.income, book?.currency)}</span>
+              )}
+            </div>
+          )}
         </section>
 
         <section className="ios-chart-card ios-breakdown">
@@ -162,23 +212,6 @@ export function AnalysisPage() {
             {!members.length && <p className="muted">暂无成员支出数据</p>}
           </div>
         </section>
-
-        <section className="ios-chart-card">
-          <h2>异常与大额</h2>
-          <div className="ios-unusual-list">
-            {warnings.map((item) => (
-              <article key={item.id}>
-                <WarningCircleIcon size={18} />
-                <span>
-                  <b>{item.note || "大额支出"}</b>
-                  <small>本期较高支出，请留意预算</small>
-                </span>
-                <strong>{yuan(item.amount, book?.currency)}</strong>
-              </article>
-            ))}
-            {!warnings.length && <p className="muted">暂无异常支出</p>}
-          </div>
-        </section>
       </IosScroll>
       {bookSwitcherOpen && (
         <BookSwitcherSheet
@@ -207,12 +240,12 @@ function getRange(range: Range) {
   const month = now.getMonth();
   if (range === "year")
     return { start: ymd(new Date(year, 0, 1)), end: ymd(new Date(year, 11, 31)), label: `${year}年` };
-  if (range === "quarter")
-    return {
-      start: ymd(new Date(year, month - 2, 1)),
-      end: ymd(new Date(year, month + 1, 0)),
-      label: "近3个月",
-    };
+  if (range === "week") {
+    const day = now.getDay() || 7;
+    const monday = new Date(year, month, now.getDate() - day + 1);
+    const sunday = new Date(year, month, now.getDate() + (7 - day));
+    return { start: ymd(monday), end: ymd(sunday), label: "本周" };
+  }
   return {
     start: ymd(new Date(year, month, 1)),
     end: ymd(new Date(year, month + 1, 0)),
@@ -232,22 +265,47 @@ function groupBy(transactions: LedgerTransaction[], label: (item: LedgerTransact
     .sort((a, b) => b.amount - a.amount);
 }
 
-function monthlyBars(transactions: LedgerTransaction[]) {
+function rangeBars(range: Range, transactions: LedgerTransaction[], limits: { start: string; end: string }) {
+  if (range === "year") return yearlyBars(transactions);
+  const start = parseYmd(limits.start);
+  const end = parseYmd(limits.end);
+  const days = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1);
+  return Array.from({ length: days }, (_, offset) => {
+    const date = new Date(start.getFullYear(), start.getMonth(), start.getDate() + offset);
+    const key = ymd(date);
+    const items = transactions.filter((item) => item.occurredAt.slice(0, 10) === key);
+    return {
+      key,
+      label:
+        range === "week"
+          ? ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][offset]
+          : String(date.getDate()),
+      income: sum(items, "income"),
+      expense: sum(items, "expense"),
+    };
+  });
+}
+
+function yearlyBars(transactions: LedgerTransaction[]) {
   const now = new Date();
-  return Array.from({ length: 6 }, (_, offset) => {
-    const date = new Date(now.getFullYear(), now.getMonth() - (5 - offset), 1);
-    const month = date.getMonth();
-    const year = date.getFullYear();
+  const year = now.getFullYear();
+  return Array.from({ length: 12 }, (_, month) => {
     const monthItems = transactions.filter((item) => {
-      const d = new Date(item.occurredAt);
+      const d = parseYmd(item.occurredAt.slice(0, 10));
       return d.getFullYear() === year && d.getMonth() === month;
     });
     return {
+      key: `${year}-${String(month + 1).padStart(2, "0")}`,
       label: `${month + 1}月`,
       income: sum(monthItems, "income"),
       expense: sum(monthItems, "expense"),
     };
   });
+}
+
+function parseYmd(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, (month || 1) - 1, day || 1);
 }
 
 function donutStyle(items: Array<{ amount: number }>, total: number) {

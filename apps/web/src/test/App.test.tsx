@@ -390,6 +390,53 @@ describe("shared ledger mobile UI", () => {
             }),
           );
         }
+        if (pathname === "/ai/records/search" && method === "POST") {
+          const body = JSON.parse(bodyText ?? "{}") as {
+            query?: string;
+            bookId?: string;
+            page?: string;
+            baseFilters?: { type?: string; sort?: string };
+            timeZone?: string;
+          };
+          aiSearchRequests.push({
+            query: body.query ?? "",
+            bookId: body.bookId ?? "",
+            baseFilters: body.baseFilters ?? {},
+            timeZone: body.timeZone ?? "",
+          });
+          if ((body.query ?? "").trim().toLowerCase() === "hi") {
+            return Promise.resolve(
+              json({
+                noSearch: true,
+                parts: [{ type: "text", text: "这看起来不是流水搜索条件，我没有修改当前筛选。" }],
+              }),
+            );
+          }
+          const filters = {
+            type: "expense",
+            sort: body.baseFilters?.sort ?? "latest",
+            start: "2026-01-01",
+            end: "2026-12-31",
+            min: { value: 100, strict: true },
+            category: "cat_food",
+          };
+          const chips = [
+            { key: "date", label: "时间", value: "今年" },
+            { key: "type", label: "类型", value: "支出" },
+            { key: "category", label: "分类", value: "餐饮" },
+            { key: "amount", label: "金额", value: "金额 > 100" },
+          ];
+          const parts = [
+            { type: "filter-result", filters, chips, href: "/records?bookId=book_test&source=ai" },
+            {
+              type: "search-result-card",
+              title: "搜索结果",
+              summary: "找到 1 条记录",
+              results: [{ id: "tx_party", title: "餐饮", description: "餐饮 · 2026-06-15", amount: -120 }],
+            },
+          ];
+          return Promise.resolve(json({ parts }));
+        }
         const aiSessionJsonMessageMatch = pathname.match(/^\/ai\/sessions\/([^/]+)\/messages$/);
         if (aiSessionJsonMessageMatch) {
           const sessionId = aiSessionJsonMessageMatch[1];
@@ -1315,8 +1362,8 @@ describe("shared ledger mobile UI", () => {
     expect(await findBookSwitcher("旅行账本")).toBeInTheDocument();
     expect((await screen.findAllByText(/300\.00/)).length).toBeGreaterThan(0);
 
-    await user.click(screen.getByRole("button", { name: "3 个月" }));
-    expect(screen.getByRole("button", { name: "3 个月" })).toHaveClass("active");
+    await user.click(screen.getByRole("button", { name: "本年" }));
+    expect(screen.getByRole("button", { name: "本年" })).toHaveClass("active");
     expect(screen.getByRole("button", { name: "本月" })).not.toHaveClass("active");
   });
   it("opens analysis directly with the requested book selected", async () => {
@@ -1687,6 +1734,42 @@ describe("shared ledger mobile UI", () => {
     expect(window.location.search).not.toContain("q=");
     await waitFor(() => expect(recordRow(container, "tx_salary")).toBeInTheDocument());
   });
+  it("does not show the reset bar when only the top type chip changes", async () => {
+    const user = userEvent.setup();
+    transactionsByBook = {
+      ...transactionsByBook,
+      book_test: [
+        {
+          id: "tx_breakfast",
+          type: "expense",
+          amount: 100,
+          note: "早餐",
+          occurredAt: "2026-06-01",
+          categoryId: "cat_food",
+        },
+        {
+          id: "tx_salary",
+          type: "income",
+          amount: 8000,
+          note: "工资",
+          occurredAt: "2026-06-20",
+          categoryId: "cat_salary",
+        },
+      ],
+    };
+    window.history.pushState({}, "", "/records?bookId=book_test");
+    const { container } = render(<App />);
+
+    expect(await findBookSwitcher()).toBeInTheDocument();
+    await waitFor(() => expect(recordRow(container, "tx_breakfast")).toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "支出" }));
+
+    expect(screen.queryByText("已筛选")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重置" })).not.toBeInTheDocument();
+    expect(recordRow(container, "tx_breakfast")).toBeInTheDocument();
+    expect(recordRow(container, "tx_salary")).not.toBeInTheDocument();
+  });
   it("uses ordinary record search for free users", async () => {
     const user = userEvent.setup();
     transactionsByBook = {
@@ -1822,6 +1905,7 @@ describe("shared ledger mobile UI", () => {
     await user.click(screen.getByRole("button", { name: "AI 搜索" }));
 
     await waitFor(() => expect(aiSearchRequests).toHaveLength(1));
+    expect(aiSessions).toHaveLength(0);
     expect(aiSearchRequests[0]).toMatchObject({
       bookId: "book_test",
       query: "今年大于100的餐饮支出",
@@ -1840,6 +1924,35 @@ describe("shared ledger mobile UI", () => {
     expect(recordRow(container, "tx_salary")).not.toBeInTheDocument();
     expect(recordRow(container, "tx_old")).not.toBeInTheDocument();
     expect(screen.getByText("今年")).toBeInTheDocument();
+  });
+  it("does not apply AI record filters when the one-shot search says the text is not a search", async () => {
+    const user = userEvent.setup();
+    plan = "pro";
+    transactionsByBook = {
+      ...transactionsByBook,
+      book_test: [
+        {
+          id: "tx_breakfast",
+          type: "expense",
+          amount: 100,
+          note: "早餐",
+          occurredAt: "2026-06-01",
+          categoryId: "cat_food",
+        },
+      ],
+    };
+    window.history.pushState({}, "", "/records?bookId=book_test");
+    render(<App />);
+
+    expect(await findBookSwitcher()).toBeInTheDocument();
+    await user.type(screen.getByLabelText("搜索流水"), "hi");
+    await user.click(screen.getByRole("button", { name: "AI 搜索" }));
+
+    await waitFor(() => expect(aiSearchRequests).toHaveLength(1));
+    expect(await screen.findByText("这看起来不是流水搜索条件，我没有修改当前筛选。")).toBeInTheDocument();
+    expect(window.location.search).not.toContain("source=ai");
+    expect(screen.queryByText("AI 筛选")).not.toBeInTheDocument();
+    expect(aiSessions).toHaveLength(0);
   });
   it("applies AI record filters from URL parameters and renders the AI reset bar", async () => {
     const user = userEvent.setup();

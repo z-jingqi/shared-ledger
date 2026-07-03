@@ -1,6 +1,6 @@
 import type { Hono } from "hono";
 import type { AiChatMessage } from "@shared-ledger/ai";
-import { getLedgerSkill, listLedgerSkills } from "@shared-ledger/ledger-skills";
+import { getLedgerSkill, listLedgerSkills, type LedgerSkillName } from "@shared-ledger/ledger-skills";
 import { z } from "zod";
 import { jsonError } from "../lib/http";
 import { D1LedgerRepository } from "../repository";
@@ -26,6 +26,19 @@ type AiRequestBody = {
 const sessionPatchSchema = z.object({
   title: z.string().trim().min(1).max(80).optional(),
   bookId: z.string().trim().min(1).nullable().optional(),
+});
+
+const recordSearchSchema = z.object({
+  bookId: z.string().trim().min(1),
+  query: z.string().trim().min(1),
+  page: z.string().trim().optional(),
+  timeZone: z.string().trim().optional(),
+  baseFilters: z
+    .object({
+      type: z.enum(["income", "expense"]).optional(),
+      sort: z.enum(["date_desc", "amount_desc"]).optional(),
+    })
+    .optional(),
 });
 
 function testMemoryEnabled(context: any, store?: MemoryLedgerStore) {
@@ -109,6 +122,24 @@ export function registerAiRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryLed
       await repository.deleteAiSession(user.id, context.req.param("id"));
     else deleteMemorySession(repository, user.id, context.req.param("id"));
     return context.body(null, 204);
+  });
+
+  app.post("/ai/records/search", async (context) => {
+    const user = await requireUser(context, store);
+    if (user instanceof Response) return user;
+    const repository = requireAiRepository(context, store);
+    if (repository instanceof Response) return repository;
+    const parsed = recordSearchSchema.safeParse(await context.req.json().catch(() => ({})));
+    if (!parsed.success) return jsonError(context, "搜索条件不合法");
+    const denied = await requireMember(context, store, parsed.data.bookId, user);
+    if (denied) return denied;
+    try {
+      const result = await runOneShotRecordSearch(context, store, repository, user, parsed.data);
+      if (result instanceof Response) return result;
+      return context.json(result);
+    } catch (error) {
+      return context.json(aiErrorBody(error), aiErrorStatus(error));
+    }
   });
 
   app.post("/ai/sessions/:id/messages", async (context) => {
@@ -207,6 +238,126 @@ export function registerAiRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryLed
   });
 }
 
+async function runOneShotRecordSearch(
+  context: any,
+  store: MemoryLedgerStore | undefined,
+  repository: AiToolRepository,
+  user: LedgerUser,
+  body: z.infer<typeof recordSearchSchema>,
+) {
+  const prompt = body.query.trim();
+  const provider = runtimeAiProvider(context.env, user);
+  const contextSnapshot = await buildModelContext(repository, user, body.bookId);
+  const allowedSkills = listLedgerSkills().filter((skill) =>
+    ["general.chat", "ledger.search"].includes(skill.name),
+  );
+  const skillSelection = normalizeOneShotSearchSkill(
+    await provider.selectSkill({
+      text: prompt,
+      userId: user.id,
+      bookId: body.bookId,
+      page: body.page ?? "records",
+      today: today(),
+      timeZone: body.timeZone ?? "Asia/Shanghai",
+      skills: allowedSkills,
+      context: {
+        ...contextSnapshot,
+        searchContext: {
+          page: "records",
+          baseFilters: body.baseFilters ?? {},
+          note: "这是流水页搜索框的一次性判断。只有用户明确要查询、筛选或列出流水记录时才选择 ledger.search；普通问候、闲聊和非搜索内容选择 general.chat。",
+        },
+      },
+      attachments: [],
+    }),
+    prompt,
+  );
+  if (skillSelection.skillName !== "ledger.search") {
+    return {
+      noSearch: true,
+      parts: [
+        {
+          type: "text",
+          text: "这看起来不是流水搜索条件，我没有修改当前筛选。",
+        },
+      ],
+      skill: skillSelection,
+    };
+  }
+  const selectedSkill = getLedgerSkill("ledger.search");
+  if (!selectedSkill) return jsonError(context, "搜索能力不可用", 503);
+  const step = await provider.planSkillStep({
+    text: prompt,
+    userId: user.id,
+    bookId: body.bookId,
+    page: body.page ?? "records",
+    today: today(),
+    timeZone: body.timeZone ?? "Asia/Shanghai",
+    skills: listLedgerSkills(),
+    selectedSkill,
+    context: {
+      ...contextSnapshot,
+      searchContext: {
+        page: "records",
+        baseFilters: body.baseFilters ?? {},
+        note: "这是流水页的一次性 AI 搜索。只返回筛选条件和搜索结果，不创建或更新 AI 会话。",
+      },
+    },
+    attachments: [],
+    observations: [],
+    stepIndex: 1,
+    maxSteps: 1,
+  });
+  const runtime = {
+    env: context.env,
+    repository,
+    store,
+    user,
+    sessionId: `one_shot_search_${crypto.randomUUID()}`,
+    bookId: body.bookId,
+    prompt,
+    today: today(),
+    timeZone: body.timeZone ?? "Asia/Shanghai",
+    origin: new URL(context.req.url).origin,
+    attachments: [],
+  };
+  const result = await executeAiTool(runtime, {
+    ...step,
+    skillName: "ledger.search",
+    toolName: "search-records",
+    requiresConfirmation: false,
+  });
+  return {
+    parts: result.parts,
+    result: result.result,
+    tool: {
+      skillName: "ledger.search",
+      toolName: "search-records",
+      args: step.args,
+    },
+  };
+}
+
+function normalizeOneShotSearchSkill(
+  selection: { skillName: LedgerSkillName; reason?: string; confidence?: number },
+  prompt: string,
+): { skillName: LedgerSkillName; reason?: string; confidence?: number } {
+  if (isClearlyCasualChat(prompt)) {
+    return {
+      ...selection,
+      skillName: "general.chat",
+      reason: "用户输入是普通聊天，不是流水搜索条件。",
+    };
+  }
+  return selection.skillName === "ledger.search" || selection.skillName === "general.chat"
+    ? selection
+    : {
+        ...selection,
+        skillName: "general.chat",
+        reason: "流水页搜索框只允许普通提示或流水搜索，其他能力不在这里执行。",
+      };
+}
+
 async function runAiMessage(
   context: any,
   store: MemoryLedgerStore | undefined,
@@ -248,7 +399,7 @@ async function runAiMessage(
           input: { message: prompt, page: body.page, attachments: attachmentMetadata(body.attachments) },
         })
       : undefined;
-  const skillSelection = await provider.selectSkill({
+  const rawSkillSelection = await provider.selectSkill({
     text: prompt || "用户上传了附件",
     userId: user.id,
     bookId,
@@ -259,6 +410,7 @@ async function runAiMessage(
     context: contextSnapshot,
     attachments: attachmentMetadata(body.attachments),
   });
+  const skillSelection = normalizeSelectedSkill(rawSkillSelection, prompt, body.attachments);
   stream?.onEvent("skill_selected", skillSelection);
   if (run && repository instanceof D1LedgerRepository) {
     await repository.updateAiRun(
@@ -395,13 +547,7 @@ async function runAiMessage(
       }
       const confirmation = result.parts.find((part) => part.type === "confirmation-card");
       if (confirmation) stream?.onEvent("confirmation", confirmation);
-      const text = result.parts
-        .filter((part) => part.type === "text" || part.type === "tool-status")
-        .map((part) => ("text" in part ? part.text : part.message))
-        .filter(Boolean)
-        .join("\n");
-      if (text) await streamText(text, stream);
-      if (confirmation || step.isFinal) break;
+      if (confirmation || step.isFinal || isFinalToolResult(result.parts)) break;
     }
   }
   const message = { id: `ai_assistant_${crypto.randomUUID()}`, role: "assistant" as const, parts };
@@ -414,6 +560,45 @@ async function runAiMessage(
     updateMemorySession(repository, user.id, sessionId, { title: prompt.slice(0, 40), bookId });
   }
   return { sessionId, message, parts };
+}
+
+function normalizeSelectedSkill(
+  selection: { skillName: LedgerSkillName; reason?: string; confidence?: number },
+  prompt: string,
+  attachments: File[],
+): { skillName: LedgerSkillName; reason?: string; confidence?: number } {
+  if (attachments.length || selection.skillName === "general.chat") return selection;
+  if (!isClearlyCasualChat(prompt)) return selection;
+  return {
+    ...selection,
+    skillName: "general.chat",
+    reason: "用户输入是普通聊天问候，不需要读取或筛选账本数据。",
+  };
+}
+
+function isClearlyCasualChat(prompt: string) {
+  const text = prompt.trim().toLowerCase();
+  if (!text) return false;
+  if (/^(hi|hello|hey|yo|嗨|你好|您好|哈喽|在吗|早|早上好|晚上好)[!.。！？\s]*$/i.test(text)) return true;
+  if (/^(讲|说|来)(个|一个)?(笑话|故事|段子)/.test(text)) return true;
+  if (/^(你是谁|你能做什么|随便聊聊|陪我聊聊)/.test(text)) return true;
+  return false;
+}
+
+function isFinalToolResult(parts: Array<Record<string, any>>) {
+  return parts.some(
+    (part) =>
+      part.type === "record-card" ||
+      part.type === "record-list" ||
+      part.type === "search-result-card" ||
+      part.type === "filter-result" ||
+      part.type === "analysis-card" ||
+      part.type === "import-job-card" ||
+      part.type === "pending-record-card" ||
+      part.type === "profile-card" ||
+      part.type === "member-card" ||
+      part.type === "navigation-card",
+  );
 }
 
 function chatHistoryMessages(
@@ -533,30 +718,6 @@ async function appendMessage(
     createdAt: new Date().toISOString(),
   });
   session.updatedAt = new Date().toISOString();
-}
-
-async function streamText(
-  text: string,
-  stream?: { onEvent: (event: string, data: unknown) => void; signal: AbortSignal },
-) {
-  if (!stream) return;
-  for (const chunk of splitGraphemes(text)) {
-    if (stream.signal.aborted) return;
-    stream.onEvent("message_delta", { text: chunk });
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
-
-function splitGraphemes(text: string) {
-  const chunks: string[] = [];
-  let cursor = 0;
-  while (cursor < text.length) {
-    const char = text.codePointAt(cursor);
-    const width = char && char > 0xffff ? 2 : 1;
-    chunks.push(text.slice(cursor, cursor + width));
-    cursor += width;
-  }
-  return chunks;
 }
 
 function partsToText(parts: Array<Record<string, any>>) {

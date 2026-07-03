@@ -24,28 +24,28 @@ export type AiTransactionSearchResponse = {
   transactions?: unknown[];
 };
 
-type AiSessionCreateResponse = { session: { id: string } };
-type AiMessageResponse = { parts?: unknown[]; message?: { parts?: unknown[] } };
+type AiSearchResponse = { parts?: unknown[]; noSearch?: boolean };
 
 export async function searchTransactionsWithAi(input: AiTransactionSearchInput) {
-  const session = await api<AiSessionCreateResponse>("/ai/sessions", {
-    method: "POST",
-    body: JSON.stringify({ bookId: input.bookId, title: input.query.slice(0, 40) || "AI 搜索" }),
-  });
-  const response = await api<AiMessageResponse>(`/ai/sessions/${session.session.id}/messages`, {
+  const response = await api<AiSearchResponse>("/ai/records/search", {
     method: "POST",
     body: JSON.stringify({
       bookId: input.bookId,
-      message: input.query,
+      query: input.query,
       page: "records",
       timeZone: input.timeZone,
       baseFilters: input.baseFilters,
     }),
   });
-  return aiSearchResponseFromParts(input.query, [
-    ...(response.parts ?? []),
-    ...(response.message?.parts ?? []),
-  ]);
+  if (response.noSearch) {
+    const message =
+      response.parts
+        ?.map(normalizeAiPart)
+        .find((part): part is AiStructuredPart & { type: "text" } => part?.type === "text")?.text ??
+      "这看起来不是流水搜索条件";
+    throw new Error(message);
+  }
+  return aiSearchResponseFromParts(input.query, response.parts ?? []);
 }
 
 function aiSearchResponseFromParts(query: string, rawParts: unknown[]): AiTransactionSearchResponse {

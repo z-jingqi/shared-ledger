@@ -135,12 +135,11 @@ async function searchWithAgent(
   query: string,
   env: Record<string, unknown> = { APP_ENV: "test" },
 ) {
-  const session = await createAiSession(app);
   return app.request(
-    `/ai/sessions/${session.id}/messages`,
+    "/ai/records/search",
     {
       method: "POST",
-      body: JSON.stringify({ bookId: "book_home", message: query, page: "records" }),
+      body: JSON.stringify({ bookId: "book_home", query, page: "records" }),
       headers: aiHeaders,
     },
     env,
@@ -570,7 +569,60 @@ describe("Hono REST API", () => {
     expect(streamRequest.input.model).toBeUndefined();
   });
 
-  it("routes record AI search through skill selection and skill step planning", async () => {
+  it("streams tool results once without replaying tool text as message deltas", async () => {
+    const store = new MemoryLedgerStore();
+    store.transactions.push({
+      id: "tx_dinner",
+      bookId: "book_home",
+      type: "expense",
+      amount: 50,
+      categoryId: "cat_food",
+      createdByUserId: "user_demo",
+      memberId: "member_demo",
+      note: "吃饭",
+      occurredAt: "2026-07-02T12:00:00.000Z",
+      items: [],
+    });
+    const app = createApp(store);
+    const { client } = recordingAlephClient({
+      invokeOutput: (request: InvokeRequest) =>
+        responseFormatName(request) === "ledger_skill_selection"
+          ? { skillName: "ledger.analysis", confidence: 1 }
+          : {
+              skillName: "ledger.analysis",
+              toolName: "analyze-records",
+              args: { type: "expense", from: "2026-07-01", to: "2026-07-31" },
+              confidence: 1,
+              requiresConfirmation: false,
+              isFinal: false,
+            },
+    });
+    const env = { APP_ENV: "test", ALEPH_AI_TEST_CLIENT: client };
+    const sessionResponse = await app.request(
+      "/ai/sessions",
+      { method: "POST", body: JSON.stringify({ bookId: "book_home", title: "新会话" }), headers: aiHeaders },
+      env,
+    );
+    const session = (await sessionResponse.json<any>()).session;
+    const response = await app.request(
+      `/ai/sessions/${session.id}/messages/stream`,
+      {
+        method: "POST",
+        body: JSON.stringify({ bookId: "book_home", message: "我这个月的支出情况" }),
+        headers: aiHeaders,
+      },
+      env,
+    );
+    const output = await readSse(response);
+
+    expect(output.match(/event: tool_result/g)).toHaveLength(1);
+    expect(output).not.toContain("event: message_delta");
+    expect(output.match(/event: step_started/g)).toHaveLength(1);
+    expect(output.match(/event: tool_call/g)).toHaveLength(1);
+    expect(output).toContain("当前范围内支出 ¥50.00");
+  });
+
+  it("routes record AI search through one-shot skill selection and step planning without creating a session", async () => {
     const store = new MemoryLedgerStore();
     store.transactions.push({
       id: "tx_small_expense",
@@ -621,6 +673,35 @@ describe("Hono REST API", () => {
     expect(responseFormatName(stepRequest)).toBe("ledger_skill_step");
     expect(stepRequest.input.model).toBeUndefined();
     expect(stepRequest.input.metadata).toBeUndefined();
+    expect((store as any).aiSessions ?? []).toHaveLength(0);
+    expect((store as any).aiMessages ?? []).toHaveLength(0);
+  });
+
+  it("does not run record search for casual one-shot AI search text even if skill selection is wrong", async () => {
+    const app = createApp(new MemoryLedgerStore());
+    const { client, requests } = recordingAlephClient({
+      invokeOutput: (request: InvokeRequest) =>
+        responseFormatName(request) === "ledger_skill_selection"
+          ? { skillName: "ledger.search", confidence: 1 }
+          : {
+              skillName: "ledger.search",
+              toolName: "search-records",
+              args: { type: "expense" },
+              confidence: 1,
+              requiresConfirmation: false,
+            },
+    });
+    const response = await searchWithAgent(app, "hi", {
+      APP_ENV: "test",
+      ALEPH_AI_TEST_CLIENT: client,
+    });
+    const body = await response.json<any>();
+
+    expect(response.status).toBe(200);
+    expect(body.noSearch).toBe(true);
+    expect(body.parts[0].text).toContain("不是流水搜索条件");
+    expect(requests.filter((item) => item.task === "ledger.skill_select")).toHaveLength(1);
+    expect(requests.some((item) => item.task === "ledger.skill_step")).toBe(false);
   });
 
   it("returns Aleph usage from the current user usage endpoint", async () => {
