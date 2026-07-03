@@ -4,6 +4,7 @@ export const terminalImportStatuses = new Set(["completed", "pending_confirmatio
 
 export type ImportJobStatus = {
   id: string;
+  bookId?: string;
   fileName: string;
   fileType?: string;
   status: string;

@@ -9,10 +9,17 @@ import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { IconTile, IosButton, IosCard, IosField, IosSegment, IosSheet } from "../components/ios/IosDesign";
+import { useAuth } from "../features/auth/AuthProvider";
 import { yuan } from "../features/formatting/money";
+import {
+  patchImportJobInCache,
+  removeImportJobFromCache,
+  replaceImportJobInCache,
+  upsertImportJobsInCache,
+} from "../features/imports/cache";
 import { createPreviewThumbnail } from "../features/imports/preview-thumbnail";
 import { terminalImportStatuses, watchImportJobs, type ImportJobStatus } from "../features/imports/status";
-import { cancelImportJob, retryImportJob } from "../features/imports/upload";
+import { cancelImportJob, deleteImportJob, retryImportJob } from "../features/imports/upload";
 import { useActiveBook } from "../hooks/useActiveBook";
 import { useApi } from "../hooks/useApi";
 import { api, apiFetchWithRefresh } from "../lib";
@@ -258,25 +265,16 @@ export function ImportHistoryPage() {
 }
 
 export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
+  const { user } = useAuth();
   const { book } = useActiveBook();
   const { data, error, reload } = useApi<{ imports: Job[]; retentionDays?: number }>(
     book ? `/books/${book.id}/imports` : undefined,
   );
   const [filter, setFilter] = useState<JobFilter>("all");
   const [busyJobId, setBusyJobId] = useState("");
-  const [jobSnapshots, setJobSnapshots] = useState<Map<string, ImportJobStatus>>(() => new Map());
   const stopWatchingRef = useRef<(() => void) | undefined>(undefined);
   const close = onClose;
-  const imports = useMemo(() => {
-    const source = data?.imports ?? emptyJobs;
-    if (!jobSnapshots.size) return source;
-    return source.map((job) => {
-      const snapshot = jobSnapshots.get(job.id);
-      return snapshot
-        ? { ...job, ...snapshot, createdAt: job.createdAt, updatedAt: snapshot.updatedAt ?? job.updatedAt }
-        : job;
-    });
-  }, [data?.imports, jobSnapshots]);
+  const imports = data?.imports ?? emptyJobs;
   const filteredImports = useMemo(
     () => imports.filter((job) => matchesJobFilter(job, filter)),
     [filter, imports],
@@ -310,27 +308,27 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
     stopWatchingRef.current = watchImportJobs(
       activeImportIds,
       (job) => {
-        setJobSnapshots((current) => {
-          const next = new Map(current);
-          next.set(job.id, job);
-          return next;
-        });
+        upsertImportJobsInCache(book?.id, user?.id, [job]);
       },
       {
         onDone: () => void reload(),
-        onError: (message) => toast.warning(message, { duration: 3000, closeButton: true }),
+        onError: (message) => {
+          toast.warning(message, { duration: 3000, closeButton: true });
+          void reload();
+        },
       },
     );
     return () => {
       stopWatchingRef.current?.();
       stopWatchingRef.current = undefined;
     };
-  }, [activeImportKey, reload]);
+  }, [activeImportKey, book?.id, reload, user?.id]);
 
   const retry = async (jobId: string) => {
     setBusyJobId(jobId);
     try {
-      await retryImportJob(jobId);
+      const { job } = await retryImportJob(jobId);
+      if (job) replaceImportJobInCache(book?.id, user?.id, job);
       toast.success("已重新开始识别", { duration: 2600, closeButton: true });
       await reload();
     } catch (cause) {
@@ -341,12 +339,35 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
   };
   const cancel = async (jobId: string) => {
     setBusyJobId(jobId);
+    const previous = patchImportJobInCache(book?.id, user?.id, jobId, {
+      status: "cancel_requested",
+      stage: "cancel_requested",
+      cancelable: false,
+      retryable: false,
+    });
     try {
-      await cancelImportJob(jobId);
-      toast.success("已取消导入", { duration: 2600, closeButton: true });
-      await reload();
+      const { job } = await cancelImportJob(jobId);
+      if (job) replaceImportJobInCache(book?.id, user?.id, job);
+      toast.success(job?.status === "cancelled" ? "已取消导入" : "正在取消导入", {
+        duration: 2600,
+        closeButton: true,
+      });
     } catch (cause) {
+      if (previous) replaceImportJobInCache(book?.id, user?.id, previous);
       toast.error(cause instanceof Error ? cause.message : "取消失败", { duration: 3000, closeButton: true });
+    } finally {
+      setBusyJobId("");
+    }
+  };
+  const remove = async (jobId: string) => {
+    setBusyJobId(jobId);
+    const previous = removeImportJobFromCache(book?.id, user?.id, jobId);
+    try {
+      await deleteImportJob(jobId);
+      toast.success("已删除导入任务", { duration: 2600, closeButton: true });
+    } catch (cause) {
+      if (previous) replaceImportJobInCache(book?.id, user?.id, previous);
+      toast.error(cause instanceof Error ? cause.message : "删除失败", { duration: 3000, closeButton: true });
     } finally {
       setBusyJobId("");
     }
@@ -401,6 +422,7 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
                   busy={busyJobId === job.id}
                   onRetry={() => void retry(job.id)}
                   onCancel={() => void cancel(job.id)}
+                  onDelete={() => void remove(job.id)}
                   key={job.id}
                 />
               ))}
@@ -562,11 +584,13 @@ function ImportJobCard({
   busy,
   onRetry,
   onCancel,
+  onDelete,
 }: {
   job: Job;
   busy: boolean;
   onRetry: () => void;
   onCancel: () => void;
+  onDelete: () => void;
 }) {
   const tone =
     job.status === "failed" ? "failed" : terminalImportStatuses.has(job.status) ? "done" : "processing";
@@ -600,6 +624,11 @@ function ImportJobCard({
         {!terminalImportStatuses.has(job.status) && job.cancelable && (
           <button type="button" disabled={busy} onClick={onCancel}>
             取消
+          </button>
+        )}
+        {canDeleteImportJob(job) && (
+          <button type="button" disabled={busy} onClick={onDelete}>
+            删除
           </button>
         )}
       </div>
@@ -731,17 +760,26 @@ function formatJobStatus(job: Job) {
   if (job.status === "pending_confirmation") return "已生成待确认记录";
   if (job.status === "completed") return "处理完成";
   if (job.status === "failed") return "处理失败";
+  if (job.status === "cancel_requested") return "取消中…";
+  if (job.status === "cancelled") return "已取消";
+  if (job.status === "uploaded") return "已上传，等待识别…";
   if (job.status === "ai_processing") return "AI 正在结构化…";
   if (job.status === "ocr_processing") return formatOcrProgress(job);
-  return job.stage || "正在排队…";
+  return job.stage || "处理中…";
 }
 
 function formatOcrProgress(job: Job) {
+  if (job.stage === "cancel_requested") return "取消中…";
+  if (job.stage === "queued") return "OCR 正在排队…";
   if (job.stage === "storing_result") return "正在保存识别结果…";
   if (typeof job.currentPage === "number" && typeof job.totalPages === "number")
     return `OCR 第 ${job.currentPage}/${job.totalPages} 页`;
   if (typeof job.progress === "number") return `OCR ${job.progress}%`;
   return "OCR 正在识别…";
+}
+
+function canDeleteImportJob(job: Job) {
+  return terminalImportStatuses.has(job.status);
 }
 
 function matchesJobFilter(job: Job, filter: JobFilter) {

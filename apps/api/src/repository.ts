@@ -1110,6 +1110,16 @@ export class D1LedgerRepository {
       .run();
     return this.getImportJob(jobId);
   }
+  async markImportJobCancelRequested(jobId: string, actorId = systemActorId) {
+    const timestamp = now();
+    await this.db
+      .prepare(
+        "UPDATE import_jobs SET status='cancel_requested',ocr_stage='cancel_requested',cancelable=0,retryable=0,updated_at=?,updated_by_user_id=? WHERE id=?",
+      )
+      .bind(timestamp, actorId, jobId)
+      .run();
+    return this.getImportJob(jobId);
+  }
   async attachOcrJob(jobId: string, ocrJobId: string, alephTool = "ocr") {
     await this.db
       .prepare(
@@ -1357,6 +1367,24 @@ export class D1LedgerRepository {
       .bind(jobId)
       .all<Row>();
     return result.results.map(mapRecord);
+  }
+  async softDeleteImportedRecordsForJob(jobId: string, actorId = systemActorId) {
+    const timestamp = now();
+    await this.db
+      .prepare(
+        "UPDATE imported_records SET deleted_at=?,deleted_by_user_id=?,updated_at=?,updated_by_user_id=? WHERE import_job_id=? AND deleted_at IS NULL",
+      )
+      .bind(timestamp, actorId, timestamp, actorId, jobId)
+      .run();
+  }
+  async softDeleteImportJob(jobId: string, actorId = systemActorId) {
+    const timestamp = now();
+    await this.db
+      .prepare(
+        "UPDATE import_jobs SET deleted_at=?,deleted_by_user_id=?,updated_at=?,updated_by_user_id=? WHERE id=? AND deleted_at IS NULL",
+      )
+      .bind(timestamp, actorId, timestamp, actorId, jobId)
+      .run();
   }
   async getImportedRecord(recordId: string) {
     const row = await this.db

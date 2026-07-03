@@ -9,6 +9,7 @@ import {
   failAlephOcrJob,
   finalizeAlephOcrJob,
   markFailed,
+  requestAlephOcrCancellation,
   retryImportJob,
   submitAlephOcrJob,
   updateAlephSnapshot,
@@ -29,6 +30,7 @@ import type { ImportJob, MemoryLedgerStore } from "../store";
 import type { Env } from "../types";
 
 const terminalImportStatuses = new Set(["completed", "pending_confirmation", "failed", "cancelled"]);
+const deletableImportStatuses = new Set(["completed", "pending_confirmation", "failed", "cancelled"]);
 type ImportRouteContext = Context<{ Bindings: Env }>;
 
 export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryLedgerStore) {
@@ -196,6 +198,10 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
 
     const sequence = sequenceFromEventId(payload.eventId);
     if (payload.job) await updateAlephSnapshot(repository, job.id, payload.job, sequence);
+    if (payload.event?.endsWith(".cancel_requested") || payload.job?.status === "cancel_requested") {
+      await requestAlephOcrCancellation(repository, job.id, sequence);
+      return context.json({ ok: true });
+    }
     if (payload.event?.endsWith(".cancelled") || payload.job?.status === "cancelled") {
       await cancelAlephOcrJob(repository, job.id, sequence);
       return context.json({ ok: true });
@@ -275,7 +281,7 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
               if (!job) return false;
               return (
                 Boolean(job.ocrJobId) &&
-                job.status === "ocr_processing" &&
+                (job.status === "ocr_processing" || job.status === "cancel_requested") &&
                 !terminalImportStatuses.has(job.status)
               );
             });
@@ -356,11 +362,29 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
       return jsonError(context, "该导入任务已经生成记录，不能取消", 409);
     }
     try {
-      await cancelImportJob(context.env, repository, job);
-      return context.json({ ok: true });
+      const nextJob = await cancelImportJob(context.env, repository, job);
+      return context.json({ job: nextJob ?? (await repository.getImportJob(job.id)) });
     } catch (error) {
       return jsonError(context, error instanceof Error ? error.message : "取消导入失败", 502);
     }
+  });
+
+  app.delete("/imports/:id", async (context) => {
+    const user = await requireUser(context, store);
+    if (user instanceof Response) return user;
+    if (!context.env.DB) return jsonError(context, "D1 运行时不可用", 503);
+    const repository = new D1LedgerRepository(context.env.DB);
+    const job = await repository.getImportJob(context.req.param("id"));
+    if (!job) return jsonError(context, "导入任务不存在", 404);
+    const denied = await requireMember(context, store, job.bookId, user);
+    if (denied) return denied;
+    if (!deletableImportStatuses.has(job.status)) {
+      return jsonError(context, "请先取消或等待任务完成后再删除", 409);
+    }
+    await repository.softDeleteImportedRecordsForJob(job.id, user.id);
+    await repository.softDeleteImportJob(job.id, user.id);
+    await context.env.FILES?.delete(job.r2Key).catch(() => undefined);
+    return new Response(null, { status: 204 });
   });
 
   app.post("/imports/:id/retry", async (context) => {
@@ -545,9 +569,10 @@ async function proxyAlephEvents(
   job: ImportJob,
   onJob: (job: ImportJob) => Promise<void> | void,
 ) {
-  const phase = "ocr" as const;
   const externalJobId = job.ocrJobId;
   if (!externalJobId) return;
+
+  if (await syncAlephJobSnapshot(env, repository, job, onJob)) return;
 
   const stream = await runtimeOcrClient(env).streamJobEvents(externalJobId, job.ocrEventSequence);
   for await (const message of parseSseStream(stream)) {
@@ -556,17 +581,20 @@ async function proxyAlephEvents(
     if (!payload) continue;
     const alephJob = payload.job ?? payload;
     const sequence = sequenceFromEventId(message.id);
-    const isCancelled =
-      message.event === "job.cancel_requested" ||
-      message.event === "job.cancelled" ||
-      alephJob.status === "cancel_requested" ||
-      alephJob.status === "cancelled";
+    const isCancelRequested =
+      message.event === "job.cancel_requested" || alephJob.status === "cancel_requested";
+    const isCancelled = message.event === "job.cancelled" || alephJob.status === "cancelled";
     const isFailed = message.event === "job.failed" || alephJob.status === "failed";
     const isReady = message.event === "job.ready" || alephJob.status === "ready";
 
     if (alephJob) {
       const updated = await updateAlephSnapshot(repository, job.id, alephJob, sequence);
       if (updated) await onJob(updated);
+    }
+    if (isCancelRequested) {
+      const requested = await requestAlephOcrCancellation(repository, job.id, sequence);
+      if (requested) await onJob(requested);
+      continue;
     }
     if (isCancelled) {
       const cancelled = await cancelAlephOcrJob(repository, job.id, sequence);
@@ -579,35 +607,76 @@ async function proxyAlephEvents(
         job.id,
         alephJob.error ?? "Aleph Tools 处理失败",
         sequence,
-        phase,
+        "ocr",
       );
       if (failed) await onJob(failed);
       return;
     }
     if (isReady) {
-      const current = await repository.getImportJob(job.id);
-      if (current && terminalImportStatuses.has(current.status)) {
-        await onJob(current);
-        return;
-      }
-      const processing = await repository.updateImportJob(job.id, "ai_processing");
-      if (processing) await onJob(processing);
-      try {
-        await finalizeAlephOcrJob(env, repository, job.id);
-      } catch (error) {
-        await repository.markImportJobFailed(job.id, {
-          message: error instanceof Error ? error.message : "导入处理失败",
-          code: "INTERNAL_ERROR",
-          stage: phase,
-          retryable: true,
-          terminal: false,
-        });
-      }
-      const finished = await repository.getImportJob(job.id);
-      if (finished) await onJob(finished);
+      await finalizeReadyAlephJob(env, repository, job, onJob);
       return;
     }
   }
+
+  if (await syncAlephJobSnapshot(env, repository, job, onJob)) return;
+  const latest = await repository.getImportJob(job.id);
+  if (!latest || terminalImportStatuses.has(latest.status)) return;
+  throw new Error("Aleph Tools 进度连接已断开，可刷新恢复");
+}
+
+async function syncAlephJobSnapshot(
+  env: Env,
+  repository: D1LedgerRepository,
+  job: ImportJob,
+  onJob: (job: ImportJob) => Promise<void> | void,
+) {
+  if (!job.ocrJobId) return false;
+  const alephJob = await runtimeOcrClient(env).getJob(job.ocrJobId);
+  const updated = await updateAlephSnapshot(repository, job.id, alephJob);
+  if (updated) await onJob(updated);
+
+  if (alephJob.status === "cancel_requested") {
+    const requested = await requestAlephOcrCancellation(repository, job.id);
+    if (requested) await onJob(requested);
+    return false;
+  }
+  if (alephJob.status === "cancelled") {
+    const cancelled = await cancelAlephOcrJob(repository, job.id);
+    if (cancelled) await onJob(cancelled);
+    return true;
+  }
+  if (alephJob.status === "failed") {
+    const failed = await failAlephOcrJob(repository, job.id, alephJob.error ?? "Aleph Tools 处理失败");
+    if (failed) await onJob(failed);
+    return true;
+  }
+  if (alephJob.status === "ready") {
+    await finalizeReadyAlephJob(env, repository, job, onJob);
+    return true;
+  }
+  return false;
+}
+
+async function finalizeReadyAlephJob(
+  env: Env,
+  repository: D1LedgerRepository,
+  job: ImportJob,
+  onJob: (job: ImportJob) => Promise<void> | void,
+) {
+  const current = await repository.getImportJob(job.id);
+  if (current && (terminalImportStatuses.has(current.status) || current.status === "cancel_requested")) {
+    await onJob(current);
+    return;
+  }
+  const processing = await repository.updateImportJob(job.id, "ai_processing");
+  if (processing) await onJob(processing);
+  try {
+    await finalizeAlephOcrJob(env, repository, job.id);
+  } catch (error) {
+    await markFailed(repository, job.id, error, "ocr");
+  }
+  const finished = await repository.getImportJob(job.id);
+  if (finished) await onJob(finished);
 }
 
 async function* parseSseStream(stream: ReadableStream<Uint8Array>): AsyncGenerator<AlephSseMessage> {
@@ -656,10 +725,12 @@ function parseSseMessage(raw: string): AlephSseMessage | null {
 function importJobStatusPayload(job: ImportJob) {
   return {
     id: job.id,
+    bookId: job.bookId,
     fileName: job.fileName,
     fileType: job.fileType,
     status: job.status,
     createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
     ...(job.errorMessage ? { errorMessage: job.errorMessage } : {}),
     ...(job.errorCode ? { errorCode: job.errorCode } : {}),
     ...(job.errorRequestId ? { errorRequestId: job.errorRequestId } : {}),

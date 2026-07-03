@@ -42,6 +42,7 @@ import {
   supportedFileAccept,
   unsupportedFileMessage,
 } from "../features/imports/files";
+import { upsertImportJobsInCache } from "../features/imports/cache";
 import { terminalImportStatuses, watchImportJobs, type ImportJobStatus } from "../features/imports/status";
 import { uploadImportFiles } from "../features/imports/upload";
 import { useAppSheetActions } from "../features/sheets/SheetContext";
@@ -383,11 +384,15 @@ function useRecordsPageController() {
     return watchImportJobs(
       ids,
       (job) => {
+        upsertImportJobsInCache(book?.id, user?.id, [job]);
         if (terminalImportStatuses.has(job.status)) void reloadImports();
       },
-      { onDone: () => void reloadImports() },
+      {
+        onDone: () => void reloadImports(),
+        onError: () => void reloadImports(),
+      },
     );
-  }, [activeImportWatchKey, activeImports, reloadImports]);
+  }, [activeImportWatchKey, activeImports, book?.id, reloadImports, user?.id]);
 
   const submitSearch = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -901,12 +906,14 @@ function TransactionFormEditor({
       book.id,
       pending.map((item) => item.file),
     );
+    upsertImportJobsInCache(book.id, user?.id, jobs);
     const jobMap = new Map(jobs.map((job, index) => [pending[index]?.id, job]));
     dispatchForm({ type: "sync-attachment-jobs", jobs: jobMap });
     stopWatchingRef.current?.();
     stopWatchingRef.current = watchImportJobs(
       jobs.map((job) => job.id),
       (job) => {
+        upsertImportJobsInCache(book.id, user?.id, [job]);
         dispatchForm({ type: "update-attachment-job", job });
       },
       { onError: (message) => toast.warning(message, { duration: 3000, closeButton: true }) },
@@ -1733,12 +1740,21 @@ function categoryColor(category: { name?: string }, type: "income" | "expense") 
 }
 
 function isActiveImport(job: ImportJobStatus) {
-  return ["uploaded", "parsing", "ocr_processing", "ai_processing", "processing"].includes(job.status);
+  return [
+    "uploaded",
+    "parsing",
+    "ocr_processing",
+    "cancel_requested",
+    "ai_processing",
+    "processing",
+  ].includes(job.status);
 }
 
 function formatActiveImportSummary(imports: ImportJobStatus[]) {
   const first = imports[0];
   if (!first) return "";
+  if (imports.every((item) => item.status === "cancel_requested"))
+    return imports.length > 1 ? `${imports.length} 个任务取消中` : "取消中";
   if (first.status === "ai_processing")
     return imports.length > 1 ? `${imports.length} 个文件，AI 分析中` : "AI 分析中";
   if (typeof first.currentPage === "number" && typeof first.totalPages === "number") {

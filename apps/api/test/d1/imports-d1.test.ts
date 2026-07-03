@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AlephAIClient, InvokeRequest } from "@shared-ledger/ai";
-import { finalizeAlephOcrJob } from "../../src/services/imports";
+import { failAlephOcrJob, finalizeAlephOcrJob } from "../../src/services/imports";
 import { authHeaders, createD1TestApp, seedBook, seedUser } from "./harness";
 
 function aiClientWithImportedRecord(): AlephAIClient {
@@ -140,4 +140,182 @@ describe("D1 image import and OCR quota integrity", () => {
     expect(context.db.rows.image_ocr_usage).toHaveLength(1);
     expect(context.db.rows.image_ocr_usage[0].import_job_id).toBe(job!.id);
   });
+
+  it("finalizes a ready OCR job from status stream snapshots when no Aleph events arrive", async () => {
+    const context = createD1TestApp();
+    const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
+    const book = seedBook(context.db, user, { id: "book_pro" });
+    const form = new FormData();
+    form.set("file", new File(["image"], "receipt.jpg", { type: "image/jpeg" }));
+    const env = { ...context.env, ALEPH_AI_TEST_CLIENT: aiClientWithImportedRecord() };
+
+    const uploaded = await context.app.request(
+      `/books/${book.id}/imports`,
+      { method: "POST", headers: authHeaders(user), body: form },
+      env,
+    );
+    const uploadedBody = await uploaded.json<any>();
+    const job = await context.repository.getImportJob(uploadedBody.job.id);
+    expect(job?.status).toBe("ocr_processing");
+
+    context.alephTools.jobStatus[job!.ocrJobId!] = {
+      jobId: job!.ocrJobId,
+      status: "ready",
+      resultAvailable: true,
+      progress: 100,
+    };
+
+    const stream = await context.app.request(
+      `/imports/status-stream?ids=${job!.id}`,
+      { headers: authHeaders(user) },
+      env,
+    );
+    const text = await stream.text();
+    const finalized = await context.repository.getImportJob(job!.id);
+
+    expect(stream.status).toBe(200);
+    expect(text).toContain("event: job");
+    expect(text).toContain('"status":"pending_confirmation"');
+    expect(finalized?.status).toBe("pending_confirmation");
+    expect(await context.repository.listImportedRecords(job!.id)).toHaveLength(1);
+  });
+
+  it("marks OCR cancellation as requested, keeps quota active, and skips later finalization", async () => {
+    const context = createD1TestApp();
+    const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
+    const book = seedBook(context.db, user, { id: "book_pro" });
+    const form = new FormData();
+    form.set("file", new File(["image"], "receipt.jpg", { type: "image/jpeg" }));
+    const env = { ...context.env, ALEPH_AI_TEST_CLIENT: aiClientWithImportedRecord() };
+
+    const uploaded = await context.app.request(
+      `/books/${book.id}/imports`,
+      { method: "POST", headers: authHeaders(user), body: form },
+      env,
+    );
+    const uploadedBody = await uploaded.json<any>();
+    const job = await context.repository.getImportJob(uploadedBody.job.id);
+    expect(job?.status).toBe("ocr_processing");
+
+    const cancelled = await context.app.request(
+      `/imports/${job!.id}/cancel`,
+      { method: "POST", headers: authHeaders(user) },
+      env,
+    );
+    const body = await cancelled.json<any>();
+
+    expect(cancelled.status).toBe(200);
+    expect(body.job.status).toBe("cancel_requested");
+    expect(body.job.cancelable).toBe(false);
+    expect(await context.repository.countActiveImageOcrJobs(user.id, currentShanghaiRange())).toBe(1);
+
+    context.alephTools.jobStatus[job!.ocrJobId!] = {
+      jobId: job!.ocrJobId,
+      status: "ready",
+      resultAvailable: true,
+      progress: 100,
+    };
+    await finalizeAlephOcrJob(env, context.repository, job!.id);
+
+    expect((await context.repository.getImportJob(job!.id))?.status).toBe("cancel_requested");
+    expect(await context.repository.listImportedRecords(job!.id)).toHaveLength(0);
+    expect(context.db.rows.image_ocr_usage).toHaveLength(0);
+  });
+
+  it("does not let later OCR failures overwrite cancellation intent", async () => {
+    const context = createD1TestApp();
+    const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
+    const book = seedBook(context.db, user, { id: "book_pro" });
+    const form = new FormData();
+    form.set("file", new File(["image"], "receipt.jpg", { type: "image/jpeg" }));
+
+    const uploaded = await context.app.request(
+      `/books/${book.id}/imports`,
+      { method: "POST", headers: authHeaders(user), body: form },
+      context.env,
+    );
+    const uploadedBody = await uploaded.json<any>();
+    const job = await context.repository.getImportJob(uploadedBody.job.id);
+
+    await context.app.request(
+      `/imports/${job!.id}/cancel`,
+      { method: "POST", headers: authHeaders(user) },
+      context.env,
+    );
+    await failAlephOcrJob(context.repository, job!.id, "provider failed after cancel");
+
+    const afterFailure = await context.repository.getImportJob(job!.id);
+    expect(afterFailure?.status).toBe("cancel_requested");
+    expect(afterFailure?.errorMessage).toBeFalsy();
+    expect(await context.repository.listImportedRecords(job!.id)).toHaveLength(0);
+  });
+
+  it("rejects deleting active import jobs", async () => {
+    const context = createD1TestApp();
+    const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
+    const book = seedBook(context.db, user, { id: "book_pro" });
+    const form = new FormData();
+    form.set("file", new File(["image"], "receipt.jpg", { type: "image/jpeg" }));
+
+    const uploaded = await context.app.request(
+      `/books/${book.id}/imports`,
+      { method: "POST", headers: authHeaders(user), body: form },
+      context.env,
+    );
+    const uploadedBody = await uploaded.json<any>();
+
+    const deleted = await context.app.request(
+      `/imports/${uploadedBody.job.id}`,
+      { method: "DELETE", headers: authHeaders(user) },
+      context.env,
+    );
+    const body = await deleted.json<any>();
+
+    expect(deleted.status).toBe(409);
+    expect(body.error).toBe("请先取消或等待任务完成后再删除");
+    expect(await context.repository.getImportJob(uploadedBody.job.id)).toBeTruthy();
+  });
+
+  it("soft deletes terminal import jobs and their pending records", async () => {
+    const context = createD1TestApp();
+    const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
+    const book = seedBook(context.db, user, { id: "book_pro" });
+    const job = await context.repository.createImportJob({
+      bookId: book.id,
+      userId: user.id,
+      fileName: "receipt.jpg",
+      fileType: "image/jpeg",
+      r2Key: "imports/test/receipt.jpg",
+    });
+    await context.repository.updateImportJob(job.id, "pending_confirmation");
+    await context.repository.createImportedRecords(job.id, [
+      {
+        type: "expense",
+        amount: 12,
+        occurredAt: "2026-06-28",
+        note: "早餐",
+        confidence: 0.95,
+        warnings: [],
+      },
+    ]);
+
+    const deleted = await context.app.request(
+      `/imports/${job.id}`,
+      { method: "DELETE", headers: authHeaders(user) },
+      context.env,
+    );
+
+    expect(deleted.status).toBe(204);
+    expect(await context.repository.getImportJob(job.id)).toBeNull();
+    expect(await context.repository.listImportedRecords(job.id)).toHaveLength(0);
+    expect(context.db.rows.import_jobs[0].deleted_by_user_id).toBe(user.id);
+    expect(context.db.rows.imported_records[0].deleted_by_user_id).toBe(user.id);
+  });
 });
+
+function currentShanghaiRange() {
+  const date = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai" }).format(new Date());
+  const start = new Date(`${date}T00:00:00+08:00`);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return { start: start.toISOString(), end: end.toISOString() };
+}

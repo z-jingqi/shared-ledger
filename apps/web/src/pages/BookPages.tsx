@@ -128,7 +128,7 @@ export function BookHomePage() {
                     {processing.length}
                   </IconTile>
                   <span>
-                    <b>{processing.length} 张图片正在识别</b>
+                    <b>{formatHomeImportTitle(processing)}</b>
                     <small>{formatHomeImportProgress(processing)} — 点击查看进度</small>
                   </span>
                   <CaretRightIcon size={18} />
@@ -233,12 +233,14 @@ function isSameDay(value: string, now: Date) {
 }
 
 function isProcessingJob(job: ImportJob) {
-  return ["uploaded", "parsing", "ocr_processing", "ai_processing"].includes(job.status);
+  return ["uploaded", "parsing", "ocr_processing", "cancel_requested", "ai_processing"].includes(job.status);
 }
 
 function formatHomeImportProgress(jobs: ImportJob[]) {
   const first = jobs[0];
   if (!first) return "";
+  if (jobs.every((job) => job.status === "cancel_requested"))
+    return jobs.length > 1 ? `${jobs.length} 个任务取消中` : "取消中";
   if (first.status === "ai_processing")
     return jobs.length > 1 ? `${jobs.length} 个文件，AI 分析中` : "AI 分析中";
   if (typeof first.currentPage === "number" && typeof first.totalPages === "number") {
@@ -250,4 +252,9 @@ function formatHomeImportProgress(jobs: ImportJob[]) {
     return jobs.length > 1 ? `${jobs.length} 个文件，OCR ${first.progress}%` : `OCR ${first.progress}%`;
   }
   return `${jobs.length} 张图片正在识别`;
+}
+
+function formatHomeImportTitle(jobs: ImportJob[]) {
+  if (jobs.every((job) => job.status === "cancel_requested")) return `${jobs.length} 个任务取消中`;
+  return `${jobs.length} 个图片任务处理中`;
 }

@@ -7,6 +7,7 @@ import {
   type ImportFileUploadInputHandle,
 } from "../components/imports/ImportFileUploadInput";
 import { useAuth } from "../features/auth/AuthProvider";
+import { upsertImportJobsInCache } from "../features/imports/cache";
 import { useInvitationBadge } from "../features/invitations/useInvitationBadge";
 import { AppSheetHost } from "../features/sheets/AppSheetHost";
 import { AppSheetProvider, useAppSheetActions } from "../features/sheets/SheetContext";
@@ -100,7 +101,10 @@ function AppFrameInner({ children }: { children: ReactNode }) {
               ref={uploadInputRef}
               bookId={book?.id}
               onUploadingChange={setUploading}
-              onUploaded={() => openSheet({ type: "imports" })}
+              onUploaded={(jobs) => {
+                upsertImportJobsInCache(book?.id, user?.id, jobs);
+                openSheet({ type: "imports" });
+              }}
             />
           ) : null}
           <AddActionMenu

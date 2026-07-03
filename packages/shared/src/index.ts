@@ -10,6 +10,7 @@ export const invitationStatuses = ["pending", "accepted", "declined", "expired",
 export const importStatuses = [
   "uploaded",
   "ocr_processing",
+  "cancel_requested",
   "ai_processing",
   "pending_confirmation",
   "completed",

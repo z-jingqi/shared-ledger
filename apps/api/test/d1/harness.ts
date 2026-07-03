@@ -336,6 +336,19 @@ function updateRows(db: TestD1Database, sql: string, values: unknown[]) {
   }
   if (table === "import_jobs") return updateImportJobRows(rows, sql, values);
   if (table === "imported_records") {
+    if (sql.includes("WHERE import_job_id=?")) {
+      rows
+        .filter((row) => row.import_job_id === values[4] && !row.deleted_at)
+        .forEach((row) =>
+          set(row, {
+            deleted_at: values[0],
+            deleted_by_user_id: values[1],
+            updated_at: values[2],
+            updated_by_user_id: values[3],
+          }),
+        );
+      return;
+    }
     rows
       .filter((row) => row.id === values[4])
       .forEach((row) =>
@@ -466,6 +479,19 @@ function updateImportJobRows(rows: Row[], sql: string, values: unknown[]) {
       );
     return;
   }
+  if (sql.includes("SET deleted_at=?")) {
+    rows
+      .filter((row) => row.id === values[4] && !row.deleted_at)
+      .forEach((row) =>
+        Object.assign(row, {
+          deleted_at: values[0],
+          deleted_by_user_id: values[1],
+          updated_at: values[2],
+          updated_by_user_id: values[3],
+        }),
+      );
+    return;
+  }
   if (sql.includes("SET status=?,error_message=?")) {
     patch(values[6], {
       status: values[0],
@@ -474,6 +500,17 @@ function updateImportJobRows(rows: Row[], sql: string, values: unknown[]) {
       updated_by_user_id: values[5],
       cancelable: values[2] ? 0 : undefined,
       retryable: values[3] ? 0 : undefined,
+    });
+    return;
+  }
+  if (sql.includes("status='cancel_requested'")) {
+    patch(values[2], {
+      status: "cancel_requested",
+      ocr_stage: "cancel_requested",
+      cancelable: 0,
+      retryable: 0,
+      updated_at: values[0],
+      updated_by_user_id: values[1],
     });
     return;
   }

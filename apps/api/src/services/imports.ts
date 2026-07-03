@@ -9,6 +9,7 @@ import type { ImportedRecord, ImportJob } from "../store";
 import type { Env } from "../types";
 
 const terminalImportStatuses = new Set(["completed", "pending_confirmation", "failed", "cancelled"]);
+const blockedFinalizeStatuses = new Set(["cancel_requested", ...terminalImportStatuses]);
 type AlephPhase = "ocr";
 type FailureStage = AlephPhase | "ai";
 
@@ -47,7 +48,7 @@ export async function finalizeAlephOcrJob(env: Env, repository: D1LedgerReposito
   const job = await repository.getImportJob(importJobId);
   if (!job) throw new Error("导入任务不存在");
   if (!job.ocrJobId) throw new Error("导入任务未关联 Aleph 任务");
-  if (terminalImportStatuses.has(job.status)) return repository.listImportedRecords(job.id);
+  if (blockedFinalizeStatuses.has(job.status)) return repository.listImportedRecords(job.id);
 
   const existing = await repository.listImportedRecords(job.id);
   if (existing.length) {
@@ -103,6 +104,8 @@ export async function failAlephOcrJob(
   sequence?: number,
   phase: AlephPhase = "ocr",
 ) {
+  const current = await repository.getImportJob(importJobId);
+  if (current && blockedFinalizeStatuses.has(current.status)) return current;
   await repository.updateOcrProgress(importJobId, {
     stage: "failed",
     progress: 0,
@@ -124,10 +127,33 @@ export async function cancelImportJob(env: Env, repository: D1LedgerRepository, 
   if (job.status === "completed" || job.status === "pending_confirmation") {
     throw new Error("该导入任务已经生成记录，不能取消");
   }
+  if (job.status === "cancel_requested") return job;
   if (job.status === "cancelled") return job;
-  if (job.ocrJobId && job.status === "ocr_processing") await runtimeOcrClient(env).cancelJob(job.ocrJobId);
+  if (job.ocrJobId && job.status === "ocr_processing") {
+    const alephJob = await runtimeOcrClient(env).cancelJob(job.ocrJobId);
+    const requested = await repository.markImportJobCancelRequested(job.id, job.userId);
+    await env.FILES?.delete(job.r2Key).catch(() => undefined);
+    if (alephJob.status === "cancelled" || alephJob.terminal) {
+      return cancelAlephOcrJob(repository, job.id);
+    }
+    return requested;
+  }
   await env.FILES?.delete(job.r2Key).catch(() => undefined);
   return repository.updateImportJob(job.id, "cancelled");
+}
+
+export async function requestAlephOcrCancellation(
+  repository: D1LedgerRepository,
+  importJobId: string,
+  sequence?: number,
+) {
+  const current = await repository.getImportJob(importJobId);
+  if (current && terminalImportStatuses.has(current.status)) return current;
+  await repository.updateOcrProgress(importJobId, {
+    stage: "cancel_requested",
+    eventSequence: sequence,
+  });
+  return repository.markImportJobCancelRequested(importJobId);
 }
 
 export async function cancelAlephOcrJob(
@@ -135,6 +161,15 @@ export async function cancelAlephOcrJob(
   importJobId: string,
   sequence?: number,
 ) {
+  const current = await repository.getImportJob(importJobId);
+  if (!current) return null;
+  if (
+    current.status === "completed" ||
+    current.status === "pending_confirmation" ||
+    current.status === "failed"
+  )
+    return current;
+  if (current.status === "cancelled") return current;
   await repository.updateOcrProgress(importJobId, {
     progress: 100,
     stage: "cancelled",
@@ -205,6 +240,8 @@ export async function markFailed(
   error: unknown,
   stage: FailureStage,
 ) {
+  const current = await repository.getImportJob(importJobId);
+  if (current && blockedFinalizeStatuses.has(current.status)) return current;
   if (error instanceof AlephToolsError) {
     return repository.markImportJobFailed(importJobId, {
       message: error.message,
@@ -235,7 +272,7 @@ async function finalizeImportJob(
 ) {
   const latest = await repository.getImportJob(job.id);
   if (!latest) throw new Error("导入任务不存在");
-  if (terminalImportStatuses.has(latest.status)) return repository.listImportedRecords(job.id);
+  if (blockedFinalizeStatuses.has(latest.status)) return repository.listImportedRecords(job.id);
   const existing = await repository.listImportedRecords(job.id);
   if (existing.length) {
     if (latest.status !== "completed" && latest.status !== "pending_confirmation") {
@@ -259,7 +296,7 @@ async function finalizeImportJob(
     throw error;
   }
   const beforeCreate = await repository.getImportJob(job.id);
-  if (!beforeCreate || terminalImportStatuses.has(beforeCreate.status))
+  if (!beforeCreate || blockedFinalizeStatuses.has(beforeCreate.status))
     return repository.listImportedRecords(job.id);
   const records = await repository.createImportedRecords(job.id, suggestions);
   if (records.length && isImageImportFileType(latest.fileType)) {
