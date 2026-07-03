@@ -402,7 +402,8 @@
 }
 
 .ios-analysis-summary {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 9px;
 }
 
@@ -522,10 +523,11 @@
 
 .ios-bar-chart {
   min-height: 142px;
-  display: flex;
-  align-items: flex-end;
-  gap: 10px;
-  overflow-x: auto;
+  display: grid;
+  grid-template-columns: repeat(var(--bar-count, 12), minmax(0, 1fr));
+  align-items: end;
+  gap: clamp(2px, 1.4vw, 10px);
+  overflow: hidden;
   padding: 8px 0 2px;
   scrollbar-width: none;
 }
@@ -536,9 +538,10 @@
 
 .ios-bar-chart > button {
   border: 0;
-  padding: 0 1px;
+  padding: 0;
   background: transparent;
-  min-width: 28px;
+  min-width: 0;
+  width: 100%;
   height: 128px;
   display: flex;
   flex-direction: column;
@@ -547,16 +550,18 @@
   gap: 6px;
 }
 
-.ios-bar-chart.range-week > button {
-  flex: 1;
+.ios-bar-chart.range-month {
+  gap: 2px;
 }
 
-.ios-bar-chart.range-year > button {
-  min-width: 34px;
+.ios-bar-chart.range-year {
+  gap: 5px;
 }
 
 .ios-bar-chart span {
   flex: 1;
+  min-width: 0;
+  width: 100%;
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -571,6 +576,19 @@
   transition: height 0.18s ease;
 }
 
+.ios-bar-chart.range-month span {
+  gap: 1px;
+}
+
+.ios-bar-chart.range-month i {
+  width: 4px;
+  border-radius: 3px 3px 0 0;
+}
+
+.ios-bar-chart.range-year i {
+  width: 7px;
+}
+
 .ios-bar-chart i.income {
   background: var(--ios-income);
 }
@@ -579,6 +597,12 @@
   color: #aab2bd;
   font-size: 10.5px;
   font-weight: 800;
+  white-space: nowrap;
+}
+
+.ios-bar-chart.range-month small {
+  font-size: 8.5px;
+  letter-spacing: -0.04em;
 }
 
 .ios-bar-chart > button.selected small {

@@ -1,5 +1,5 @@
 import { CaretRightIcon, SparkleIcon } from "@phosphor-icons/react";
-import { useMemo, useState } from "react";
+import { type CSSProperties, useMemo, useState } from "react";
 import { BookSwitcherSheet } from "../components/books/BookSwitcherSheet";
 import type { LedgerTransaction } from "../components/ledger/Transactions";
 import { IosMetric, IosPage, IosScroll, IosTopBar } from "../components/ios/IosDesign";
@@ -127,7 +127,10 @@ export function AnalysisPage() {
               </button>
             </div>
           </header>
-          <div className={`ios-bar-chart range-${range}`}>
+          <div
+            className={`ios-bar-chart range-${range}`}
+            style={{ "--bar-count": bars.length } as CSSProperties}
+          >
             {bars.map((item, index) => (
               <button
                 className={selectedBar === index ? "selected" : ""}

@@ -67,6 +67,7 @@ const importDayFormatter = new Intl.DateTimeFormat("zh-CN", {
   weekday: "short",
 });
 const thumbnailBlobCache = new Map<string, Blob>();
+const thumbnailFailureCache = new Set<string>();
 const maxThumbnailCacheSize = 48;
 let activeThumbnailLoads = 0;
 const thumbnailQueue: (() => void)[] = [];
@@ -263,9 +264,19 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
   );
   const [filter, setFilter] = useState<JobFilter>("all");
   const [busyJobId, setBusyJobId] = useState("");
+  const [jobSnapshots, setJobSnapshots] = useState<Map<string, ImportJobStatus>>(() => new Map());
   const stopWatchingRef = useRef<(() => void) | undefined>(undefined);
   const close = onClose;
-  const imports = data?.imports ?? emptyJobs;
+  const imports = useMemo(() => {
+    const source = data?.imports ?? emptyJobs;
+    if (!jobSnapshots.size) return source;
+    return source.map((job) => {
+      const snapshot = jobSnapshots.get(job.id);
+      return snapshot
+        ? { ...job, ...snapshot, createdAt: job.createdAt, updatedAt: snapshot.updatedAt ?? job.updatedAt }
+        : job;
+    });
+  }, [data?.imports, jobSnapshots]);
   const filteredImports = useMemo(
     () => imports.filter((job) => matchesJobFilter(job, filter)),
     [filter, imports],
@@ -296,15 +307,25 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     stopWatchingRef.current?.();
     if (!activeImportIds.length) return undefined;
-    stopWatchingRef.current = watchImportJobs(activeImportIds, () => void reload(), {
-      onDone: () => void reload(),
-      onError: (message) => toast.warning(message, { duration: 3000, closeButton: true }),
-    });
+    stopWatchingRef.current = watchImportJobs(
+      activeImportIds,
+      (job) => {
+        setJobSnapshots((current) => {
+          const next = new Map(current);
+          next.set(job.id, job);
+          return next;
+        });
+      },
+      {
+        onDone: () => void reload(),
+        onError: (message) => toast.warning(message, { duration: 3000, closeButton: true }),
+      },
+    );
     return () => {
       stopWatchingRef.current?.();
       stopWatchingRef.current = undefined;
     };
-  }, [activeImportIds, activeImportKey, reload]);
+  }, [activeImportKey, reload]);
 
   const retry = async (jobId: string) => {
     setBusyJobId(jobId);
@@ -618,7 +639,7 @@ function ImageJobThumbnail({
   const holderRef = useRef<HTMLDivElement | null>(null);
   const [thumbnailUrl, setThumbnailUrl] = useState("");
   const [failed, setFailed] = useState(false);
-  const cacheKey = `${job.id}:${job.updatedAt ?? job.createdAt ?? ""}`;
+  const cacheKey = job.id;
 
   useEffect(() => {
     const element = holderRef.current;
@@ -632,6 +653,10 @@ function ImageJobThumbnail({
       setThumbnailUrl(objectUrl);
     };
     const load = () => {
+      if (thumbnailFailureCache.has(cacheKey)) {
+        setFailed(true);
+        return;
+      }
       if (thumbnailBlobCache.has(cacheKey)) {
         setBlobUrl(thumbnailBlobCache.get(cacheKey)!);
         return;
@@ -651,7 +676,10 @@ function ImageJobThumbnail({
         rememberThumbnail(cacheKey, thumbnail);
         setBlobUrl(thumbnail);
       }).catch((cause) => {
-        if (!cancelled && !(cause instanceof DOMException && cause.name === "AbortError")) setFailed(true);
+        if (!cancelled && !(cause instanceof DOMException && cause.name === "AbortError")) {
+          thumbnailFailureCache.add(cacheKey);
+          setFailed(true);
+        }
       });
     };
 
