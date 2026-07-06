@@ -1228,10 +1228,45 @@ class FakeAlephToolsBinding {
   nextJobId = "ocr_test_job";
   jobStatus: Record<string, any> = {};
   result: Record<string, any> = {};
+  platformOk = true;
 
   async fetch(request: Request) {
     this.requests.push(request);
     const url = new URL(request.url);
+    if (url.pathname === "/v1/platform/check") {
+      const jobId = url.searchParams.get("jobId");
+      const job = jobId ? this.jobStatus[jobId] : undefined;
+      return Response.json({
+        success: true,
+        data: {
+          ok: this.platformOk,
+          checks: {
+            auth: { ok: true, clientId: "shared-ledger-preview" },
+            storage: { ok: true, d1: { ok: true }, r2: { ok: true } },
+            processing: { ok: true, workflow: true, queue: true },
+            googleVision: { ok: true, mode: "service_account" },
+            imageConversion: { ok: true, requiredFor: ["heic", "heif"] },
+          },
+          ...(jobId
+            ? {
+                job: {
+                  found: Boolean(job),
+                  ...(job
+                    ? {
+                        snapshot: job,
+                        storage: {
+                          sourceAvailable: true,
+                          resultObjectAvailable: job.status === "ready",
+                        },
+                      }
+                    : {}),
+                },
+              }
+            : {}),
+        },
+        requestId: "diag_test",
+      });
+    }
     if (url.pathname === "/v1/tools/ocr") {
       const jobId = `${this.nextJobId}_${this.requests.length}`;
       this.jobStatus[jobId] = { jobId, status: "queued", progress: 0, resultAvailable: false };

@@ -20,6 +20,7 @@ import {
 import { createPreviewThumbnail } from "../features/imports/preview-thumbnail";
 import { terminalImportStatuses, watchImportJobs, type ImportJobStatus } from "../features/imports/status";
 import { cancelImportJob, deleteImportJob, retryImportJob } from "../features/imports/upload";
+import { diagnoseImportOcrJob, type AlephToolsDiagnosticsResponse } from "../features/imports/diagnostics";
 import { useActiveBook } from "../hooks/useActiveBook";
 import { useApi } from "../hooks/useApi";
 import { api, apiFetchWithRefresh } from "../lib";
@@ -78,6 +79,13 @@ const thumbnailFailureCache = new Set<string>();
 const maxThumbnailCacheSize = 48;
 let activeThumbnailLoads = 0;
 const thumbnailQueue: (() => void)[] = [];
+const diagnosticCheckLabels: Record<string, string> = {
+  auth: "认证",
+  storage: "存储",
+  processing: "处理",
+  googleVision: "Google Vision",
+  imageConversion: "图片转换",
+};
 
 function pendingRecordsReducer(_: PendingRecordsState, action: PendingRecordsAction): PendingRecordsState {
   switch (action.type) {
@@ -292,6 +300,7 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
   }, [imports]);
   const activeImportIds = activeImports.ids;
   const activeImportKey = activeImports.key;
+  const showDiagnostics = isOcrDiagnosticsEnvironment();
   const counts = useMemo(() => {
     const next = { all: imports.length, processing: 0, success: 0, failed: 0 };
     for (const job of imports) {
@@ -372,6 +381,23 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
       setBusyJobId("");
     }
   };
+  const diagnose = async (job: Job) => {
+    setBusyJobId(job.id);
+    try {
+      const diagnostics = await diagnoseImportOcrJob(job.id);
+      const summary = summarizeAlephToolsDiagnostics(diagnostics);
+      const options = { description: summary.description, duration: 6000, closeButton: true };
+      if (summary.ok) toast.success(summary.title, options);
+      else toast.warning(summary.title, options);
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "诊断失败", {
+        duration: 4000,
+        closeButton: true,
+      });
+    } finally {
+      setBusyJobId("");
+    }
+  };
 
   return (
     <IosSheet title="识别进度" onClose={close}>
@@ -423,6 +449,9 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
                   onRetry={() => void retry(job.id)}
                   onCancel={() => void cancel(job.id)}
                   onDelete={() => void remove(job.id)}
+                  onDiagnose={
+                    showDiagnostics && canDiagnoseImportJob(job) ? () => void diagnose(job) : undefined
+                  }
                   key={job.id}
                 />
               ))}
@@ -585,12 +614,14 @@ function ImportJobCard({
   onRetry,
   onCancel,
   onDelete,
+  onDiagnose,
 }: {
   job: Job;
   busy: boolean;
   onRetry: () => void;
   onCancel: () => void;
   onDelete: () => void;
+  onDiagnose?: () => void;
 }) {
   const tone =
     job.status === "failed" ? "failed" : terminalImportStatuses.has(job.status) ? "done" : "processing";
@@ -624,6 +655,11 @@ function ImportJobCard({
         {!terminalImportStatuses.has(job.status) && job.cancelable && (
           <button type="button" disabled={busy} onClick={onCancel}>
             取消
+          </button>
+        )}
+        {onDiagnose && (
+          <button className="diagnostic" type="button" disabled={busy} onClick={onDiagnose}>
+            诊断
           </button>
         )}
         {canDeleteImportJob(job) && (
@@ -780,6 +816,44 @@ function formatOcrProgress(job: Job) {
 
 function canDeleteImportJob(job: Job) {
   return terminalImportStatuses.has(job.status);
+}
+
+function canDiagnoseImportJob(job: Job) {
+  return isImageJob(job) && ["ocr_processing", "cancel_requested", "failed"].includes(job.status);
+}
+
+function isOcrDiagnosticsEnvironment() {
+  if (typeof window === "undefined") return false;
+  const host = window.location.hostname;
+  return host === "dev.leger.aleph-cat.com" || host === "localhost" || host === "127.0.0.1";
+}
+
+function summarizeAlephToolsDiagnostics(result: AlephToolsDiagnosticsResponse) {
+  const data = result.data;
+  const checks = data?.checks ?? {};
+  const failedChecks = Object.entries(diagnosticCheckLabels)
+    .filter(([key]) => checks[key]?.ok === false)
+    .map(([, label]) => label);
+  const job = data?.job;
+  const jobProblems = [
+    job?.found === false ? "任务未找到" : "",
+    job?.storage?.sourceAvailable === false ? "源文件不可用" : "",
+  ].filter(Boolean);
+  const ok = Boolean(data?.ok) && failedChecks.length === 0 && jobProblems.length === 0;
+  const snapshot = job?.snapshot;
+  const statusParts = [
+    snapshot?.status ? `状态 ${snapshot.status}` : "",
+    typeof snapshot?.progress === "number" ? `进度 ${snapshot.progress}%` : "",
+    snapshot?.stage ? `阶段 ${snapshot.stage}` : "",
+    snapshot?.error?.code ? `错误 ${snapshot.error.code}` : "",
+  ].filter(Boolean);
+  const problemParts = [...failedChecks, ...jobProblems];
+  const details = ok ? statusParts : [...problemParts, ...statusParts];
+  return {
+    ok,
+    title: ok ? "OCR 诊断通过" : "OCR 诊断异常",
+    description: details.length ? details.join(" · ") : "Aleph Tools 基础检查已返回",
+  };
 }
 
 function matchesJobFilter(job: Job, filter: JobFilter) {

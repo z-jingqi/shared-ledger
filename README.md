@@ -108,4 +108,4 @@ shared-ledger 现在只支持图片导入：jpg/jpeg/png/gif/webp/tif/tiff/bmp/r
 
 ## CI/CD
 
-`.github/workflows/deploy.yml` 通过 paths filter 判断 web、api、migration、shared 与基础设施的变更；仅部署受影响的层。Actions 不创建或部署 D1/R2，只在 `packages/db/migrations` 变化时执行 migration，且 migration 会先于 API 部署完成。`main` 部署 prod，`develop` 部署 preview。需要 GitHub secrets：`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`、`ALEPH_AI_SERVICE_TOKEN`、`ALEPH_TOOLS_API_KEY`、`ALEPH_TOOLS_WEBHOOK_SECRET`。prod D1 id 使用 GitHub variable `CLOUDFLARE_D1_DATABASE_ID_PROD`。
+`.github/workflows/deploy.yml` 通过 paths filter 判断 web、api、migration、shared 与基础设施的变更；仅部署受影响的层。Actions 不创建或部署 D1/R2，只在 `packages/db/migrations` 变化时执行 migration，且 migration 会先于 API 部署完成。`main` 部署 prod，`develop` 部署 preview。GitHub Actions 只需要 Cloudflare 部署权限：`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`。AI/OCR token 与 webhook secret 是 API Worker runtime secrets，应直接配置在 Cloudflare Worker 上。prod D1 id 使用 GitHub variable `CLOUDFLARE_D1_DATABASE_ID_PROD`。

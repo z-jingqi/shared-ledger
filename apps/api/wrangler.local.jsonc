@@ -14,7 +14,7 @@
   },
   "services": [
     { "binding": "AI_ORCHESTRATOR", "service": "aleph-ai-orchestrator-preview", "remote": true },
-    { "binding": "ALEPH_TOOLS", "service": "aleph-tools-gateway-preview" },
+    { "binding": "ALEPH_TOOLS", "service": "aleph-tools-gateway-preview", "remote": true },
   ],
   "d1_databases": [
     {

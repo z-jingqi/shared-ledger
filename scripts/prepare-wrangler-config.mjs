@@ -12,8 +12,12 @@ if (!target || !["web", "api"].includes(target) || !["preview", "prod"].includes
 const suffix = environment.toUpperCase();
 const isProd = environment === "prod";
 const defaultD1DatabaseIds = {
-  preview: "58bdce1d-afd3-4d89-9ad7-330a685d0a26",
+  preview: "4cd0cf69-dc51-4c02-bca5-e0141a73d17b",
   prod: undefined,
+};
+const envValue = (name) => {
+  const value = process.env[name];
+  return value && value.trim() ? value : undefined;
 };
 const webDomain = isProd ? "leger.aleph-cat.com" : "dev.leger.aleph-cat.com";
 const webOrigin = `https://${webDomain}`;
@@ -23,18 +27,18 @@ const values = {
   __WEB_ORIGIN__: webOrigin,
   __API_PUBLIC_ORIGIN__: `${webOrigin}/api`,
   __ZONE_NAME__: "aleph-cat.com",
-  __ALEPH_AI_ENV__: process.env[`ALEPH_AI_ENV_${suffix}`] ?? (isProd ? "prod" : "preview"),
+  __ALEPH_AI_ENV__: envValue(`ALEPH_AI_ENV_${suffix}`) ?? (isProd ? "prod" : "preview"),
   __ALEPH_AI_SERVICE__:
-    process.env[`ALEPH_AI_SERVICE_${suffix}`] ??
+    envValue(`ALEPH_AI_SERVICE_${suffix}`) ??
     (isProd ? "aleph-ai-orchestrator" : "aleph-ai-orchestrator-preview"),
   __ALEPH_TOOLS_SERVICE__:
-    process.env[`ALEPH_TOOLS_SERVICE_${suffix}`] ??
+    envValue(`ALEPH_TOOLS_SERVICE_${suffix}`) ??
     (isProd ? "aleph-tools-gateway-prod" : "aleph-tools-gateway-preview"),
   __D1_DATABASE_ID__:
-    process.env[`CLOUDFLARE_D1_DATABASE_ID_${suffix}`] ??
+    envValue(`CLOUDFLARE_D1_DATABASE_ID_${suffix}`) ??
     defaultD1DatabaseIds[environment] ??
     "__D1_DATABASE_ID__",
-  __R2_BUCKET__: process.env[`CLOUDFLARE_R2_BUCKET_${suffix}`] ?? `shared-ledger-files-${environment}`,
+  __R2_BUCKET__: envValue(`CLOUDFLARE_R2_BUCKET_${suffix}`) ?? `shared-ledger-files-${environment}`,
 };
 if (target.startsWith("api") && values.__D1_DATABASE_ID__ === "__D1_DATABASE_ID__") {
   throw new Error(`CLOUDFLARE_D1_DATABASE_ID_${suffix} is required to deploy the API.`);

@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import { registerAiRoutes } from "./routes/ai";
 import { registerAuthRoutes } from "./routes/auth";
 import { registerBookRoutes } from "./routes/books";
+import { registerDiagnosticRoutes } from "./routes/diagnostics";
 import { registerImportRoutes } from "./routes/imports";
 import { registerInvitationRoutes } from "./routes/invitations";
 import { registerMeRoutes } from "./routes/me";
@@ -28,6 +29,7 @@ export function createApp(store?: MemoryLedgerStore) {
   );
 
   app.get("/health", (context) => context.json({ ok: true, environment: context.env.APP_ENV ?? "test" }));
+  registerDiagnosticRoutes(app, store);
   registerAuthRoutes(app, store);
   registerBookRoutes(app, store);
   registerMemberRoutes(app, store);
