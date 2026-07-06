@@ -481,36 +481,65 @@ function updateImportJobRows(rows: Row[], sql: string, values: unknown[]) {
   }
   if (sql.includes("SET deleted_at=?")) {
     rows
-      .filter((row) => row.id === values[4] && !row.deleted_at)
+      .filter((row) => row.id === values[values.length - 1] && !row.deleted_at)
       .forEach((row) =>
         Object.assign(row, {
           deleted_at: values[0],
           deleted_by_user_id: values[1],
-          updated_at: values[2],
-          updated_by_user_id: values[3],
+          source_access_token_revoked_at: sql.includes("source_access_token_revoked_at")
+            ? (row.source_access_token_revoked_at ?? values[2])
+            : row.source_access_token_revoked_at,
+          updated_at: values[sql.includes("source_access_token_revoked_at") ? 3 : 2],
+          updated_by_user_id: values[sql.includes("source_access_token_revoked_at") ? 4 : 3],
         }),
       );
     return;
   }
   if (sql.includes("SET status=?,error_message=?")) {
-    patch(values[6], {
+    const jobId = values[sql.includes("source_access_token_revoked_at") ? 8 : 6];
+    const existing = rows.find((row) => row.id === jobId);
+    patch(jobId, {
       status: values[0],
       error_message: values[1],
-      updated_at: values[4],
-      updated_by_user_id: values[5],
+      source_access_token_revoked_at:
+        sql.includes("source_access_token_revoked_at") && values[4]
+          ? (existing?.source_access_token_revoked_at ?? values[5])
+          : existing?.source_access_token_revoked_at,
+      updated_at: values[sql.includes("source_access_token_revoked_at") ? 6 : 4],
+      updated_by_user_id: values[sql.includes("source_access_token_revoked_at") ? 7 : 5],
       cancelable: values[2] ? 0 : undefined,
       retryable: values[3] ? 0 : undefined,
     });
     return;
   }
   if (sql.includes("status='cancel_requested'")) {
-    patch(values[2], {
+    patch(values[3], {
       status: "cancel_requested",
       ocr_stage: "cancel_requested",
       cancelable: 0,
       retryable: 0,
-      updated_at: values[0],
-      updated_by_user_id: values[1],
+      source_access_token_revoked_at: values[0],
+      updated_at: values[1],
+      updated_by_user_id: values[2],
+    });
+    return;
+  }
+  if (sql.includes("source_access_token_hash=?")) {
+    patch(values[4], {
+      source_access_token_hash: values[0],
+      source_access_token_expires_at: values[1],
+      source_access_token_revoked_at: null,
+      updated_at: values[2],
+      updated_by_user_id: values[3],
+    });
+    return;
+  }
+  if (sql.includes("SET source_access_token_revoked_at=COALESCE")) {
+    patch(values[3], {
+      source_access_token_revoked_at:
+        rows.find((row) => row.id === values[3])?.source_access_token_revoked_at ?? values[0],
+      updated_at: values[1],
+      updated_by_user_id: values[2],
     });
     return;
   }
@@ -537,7 +566,7 @@ function updateImportJobRows(rows: Row[], sql: string, values: unknown[]) {
     return;
   }
   if (sql.includes("status='failed'")) {
-    patch(values[9], {
+    patch(values[10], {
       status: "failed",
       error_message: values[0],
       error_code: values[1],
@@ -548,7 +577,9 @@ function updateImportJobRows(rows: Row[], sql: string, values: unknown[]) {
       failed_external_job_id: values[6],
       cancelable: 0,
       retryable: values[7],
-      updated_at: values[8],
+      source_access_token_revoked_at:
+        rows.find((row) => row.id === values[10])?.source_access_token_revoked_at ?? values[8],
+      updated_at: values[9],
     });
     return;
   }
@@ -560,6 +591,15 @@ function updateImportJobRows(rows: Row[], sql: string, values: unknown[]) {
           retry_count: Number(row.retry_count ?? 0) + 1,
           status: sql.includes("status='ai_processing'") ? "ai_processing" : "uploaded",
           ocr_job_id: sql.includes("ocr_job_id=NULL") ? null : row.ocr_job_id,
+          source_access_token_hash: sql.includes("source_access_token_hash=NULL")
+            ? null
+            : row.source_access_token_hash,
+          source_access_token_expires_at: sql.includes("source_access_token_expires_at=NULL")
+            ? null
+            : row.source_access_token_expires_at,
+          source_access_token_revoked_at: sql.includes("source_access_token_revoked_at=NULL")
+            ? null
+            : row.source_access_token_revoked_at,
           updated_at: values[0],
         }),
       );
@@ -854,6 +894,23 @@ function selectImportJobs(db: TestD1Database, lower: string, values: unknown[]) 
   if (lower.includes("where id=?")) rows = rows.filter((row) => row.id === values[0]);
   else if (lower.includes("where user_id=?")) rows = rows.filter((row) => row.user_id === values[0]);
   else if (lower.includes("where book_id=?")) rows = rows.filter((row) => row.book_id === values[0]);
+  if (lower.includes("source_access_token_hash")) {
+    return rows.map((row) => ({
+      id: row.id,
+      bookId: row.book_id,
+      userId: row.user_id,
+      fileName: row.file_name,
+      fileType: row.file_type,
+      r2Key: row.r2_key,
+      status: row.status,
+      ocrJobId: row.ocr_job_id,
+      sourceAccessTokenHash: row.source_access_token_hash,
+      sourceAccessTokenExpiresAt: row.source_access_token_expires_at,
+      sourceAccessTokenRevokedAt: row.source_access_token_revoked_at,
+      createdAt: row.created_at,
+      deletedAt: row.deleted_at,
+    }));
+  }
   return rows.map(importJobRow);
 }
 

@@ -3,6 +3,7 @@ import { structureForConfirmation } from "@shared-ledger/import";
 import type { NormalizedImport } from "@shared-ledger/import";
 import { D1LedgerRepository } from "../repository";
 import { runtimeAiProvider } from "./ai";
+import { createImportSourceAccess } from "./import-source";
 import { AlephToolsError, ocrConfidence, runtimeOcrClient } from "./ocr";
 import type { AlephErrorPayload, AlephOcrJob } from "./ocr";
 import type { ImportedRecord, ImportJob } from "../store";
@@ -25,14 +26,22 @@ export async function submitAlephOcrJob(
   env: Env,
   repository: D1LedgerRepository,
   job: ImportJob,
-  bytes?: ArrayBuffer,
-  requestOrigin?: string,
+  options: { requestOrigin?: string } = {},
 ) {
   if (!isImageImportFileType(job.fileType)) throw new Error("当前只支持图片识别");
-  const sourceBytes = bytes ?? (await readStoredFile(env, repository, job));
-  const callbackUrl = `${apiPublicOrigin(env, requestOrigin)}/imports/aleph-webhook`;
+  const sourceFile = await readStoredSourceFile(env, repository, job);
+  const sourceAccess = await createImportSourceAccess(repository, job.id);
+  const callbackUrl = `${apiPublicOrigin(env, options.requestOrigin)}/imports/aleph-webhook`;
   const alephJob = await runtimeOcrClient(env).createOcrJob(
-    { bytes: sourceBytes, filename: job.fileName, mimeType: job.fileType },
+    {
+      type: "client_source",
+      sourceId: job.id,
+      accessToken: sourceAccess.token,
+      filename: job.fileName,
+      mimeType: job.fileType,
+      sizeBytes: sourceFile.sizeBytes,
+      checksumSha256: sourceFile.checksumSha256,
+    },
     {
       callbackUrl,
       metadata: { importJobId: job.id, phase: "ocr" },
@@ -73,6 +82,7 @@ export async function finalizeAlephOcrJob(env: Env, repository: D1LedgerReposito
     });
   }
   const result = await runtimeOcrClient(env).getResult(job.ocrJobId);
+  await repository.revokeImportSourceAccess(job.id);
   const rawText = result.plainText?.trim() || result.markdown?.trim();
   if (!rawText) {
     await repository.markImportJobFailed(job.id, {
@@ -231,7 +241,7 @@ export async function retryImportJob(
   }
   const prepared = await repository.prepareImportJobRetry(job.id);
   if (!prepared) throw new Error("导入任务不存在");
-  return submitAlephOcrJob(env, repository, prepared, undefined, requestOrigin);
+  return submitAlephOcrJob(env, repository, prepared, { requestOrigin });
 }
 
 export async function markFailed(
@@ -341,7 +351,7 @@ async function confirmImportedRecords(
   }
 }
 
-async function readStoredFile(env: Env, repository: D1LedgerRepository, job: ImportJob) {
+async function readStoredSourceFile(env: Env, repository: D1LedgerRepository, job: ImportJob) {
   const object = await env.FILES?.get(job.r2Key);
   if (!object) {
     await repository.markImportJobFailed(job.id, {
@@ -353,7 +363,16 @@ async function readStoredFile(env: Env, repository: D1LedgerRepository, job: Imp
     });
     throw new Error("导入原文件不存在");
   }
-  return object.arrayBuffer();
+  const bytes = await object.arrayBuffer();
+  return {
+    sizeBytes: bytes.byteLength,
+    checksumSha256: await sha256Hex(bytes),
+  };
+}
+
+async function sha256Hex(bytes: ArrayBuffer) {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function normalizeAlephError(error: string | AlephErrorPayload, stage: AlephPhase): AlephErrorPayload {

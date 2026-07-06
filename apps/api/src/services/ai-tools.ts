@@ -1152,7 +1152,9 @@ async function createImportJobFromFile(
       httpMetadata: { contentType: resolvedFileType },
       customMetadata: { importJobId: job.id, bookId, uploadedBy: runtime.user.id },
     });
-    return await submitAlephOcrJob(runtime.env, runtime.repository, job, bytes, runtime.origin);
+    return await submitAlephOcrJob(runtime.env, runtime.repository, job, {
+      requestOrigin: runtime.origin,
+    });
   } catch (error) {
     await markFailed(runtime.repository, job.id, error, "ocr");
     throw error;

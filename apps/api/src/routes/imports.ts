@@ -24,6 +24,7 @@ import {
   shanghaiDateRange,
   shanghaiUsageDate,
 } from "../services/import-validation";
+import { bearerToken, constantTimeEqual, hashImportSourceAccessToken } from "../services/import-source";
 import type { AlephErrorPayload, AlephOcrJob } from "../services/ocr";
 import { runtimeOcrClient } from "../services/ocr";
 import type { ImportJob, MemoryLedgerStore } from "../store";
@@ -65,18 +66,21 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
         httpMetadata: { contentType: resolvedFileType },
         customMetadata: { importJobId: job.id, bookId: input.bookId, uploadedBy: input.userId },
       });
-      return await submitAlephOcrJob(
-        context.env,
-        input.repository,
-        job,
-        bytes,
-        new URL(context.req.url).origin,
-      );
+      return await submitAlephOcrJob(context.env, input.repository, job, {
+        requestOrigin: new URL(context.req.url).origin,
+      });
     } catch (error) {
       await markFailed(input.repository, job.id, error, "ocr");
       throw error;
     }
   };
+
+  app.get("/internal/aleph-tools/import-sources/:importJobId", (context) =>
+    serveInternalImportSource(context),
+  );
+  app.on("HEAD", "/internal/aleph-tools/import-sources/:importJobId", (context) =>
+    serveInternalImportSource(context),
+  );
 
   app.get("/me/import-usage", async (context) => {
     const user = await requireUser(context, store);
@@ -677,6 +681,50 @@ async function finalizeReadyAlephJob(
   }
   const finished = await repository.getImportJob(job.id);
   if (finished) await onJob(finished);
+}
+
+async function serveInternalImportSource(context: ImportRouteContext) {
+  if (!context.env.DB || !context.env.FILES) return jsonError(context, "导入源文件需要 D1 与 R2 绑定", 503);
+  const token = bearerToken(context.req.header("Authorization"));
+  if (!token) return jsonError(context, "缺少 source token", 401);
+
+  const repository = new D1LedgerRepository(context.env.DB);
+  await repository.cleanupExpiredImportJobs();
+  const importJobId = context.req.param("importJobId");
+  if (!importJobId) return jsonError(context, "导入任务不存在或已过期", 404);
+  const job = await repository.getImportSourceAccessJob(importJobId);
+  if (!job) return jsonError(context, "导入任务不存在或已过期", 404);
+  if (!job.sourceAccessTokenHash || !job.sourceAccessTokenExpiresAt) {
+    return jsonError(context, "导入源访问未授权", 401);
+  }
+  if (job.sourceAccessTokenRevokedAt) return jsonError(context, "导入源访问已撤销", 410);
+  if (new Date(job.sourceAccessTokenExpiresAt).getTime() <= Date.now()) {
+    await repository.revokeImportSourceAccess(job.id);
+    return jsonError(context, "导入源访问已过期", 410);
+  }
+  const tokenHash = await hashImportSourceAccessToken(token);
+  if (!constantTimeEqual(tokenHash, job.sourceAccessTokenHash)) {
+    return jsonError(context, "导入源访问未授权", 401);
+  }
+  if (job.ocrJobId) {
+    const alephJobId = context.req.header("X-Aleph-Job-Id")?.trim();
+    if (!alephJobId) return jsonError(context, "缺少 Aleph OCR 任务标识", 401);
+    if (alephJobId !== job.ocrJobId) return jsonError(context, "Aleph OCR 任务不匹配", 403);
+  }
+  if (job.status !== "uploaded" && job.status !== "ocr_processing") {
+    return jsonError(context, "导入源当前不可读取", 409);
+  }
+
+  const object = await context.env.FILES.get(job.r2Key);
+  if (!object?.body) return jsonError(context, "导入原文件不存在", 404);
+  const headers = new Headers({
+    "Content-Type": object.httpMetadata?.contentType ?? job.fileType,
+    "Content-Disposition": `inline; filename="${encodeURIComponent(job.fileName)}"`,
+    "Cache-Control": "private, no-store",
+    "X-Import-Job-Id": job.id,
+    "X-Source-Expires-At": job.sourceAccessTokenExpiresAt,
+  });
+  return new Response(context.req.raw.method === "HEAD" ? null : object.body, { headers });
 }
 
 async function* parseSseStream(stream: ReadableStream<Uint8Array>): AsyncGenerator<AlephSseMessage> {

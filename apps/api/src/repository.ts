@@ -155,6 +155,8 @@ const mapImportJob = (row: Row): ImportJob => ({
 
 const importJobColumns =
   "id,book_id AS bookId,user_id AS userId,file_name AS fileName,file_type AS fileType,r2_key AS r2Key,status,auto_confirm AS autoConfirm,error_message AS errorMessage,error_code AS errorCode,error_stage AS errorStage,error_request_id AS errorRequestId,error_retryable AS errorRetryable,error_terminal AS errorTerminal,failed_external_job_id AS failedExternalJobId,cancelable,retryable,retry_count AS retryCount,ocr_job_id AS ocrJobId,aleph_tool AS alephTool,ocr_submitted_at AS ocrSubmittedAt,ocr_progress AS ocrProgress,ocr_stage AS ocrStage,ocr_current_page AS ocrCurrentPage,ocr_total_pages AS ocrTotalPages,ocr_completed_at AS ocrCompletedAt,ocr_event_sequence AS ocrEventSequence,created_at AS createdAt,updated_at AS updatedAt,deleted_at AS deletedAt,deleted_by_user_id AS deletedByUserId";
+const importSourceAccessColumns =
+  "id,book_id AS bookId,user_id AS userId,file_name AS fileName,file_type AS fileType,r2_key AS r2Key,status,ocr_job_id AS ocrJobId,source_access_token_hash AS sourceAccessTokenHash,source_access_token_expires_at AS sourceAccessTokenExpiresAt,source_access_token_revoked_at AS sourceAccessTokenRevokedAt,created_at AS createdAt,deleted_at AS deletedAt";
 const aiConfirmationColumns =
   "id,user_id AS userId,book_id AS bookId,action,status,payload,result,expires_at AS expiresAt,confirmed_at AS confirmedAt,cancelled_at AS cancelledAt,created_at AS createdAt,updated_at AS updatedAt";
 const aiSessionColumns =
@@ -1099,14 +1101,69 @@ export class D1LedgerRepository {
       .first<Row>();
     return row ? mapImportJob(row) : null;
   }
+  async getImportSourceAccessJob(jobId: string) {
+    const row = await this.db
+      .prepare(`SELECT ${importSourceAccessColumns} FROM import_jobs WHERE id=? AND deleted_at IS NULL`)
+      .bind(jobId)
+      .first<Row>();
+    return row
+      ? {
+          id: String(row.id),
+          bookId: String(row.bookId),
+          userId: String(row.userId),
+          fileName: String(row.fileName),
+          fileType: String(row.fileType),
+          r2Key: String(row.r2Key),
+          status: String(row.status),
+          ocrJobId: row.ocrJobId ? String(row.ocrJobId) : undefined,
+          sourceAccessTokenHash: row.sourceAccessTokenHash ? String(row.sourceAccessTokenHash) : undefined,
+          sourceAccessTokenExpiresAt: row.sourceAccessTokenExpiresAt
+            ? String(row.sourceAccessTokenExpiresAt)
+            : undefined,
+          sourceAccessTokenRevokedAt: row.sourceAccessTokenRevokedAt
+            ? String(row.sourceAccessTokenRevokedAt)
+            : undefined,
+          createdAt: String(row.createdAt),
+          deletedAt: row.deletedAt ? String(row.deletedAt) : undefined,
+        }
+      : null;
+  }
+  async storeImportSourceAccess(jobId: string, tokenHash: string, expiresAt: string) {
+    const timestamp = now();
+    await this.db
+      .prepare(
+        "UPDATE import_jobs SET source_access_token_hash=?,source_access_token_expires_at=?,source_access_token_revoked_at=NULL,updated_at=?,updated_by_user_id=? WHERE id=?",
+      )
+      .bind(tokenHash, expiresAt, timestamp, systemActorId, jobId)
+      .run();
+  }
+  async revokeImportSourceAccess(jobId: string, actorId = systemActorId) {
+    const timestamp = now();
+    await this.db
+      .prepare(
+        "UPDATE import_jobs SET source_access_token_revoked_at=COALESCE(source_access_token_revoked_at,?),updated_at=?,updated_by_user_id=? WHERE id=?",
+      )
+      .bind(timestamp, timestamp, actorId, jobId)
+      .run();
+  }
   async updateImportJob(jobId: string, status: string, errorMessage?: string) {
     const terminal = ["completed", "pending_confirmation", "failed", "cancelled"].includes(status) ? 1 : 0;
     const timestamp = now();
     await this.db
       .prepare(
-        "UPDATE import_jobs SET status=?,error_message=?,cancelable=CASE WHEN ? THEN 0 ELSE cancelable END,retryable=CASE WHEN ? THEN 0 ELSE retryable END,updated_at=?,updated_by_user_id=? WHERE id=?",
+        "UPDATE import_jobs SET status=?,error_message=?,cancelable=CASE WHEN ? THEN 0 ELSE cancelable END,retryable=CASE WHEN ? THEN 0 ELSE retryable END,source_access_token_revoked_at=CASE WHEN ? THEN COALESCE(source_access_token_revoked_at,?) ELSE source_access_token_revoked_at END,updated_at=?,updated_by_user_id=? WHERE id=?",
       )
-      .bind(status, errorMessage ?? null, terminal, terminal, timestamp, systemActorId, jobId)
+      .bind(
+        status,
+        errorMessage ?? null,
+        terminal,
+        terminal,
+        terminal,
+        timestamp,
+        timestamp,
+        systemActorId,
+        jobId,
+      )
       .run();
     return this.getImportJob(jobId);
   }
@@ -1114,9 +1171,9 @@ export class D1LedgerRepository {
     const timestamp = now();
     await this.db
       .prepare(
-        "UPDATE import_jobs SET status='cancel_requested',ocr_stage='cancel_requested',cancelable=0,retryable=0,updated_at=?,updated_by_user_id=? WHERE id=?",
+        "UPDATE import_jobs SET status='cancel_requested',ocr_stage='cancel_requested',cancelable=0,retryable=0,source_access_token_revoked_at=COALESCE(source_access_token_revoked_at,?),updated_at=?,updated_by_user_id=? WHERE id=?",
       )
-      .bind(timestamp, actorId, jobId)
+      .bind(timestamp, timestamp, actorId, jobId)
       .run();
     return this.getImportJob(jobId);
   }
@@ -1241,7 +1298,7 @@ export class D1LedgerRepository {
   ) {
     await this.db
       .prepare(
-        "UPDATE import_jobs SET status='failed',error_message=?,error_code=?,error_stage=?,error_request_id=?,error_retryable=?,error_terminal=?,failed_external_job_id=?,cancelable=0,retryable=?,updated_at=? WHERE id=?",
+        "UPDATE import_jobs SET status='failed',error_message=?,error_code=?,error_stage=?,error_request_id=?,error_retryable=?,error_terminal=?,failed_external_job_id=?,cancelable=0,retryable=?,source_access_token_revoked_at=COALESCE(source_access_token_revoked_at,?),updated_at=? WHERE id=?",
       )
       .bind(
         input.message,
@@ -1253,6 +1310,7 @@ export class D1LedgerRepository {
         input.externalJobId ?? null,
         input.retryable ? 1 : 0,
         now(),
+        now(),
         jobId,
       )
       .run();
@@ -1261,7 +1319,7 @@ export class D1LedgerRepository {
   async prepareImportJobRetry(jobId: string) {
     await this.db
       .prepare(
-        "UPDATE import_jobs SET retry_count=retry_count+1,status='uploaded',ocr_job_id=NULL,aleph_tool=NULL,ocr_submitted_at=NULL,ocr_progress=0,ocr_stage=NULL,ocr_current_page=NULL,ocr_total_pages=NULL,ocr_completed_at=NULL,ocr_event_sequence=0,error_message=NULL,error_code=NULL,error_stage=NULL,error_request_id=NULL,error_retryable=0,error_terminal=0,failed_external_job_id=NULL,cancelable=0,retryable=0,updated_at=? WHERE id=?",
+        "UPDATE import_jobs SET retry_count=retry_count+1,status='uploaded',ocr_job_id=NULL,aleph_tool=NULL,source_access_token_hash=NULL,source_access_token_expires_at=NULL,source_access_token_revoked_at=NULL,ocr_submitted_at=NULL,ocr_progress=0,ocr_stage=NULL,ocr_current_page=NULL,ocr_total_pages=NULL,ocr_completed_at=NULL,ocr_event_sequence=0,error_message=NULL,error_code=NULL,error_stage=NULL,error_request_id=NULL,error_retryable=0,error_terminal=0,failed_external_job_id=NULL,cancelable=0,retryable=0,updated_at=? WHERE id=?",
       )
       .bind(now(), jobId)
       .run();
@@ -1381,9 +1439,9 @@ export class D1LedgerRepository {
     const timestamp = now();
     await this.db
       .prepare(
-        "UPDATE import_jobs SET deleted_at=?,deleted_by_user_id=?,updated_at=?,updated_by_user_id=? WHERE id=? AND deleted_at IS NULL",
+        "UPDATE import_jobs SET deleted_at=?,deleted_by_user_id=?,source_access_token_revoked_at=COALESCE(source_access_token_revoked_at,?),updated_at=?,updated_by_user_id=? WHERE id=? AND deleted_at IS NULL",
       )
-      .bind(timestamp, actorId, timestamp, actorId, jobId)
+      .bind(timestamp, actorId, timestamp, timestamp, actorId, jobId)
       .run();
   }
   async getImportedRecord(recordId: string) {

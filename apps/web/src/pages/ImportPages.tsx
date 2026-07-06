@@ -5,7 +5,7 @@ import {
   ShoppingCartIcon,
   XCircleIcon,
 } from "@phosphor-icons/react";
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { IconTile, IosButton, IosCard, IosField, IosSegment, IosSheet } from "../components/ios/IosDesign";
@@ -23,7 +23,7 @@ import { cancelImportJob, deleteImportJob, retryImportJob } from "../features/im
 import { diagnoseImportOcrJob, type AlephToolsDiagnosticsResponse } from "../features/imports/diagnostics";
 import { useActiveBook } from "../hooks/useActiveBook";
 import { useApi } from "../hooks/useApi";
-import { api, apiFetchWithRefresh } from "../lib";
+import { api, ApiError, apiFetchWithRefresh } from "../lib";
 
 type Job = ImportJobStatus & {
   fileType?: string;
@@ -381,6 +381,12 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
       setBusyJobId("");
     }
   };
+  const removeMissing = useCallback(
+    (jobId: string) => {
+      removeImportJobFromCache(book?.id, user?.id, jobId);
+    },
+    [book?.id, user?.id],
+  );
   const diagnose = async (job: Job) => {
     setBusyJobId(job.id);
     try {
@@ -390,6 +396,15 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
       if (summary.ok) toast.success(summary.title, options);
       else toast.warning(summary.title, options);
     } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 404) {
+        removeMissing(job.id);
+        toast.warning("识别任务已不存在", {
+          description: "已从当前列表移除这条过期任务。",
+          duration: 3000,
+          closeButton: true,
+        });
+        return;
+      }
       toast.error(cause instanceof Error ? cause.message : "诊断失败", {
         duration: 4000,
         closeButton: true,
@@ -452,6 +467,7 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
                   onDiagnose={
                     showDiagnostics && canDiagnoseImportJob(job) ? () => void diagnose(job) : undefined
                   }
+                  onMissing={removeMissing}
                   key={job.id}
                 />
               ))}
@@ -615,6 +631,7 @@ function ImportJobCard({
   onCancel,
   onDelete,
   onDiagnose,
+  onMissing,
 }: {
   job: Job;
   busy: boolean;
@@ -622,6 +639,7 @@ function ImportJobCard({
   onCancel: () => void;
   onDelete: () => void;
   onDiagnose?: () => void;
+  onMissing?: (jobId: string) => void;
 }) {
   const tone =
     job.status === "failed" ? "failed" : terminalImportStatuses.has(job.status) ? "done" : "processing";
@@ -629,7 +647,7 @@ function ImportJobCard({
   const statusText = formatJobStatus(job);
   return (
     <IosCard className={`ios-import-job ${tone}`}>
-      <ImportJobPreview job={job} tone={tone} fallbackIcon={Icon} />
+      <ImportJobPreview job={job} tone={tone} fallbackIcon={Icon} onMissing={onMissing} />
       <span>
         <b>{job.fileName}</b>
         <small>{statusText}</small>
@@ -676,10 +694,12 @@ function ImportJobPreview({
   job,
   tone,
   fallbackIcon: FallbackIcon,
+  onMissing,
 }: {
   job: Job;
   tone: "done" | "failed" | "processing";
   fallbackIcon: JobIcon;
+  onMissing?: (jobId: string) => void;
 }) {
   if (!isImageJob(job)) {
     return (
@@ -689,17 +709,19 @@ function ImportJobPreview({
       </div>
     );
   }
-  return <ImageJobThumbnail job={job} tone={tone} fallbackIcon={FallbackIcon} />;
+  return <ImageJobThumbnail job={job} tone={tone} fallbackIcon={FallbackIcon} onMissing={onMissing} />;
 }
 
 function ImageJobThumbnail({
   job,
   tone,
   fallbackIcon: FallbackIcon,
+  onMissing,
 }: {
   job: Job;
   tone: "done" | "failed" | "processing";
   fallbackIcon: JobIcon;
+  onMissing?: (jobId: string) => void;
 }) {
   const holderRef = useRef<HTMLDivElement | null>(null);
   const [thumbnailUrl, setThumbnailUrl] = useState("");
@@ -730,6 +752,10 @@ function ImageJobThumbnail({
       void enqueueThumbnailLoad(async () => {
         if (cancelled) return;
         const response = await apiFetchWithRefresh(`/imports/${job.id}/file`, { signal: controller?.signal });
+        if (response.status === 404) {
+          onMissing?.(job.id);
+          return;
+        }
         if (!response.ok) throw new Error("图片预览读取失败");
         const source = await response.blob();
         const thumbnail = await createPreviewThumbnail(source, {
@@ -772,7 +798,7 @@ function ImageJobThumbnail({
       observer.disconnect();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [cacheKey, job.id]);
+  }, [cacheKey, job.id, onMissing]);
 
   return (
     <div className={`ios-import-preview ${tone}`} ref={holderRef}>

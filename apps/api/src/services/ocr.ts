@@ -50,6 +50,15 @@ export type AlephPlainOcrResult = {
   metadata?: { input?: { converted?: boolean } };
 };
 export type AlephOcrResult = AlephPlainOcrResult;
+export type AlephOcrClientSource = {
+  type: "client_source";
+  sourceId: string;
+  accessToken: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  checksumSha256?: string;
+};
 
 export class AlephToolsError extends Error {
   code: string;
@@ -82,17 +91,20 @@ export class AlephToolsClient {
   ) {}
 
   async createOcrJob(
-    file: { bytes: ArrayBuffer; filename: string; mimeType: string },
+    source: AlephOcrClientSource,
     options: { callbackUrl?: string; metadata?: Record<string, unknown>; idempotencyKey?: string } = {},
   ): Promise<AlephOcrJob> {
-    const form = new FormData();
-    form.append("file", new File([file.bytes], file.filename, { type: file.mimeType }));
-    if (options.callbackUrl) form.append("callbackUrl", options.callbackUrl);
-    if (options.metadata) form.append("metadata", JSON.stringify(options.metadata));
     return this.request<AlephOcrJob>("/v1/tools/ocr", {
       method: "POST",
-      body: form,
-      headers: options.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : undefined,
+      body: JSON.stringify({
+        source,
+        ...(options.callbackUrl ? { callbackUrl: options.callbackUrl } : {}),
+        ...(options.metadata ? { metadata: options.metadata } : {}),
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : {}),
+      },
     });
   }
 

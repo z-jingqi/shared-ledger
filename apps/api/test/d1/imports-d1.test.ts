@@ -141,6 +141,78 @@ describe("D1 image import and OCR quota integrity", () => {
     expect(context.db.rows.image_ocr_usage[0].import_job_id).toBe(job!.id);
   });
 
+  it("creates Aleph OCR sourceRef jobs and serves original source only to the bound Aleph job", async () => {
+    const context = createD1TestApp();
+    const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
+    const book = seedBook(context.db, user, { id: "book_pro" });
+    const form = new FormData();
+    form.set("file", new File(["image"], "receipt.heic", { type: "image/heic" }));
+
+    const uploaded = await context.app.request(
+      `/books/${book.id}/imports`,
+      { method: "POST", headers: authHeaders(user), body: form },
+      context.env,
+    );
+    const uploadedBody = await uploaded.json<any>();
+    const job = await context.repository.getImportJob(uploadedBody.job.id);
+    const alephRequest = context.alephTools.requests.find((request) => request.url.endsWith("/v1/tools/ocr"));
+    const alephBody = (await alephRequest!.json()) as {
+      source: { accessToken: string; [key: string]: unknown };
+    };
+
+    expect(uploaded.status).toBe(202);
+    expect(job?.ocrJobId).toBeTruthy();
+    expect(alephBody.source).toMatchObject({
+      type: "client_source",
+      sourceId: job!.id,
+      filename: "receipt.heic",
+      mimeType: "image/heic",
+      sizeBytes: 5,
+    });
+    expect(alephBody.source.checksumSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(alephBody.source.accessToken).toBeTruthy();
+    expect(context.db.rows.import_jobs[0].source_access_token_hash).toBeTruthy();
+
+    const missingAlephJob = await context.app.request(
+      `/internal/aleph-tools/import-sources/${job!.id}`,
+      { headers: { Authorization: `Bearer ${alephBody.source.accessToken}` } },
+      context.env,
+    );
+    expect(missingAlephJob.status).toBe(401);
+
+    const source = await context.app.request(
+      `/internal/aleph-tools/import-sources/${job!.id}`,
+      {
+        headers: {
+          Authorization: `Bearer ${alephBody.source.accessToken}`,
+          "X-Aleph-Job-Id": job!.ocrJobId!,
+        },
+      },
+      context.env,
+    );
+    expect(source.status).toBe(200);
+    expect(source.headers.get("Content-Type")).toBe("image/heic");
+    expect(await source.text()).toBe("image");
+
+    const cancelled = await context.app.request(
+      `/imports/${job!.id}/cancel`,
+      { method: "POST", headers: authHeaders(user) },
+      context.env,
+    );
+    expect(cancelled.status).toBe(200);
+    const revoked = await context.app.request(
+      `/internal/aleph-tools/import-sources/${job!.id}`,
+      {
+        headers: {
+          Authorization: `Bearer ${alephBody.source.accessToken}`,
+          "X-Aleph-Job-Id": job!.ocrJobId!,
+        },
+      },
+      context.env,
+    );
+    expect(revoked.status).toBe(410);
+  });
+
   it("finalizes a ready OCR job from status stream snapshots when no Aleph events arrive", async () => {
     const context = createD1TestApp();
     const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });

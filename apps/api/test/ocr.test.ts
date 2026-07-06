@@ -10,7 +10,7 @@ import type { D1LedgerRepository } from "../src/repository";
 import type { WorkerServiceBinding } from "../src/types";
 
 describe("Aleph Tools client", () => {
-  it("calls Aleph Tools through service binding and sends only supported OCR multipart fields", async () => {
+  it("calls Aleph Tools through service binding and sends a client source reference", async () => {
     const requests: Request[] = [];
     const service: WorkerServiceBinding = {
       fetch: vi.fn(async (request: Request) => {
@@ -21,9 +21,12 @@ describe("Aleph Tools client", () => {
 
     const job = await new AlephToolsClient(service, "secret").createOcrJob(
       {
-        bytes: new TextEncoder().encode("image").buffer,
+        type: "client_source",
+        sourceId: "import_1",
+        accessToken: "source_token",
         filename: "receipt.png",
         mimeType: "image/png",
+        sizeBytes: 123,
       },
       {
         callbackUrl: "https://api.example.com/imports/aleph-webhook",
@@ -37,11 +40,20 @@ describe("Aleph Tools client", () => {
     expect(requests[0]?.method).toBe("POST");
     expect(requests[0]?.headers.get("Authorization")).toBe("Bearer secret");
     expect(requests[0]?.headers.get("Idempotency-Key")).toBe("ocr:import_1:0");
-    const body = await requests[0]!.formData();
-    expect([...body.keys()].sort()).toEqual(["callbackUrl", "file", "metadata"]);
-    expect(body.get("file")).toBeInstanceOf(File);
-    expect(body.get("callbackUrl")).toBe("https://api.example.com/imports/aleph-webhook");
-    expect(JSON.parse(String(body.get("metadata")))).toEqual({ importJobId: "import_1", phase: "ocr" });
+    expect(requests[0]?.headers.get("Content-Type")).toBe("application/json");
+    const body = await requests[0]!.json();
+    expect(body).toEqual({
+      source: {
+        type: "client_source",
+        sourceId: "import_1",
+        accessToken: "source_token",
+        filename: "receipt.png",
+        mimeType: "image/png",
+        sizeBytes: 123,
+      },
+      callbackUrl: "https://api.example.com/imports/aleph-webhook",
+      metadata: { importJobId: "import_1", phase: "ocr" },
+    });
   });
 
   it("requests Aleph Tools job cancellation through service binding", async () => {
