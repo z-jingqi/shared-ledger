@@ -124,12 +124,19 @@ export const categorySchema = z.object({
   icon: z.string().max(40).default("tag"),
   sortOrder: z.number().int().min(0).default(0),
 });
+export const aiImportItemSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  amount: moneySchema,
+  categoryName: z.string().trim().min(1).max(30).optional(),
+  note: z.string().trim().max(500).optional(),
+});
 export const aiImportRecordSchema = z.object({
   type: z.enum(transactionTypes),
   amount: moneySchema,
   occurredAt: z.string(),
-  note: z.string().max(500).optional(),
-  categoryName: z.string().max(30).optional(),
+  note: z.string().trim().max(500).optional(),
+  categoryName: z.string().trim().min(1).max(30).optional(),
+  items: z.array(aiImportItemSchema).default([]),
   confidence: z.number().min(0).max(1),
   warnings: z.array(z.string()).default([]),
 });

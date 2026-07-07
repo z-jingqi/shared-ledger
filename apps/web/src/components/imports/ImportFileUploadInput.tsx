@@ -6,7 +6,13 @@ import {
   supportedFileAccept,
   unsupportedFileMessage,
 } from "../../features/imports/files";
-import { uploadImportFiles, type ImportBatchJob } from "../../features/imports/upload";
+import {
+  createUploadPlaceholders,
+  revokeUploadPlaceholderUrls,
+  uploadImportFiles,
+  type ImportBatchJob,
+  type UploadPlaceholder,
+} from "../../features/imports/upload";
 
 export type ImportFileUploadInputHandle = {
   open: () => void;
@@ -15,14 +21,18 @@ export type ImportFileUploadInputHandle = {
 type ImportFileUploadInputProps = {
   bookId?: string;
   disabled?: boolean;
-  onUploaded?: (jobs: ImportBatchJob[]) => void | Promise<void>;
+  onUploadStart?: (placeholders: UploadPlaceholder[]) => void | Promise<void>;
+  onUploaded?: (jobs: ImportBatchJob[], placeholders: UploadPlaceholder[]) => void | Promise<void>;
+  onUploadError?: (placeholders: UploadPlaceholder[]) => void | Promise<void>;
   onUploadingChange?: (uploading: boolean) => void;
 };
 
 export function ImportFileUploadInput({
   bookId,
   disabled = false,
+  onUploadStart,
   onUploaded,
+  onUploadError,
   onUploadingChange,
   ref,
 }: ImportFileUploadInputProps & { ref?: Ref<ImportFileUploadInputHandle> }) {
@@ -76,6 +86,8 @@ export function ImportFileUploadInput({
     }
 
     setUploadingState(true);
+    const placeholders = createUploadPlaceholders(selectedFiles);
+    await onUploadStart?.(placeholders);
     try {
       const { jobs } = await uploadImportFiles(bookId, selectedFiles);
       toast.success("图片已上传", {
@@ -83,8 +95,10 @@ export function ImportFileUploadInput({
         duration: 3000,
         closeButton: true,
       });
-      await onUploaded?.(jobs);
+      await onUploaded?.(jobs, placeholders);
     } catch (cause) {
+      await onUploadError?.(placeholders);
+      if (!onUploadError) revokeUploadPlaceholderUrls(placeholders);
       toast.error(cause instanceof Error ? cause.message : "上传失败", { duration: 3000, closeButton: true });
     } finally {
       setUploadingState(false);

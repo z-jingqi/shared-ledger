@@ -1167,6 +1167,16 @@ export class D1LedgerRepository {
       .run();
     return this.getImportJob(jobId);
   }
+  async markImportJobAiProcessing(jobId: string, stage = "ai_text_ready", progress = 100) {
+    const timestamp = now();
+    await this.db
+      .prepare(
+        "UPDATE import_jobs SET status='ai_processing',ocr_stage=?,ocr_progress=?,cancelable=1,retryable=0,updated_at=?,updated_by_user_id=? WHERE id=?",
+      )
+      .bind(stage, progress, timestamp, systemActorId, jobId)
+      .run();
+    return this.getImportJob(jobId);
+  }
   async markImportJobCancelRequested(jobId: string, actorId = systemActorId) {
     const timestamp = now();
     await this.db
@@ -1328,7 +1338,7 @@ export class D1LedgerRepository {
   async prepareImportJobAiRetry(jobId: string) {
     await this.db
       .prepare(
-        "UPDATE import_jobs SET retry_count=retry_count+1,status='ai_processing',error_message=NULL,error_code=NULL,error_stage=NULL,error_request_id=NULL,error_retryable=0,error_terminal=0,failed_external_job_id=NULL,cancelable=0,retryable=0,updated_at=? WHERE id=?",
+        "UPDATE import_jobs SET retry_count=retry_count+1,status='ai_processing',ocr_stage='ai_text_ready',ocr_progress=100,error_message=NULL,error_code=NULL,error_stage=NULL,error_request_id=NULL,error_retryable=0,error_terminal=0,failed_external_job_id=NULL,cancelable=1,retryable=0,updated_at=? WHERE id=?",
       )
       .bind(now(), jobId)
       .run();
@@ -1379,6 +1389,7 @@ export class D1LedgerRepository {
       occurredAt: string;
       note?: string;
       categoryName?: string;
+      items?: Array<{ name: string; amount: number; categoryName?: string; note?: string }>;
       confidence: number;
       warnings: string[];
     }>,

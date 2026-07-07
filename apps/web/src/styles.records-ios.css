@@ -956,6 +956,13 @@
   font-size: 12px;
 }
 
+.ios-import-ai-progress {
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .ios-import-error-stage {
   width: fit-content;
   margin-top: 7px;
@@ -1094,6 +1101,47 @@
   font-size: 12px;
 }
 
+.ios-pending-items {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ios-pending-items li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-radius: 9px;
+  padding: 7px 9px;
+  background: #f7f9fc;
+  color: #172032;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.ios-pending-items span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ios-pending-items em {
+  margin-left: 6px;
+  color: var(--ios-muted);
+  font-style: normal;
+  font-weight: 700;
+}
+
+.ios-pending-items .more {
+  justify-content: center;
+  color: var(--ios-muted);
+  font-weight: 800;
+}
+
 .ios-pending-actions {
   display: flex;
   gap: 8px;
@@ -1121,6 +1169,45 @@
   border: 0;
   background: var(--ios-accent);
   color: #fff;
+}
+
+.ios-pending-item-editor {
+  display: grid;
+  gap: 9px;
+}
+
+.ios-pending-item-edit-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 86px;
+  gap: 8px;
+  border-radius: 12px;
+  padding: 9px;
+  background: #f7f9fc;
+}
+
+.ios-pending-item-edit-row input:nth-child(3) {
+  grid-column: 1 / 2;
+}
+
+.ios-pending-item-edit-row button {
+  grid-column: 2 / 3;
+  border: 0;
+  border-radius: 10px;
+  background: #fff2ef;
+  color: var(--ios-danger);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.ios-pending-add-item {
+  height: 40px;
+  border: 1px dashed #ffc3a8;
+  border-radius: 12px;
+  background: #fff;
+  color: var(--ios-accent);
+  font: inherit;
+  font-weight: 900;
 }
 
 .ios-spin {

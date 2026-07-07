@@ -524,6 +524,18 @@ function updateImportJobRows(rows: Row[], sql: string, values: unknown[]) {
     });
     return;
   }
+  if (sql.includes("status='ai_processing'") && sql.includes("ocr_stage=?")) {
+    patch(values[4], {
+      status: "ai_processing",
+      ocr_stage: values[0],
+      ocr_progress: values[1],
+      cancelable: 1,
+      retryable: 0,
+      updated_at: values[2],
+      updated_by_user_id: values[3],
+    });
+    return;
+  }
   if (sql.includes("source_access_token_hash=?")) {
     patch(values[4], {
       source_access_token_hash: values[0],
@@ -590,6 +602,8 @@ function updateImportJobRows(rows: Row[], sql: string, values: unknown[]) {
         Object.assign(row, {
           retry_count: Number(row.retry_count ?? 0) + 1,
           status: sql.includes("status='ai_processing'") ? "ai_processing" : "uploaded",
+          ocr_stage: sql.includes("ocr_stage='ai_text_ready'") ? "ai_text_ready" : row.ocr_stage,
+          ocr_progress: sql.includes("ocr_progress=100") ? 100 : row.ocr_progress,
           ocr_job_id: sql.includes("ocr_job_id=NULL") ? null : row.ocr_job_id,
           source_access_token_hash: sql.includes("source_access_token_hash=NULL")
             ? null
@@ -601,6 +615,8 @@ function updateImportJobRows(rows: Row[], sql: string, values: unknown[]) {
             ? null
             : row.source_access_token_revoked_at,
           updated_at: values[0],
+          cancelable: sql.includes("cancelable=1") ? 1 : row.cancelable,
+          retryable: sql.includes("retryable=0") ? 0 : row.retryable,
         }),
       );
     return;

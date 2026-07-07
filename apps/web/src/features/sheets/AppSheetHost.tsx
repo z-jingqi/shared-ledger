@@ -25,7 +25,8 @@ export function AppSheetHost({ bookId, currency }: { bookId?: string; currency?:
     );
   }
   if (sheet.type === "imports") return <ImportHistorySheet onClose={closeSheet} />;
-  if (sheet.type === "pending-imports") return <PendingImportsSheet onClose={closeSheet} />;
+  if (sheet.type === "pending-imports")
+    return <PendingImportsSheet jobId={sheet.jobId} onClose={closeSheet} />;
   if (sheet.type === "members") return <MembersSheet onClose={closeSheet} />;
   if (sheet.type === "ai") return <AiSheet onClose={closeSheet} />;
   if (sheet.type === "settings-export") return <ExportSheet onClose={closeSheet} />;

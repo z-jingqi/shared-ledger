@@ -23,7 +23,13 @@ import { z } from "zod";
 export { AlephAIError, createAlephAIClient };
 export type { AlephAIClient, ErrorCode, InvokeRequest, JsonObject, StreamEvent, UserUsageResponse };
 
-export type AiContext = { bookId: string; userId: string; page?: string; text: string };
+export type AiContext = {
+  bookId: string;
+  userId: string;
+  page?: string;
+  text: string;
+  categories?: Array<{ name: string; type: "income" | "expense" }>;
+};
 export type AiChatMessage = { role: "system" | "user" | "assistant" | "tool"; content?: string };
 export type AiTextStream = { textStream: AsyncIterable<string> };
 export type LedgerAiUser = { id: string; plan: string };
@@ -32,6 +38,7 @@ export type LedgerAiRuntime = {
   env: string;
   user: LedgerAiUser;
   project?: string;
+  importTimeoutMs?: number;
 };
 
 export interface AiProvider {
@@ -47,8 +54,14 @@ const chatTask = "ledger.chat";
 const skillSelectTask = "ledger.skill_select";
 const skillStepTask = "ledger.skill_step";
 
-const importSystemPrompt =
-  "You extract bookkeeping entries. Return only JSON matching the supplied schema. Do not invent records unsupported by the supplied text.";
+const importSystemPrompt = [
+  "You extract bookkeeping entries from OCR text.",
+  "Return only JSON matching the supplied schema.",
+  "Use all information supported by the text: merchant/receipt purpose as note, date, total amount, transaction type, category, and line items.",
+  "Prefer category names from the provided existing categories. If none fits and the text clearly implies a category, return a concise new categoryName.",
+  "For receipt line items, include every clear item name and amount. If a line item is uncertain, omit that item and add a short warning.",
+  "Do not invent unsupported records or unsupported amounts. Leave only truly unknowable fields empty and explain them in warnings.",
+].join("\n");
 const chatSystemPrompt = [
   "你是一个正常、友好、可靠的通用聊天机器人，同时也是一起记应用的智能助手。",
   "用户可以聊任何话题；和账本无关的问题也要自然回答，不要强行转回记账。",
@@ -188,36 +201,53 @@ export function createAlephAiProvider(runtime: LedgerAiRuntime): AiProvider {
       return step;
     },
     async structureImport(input: AiContext): Promise<z.infer<typeof aiImportRecordSchema>[]> {
-      const response = await runtime.client.invoke<unknown>(
-        invokeRequest({
-          task: skillStepTask,
-          mode: "object",
-          messages: [
-            { role: "system", content: importSystemPrompt },
-            {
-              role: "user",
-              content: JSON.stringify(
-                {
-                  bookId: input.bookId,
-                  userId: input.userId,
-                  page: input.page ?? "导入",
-                  text: input.text,
-                },
-                null,
-                2,
-              ),
-            },
-          ],
-          responseFormat: responseFormat("ledger_import_records", importRecordsJsonSchema),
-          temperature: 0,
-          maxTokens: 2400,
-        }),
+      const response = await withTimeout(
+        runtime.client.invoke<unknown>(
+          invokeRequest({
+            task: skillStepTask,
+            mode: "object",
+            messages: [
+              { role: "system", content: importSystemPrompt },
+              {
+                role: "user",
+                content: JSON.stringify(
+                  {
+                    bookId: input.bookId,
+                    userId: input.userId,
+                    page: input.page ?? "导入",
+                    existingCategories: input.categories ?? [],
+                    text: input.text,
+                  },
+                  null,
+                  2,
+                ),
+              },
+            ],
+            responseFormat: responseFormat("ledger_import_records", importRecordsJsonSchema),
+            temperature: 0,
+            maxTokens: 2400,
+          }),
+        ),
+        runtime.importTimeoutMs ?? 45_000,
       );
       return importRecordsOutputSchema
         .parse(response.output)
         .records.map((record) => aiImportRecordSchema.parse(record));
     },
   };
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return promise;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => {
+      reject(new AlephAIError("provider_unavailable", "AI 分析超时，请稍后重试"));
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timeout) clearTimeout(timeout);
+  });
 }
 
 function toAlephMessage(message: AiChatMessage): ChatMessage {
@@ -295,6 +325,20 @@ const importRecordJsonSchema = {
     occurredAt: { type: "string" },
     note: { type: "string", maxLength: 500 },
     categoryName: { type: "string", maxLength: 30 },
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["name", "amount"],
+        properties: {
+          name: { type: "string", maxLength: 120 },
+          amount: moneyJsonSchema,
+          categoryName: { type: "string", maxLength: 30 },
+          note: { type: "string", maxLength: 500 },
+        },
+      },
+    },
     confidence: { type: "number", minimum: 0, maximum: 1 },
     warnings: { type: "array", items: { type: "string" } },
   },

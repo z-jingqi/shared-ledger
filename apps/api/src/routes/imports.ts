@@ -66,9 +66,11 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
         httpMetadata: { contentType: resolvedFileType },
         customMetadata: { importJobId: job.id, bookId: input.bookId, uploadedBy: input.userId },
       });
-      return await submitAlephOcrJob(context.env, input.repository, job, {
+      const submitted = await submitAlephOcrJob(context.env, input.repository, job, {
         requestOrigin: new URL(context.req.url).origin,
       });
+      if (!submitted) throw new Error("导入任务创建失败");
+      return submitted;
     } catch (error) {
       await markFailed(input.repository, job.id, error, "ocr");
       throw error;
@@ -118,7 +120,7 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     try {
       assertImageImportFile(file);
       const job = await createJob(context, { bookId, userId: user.id, file, repository, autoConfirm });
-      return context.json({ job }, 202);
+      return context.json({ job: importJobStatusPayload(job) }, 202);
     } catch (error) {
       if (error instanceof ImportUploadError) return jsonError(context, error.message, error.status);
       return jsonError(context, error instanceof Error ? error.message : "文件上传或任务提交失败", 502);
@@ -158,7 +160,7 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
           }),
         );
       }
-      return context.json({ jobs }, 202);
+      return context.json({ jobs: jobs.map(importJobStatusPayload) }, 202);
     } catch (error) {
       if (error instanceof ImportUploadError) return jsonError(context, error.message, error.status);
       return jsonError(context, error instanceof Error ? error.message : "文件上传或任务提交失败", 502);
@@ -172,9 +174,11 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     if (!context.env.DB) return jsonError(context, "D1 运行时不可用", 503);
     return context.json({
       retentionDays: importJobRetentionDays,
-      imports: await new D1LedgerRepository(context.env.DB).listImportJobs(bookId, {
-        status: parseImportStatusFilter(context.req.query("status")),
-      }),
+      imports: (
+        await new D1LedgerRepository(context.env.DB).listImportJobs(bookId, {
+          status: parseImportStatusFilter(context.req.query("status")),
+        })
+      ).map(importJobStatusPayload),
     });
   });
 
@@ -289,18 +293,36 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
                 !terminalImportStatuses.has(job.status)
               );
             });
+            const activeLocalJobs = jobs.filter(
+              (job): job is ImportJob => job !== null && job.status === "ai_processing",
+            );
             if (!activeAlephJobs.length) {
+              if (activeLocalJobs.length) {
+                await watchLocalImportJobs(context.env, repository, activeLocalJobs, async (nextJob) => {
+                  if (stopped) return;
+                  sendJob(nextJob);
+                });
+                if (!stopped) sendEvent("stream-idle", { reason: "local_processing" });
+              }
               close();
               return;
             }
-            await Promise.all(
-              activeAlephJobs.map((job) =>
+            await Promise.all([
+              ...activeAlephJobs.map((job) =>
                 proxyAlephEvents(context.env, repository, job, async (nextJob) => {
                   if (stopped) return;
                   sendJob(nextJob);
                 }),
               ),
-            );
+              ...(activeLocalJobs.length
+                ? [
+                    watchLocalImportJobs(context.env, repository, activeLocalJobs, async (nextJob) => {
+                      if (stopped) return;
+                      sendJob(nextJob);
+                    }),
+                  ]
+                : []),
+            ]);
             close();
           } catch (error) {
             if (!stopped) {
@@ -350,7 +372,7 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     const job = await repository.getImportJob(context.req.param("id"));
     if (!job) return jsonError(context, "导入任务不存在", 404);
     const denied = await requireMember(context, store, job.bookId);
-    return denied ?? context.json({ job });
+    return denied ?? context.json({ job: importJobStatusPayload(job) });
   });
 
   app.post("/imports/:id/cancel", async (context) => {
@@ -365,9 +387,11 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     if (job.status === "completed" || job.status === "pending_confirmation") {
       return jsonError(context, "该导入任务已经生成记录，不能取消", 409);
     }
+    if (job.status === "failed") return jsonError(context, "该导入任务已结束，不能取消", 409);
     try {
       const nextJob = await cancelImportJob(context.env, repository, job);
-      return context.json({ job: nextJob ?? (await repository.getImportJob(job.id)) });
+      const responseJob = nextJob ?? (await repository.getImportJob(job.id));
+      return context.json({ job: responseJob ? importJobStatusPayload(responseJob) : null });
     } catch (error) {
       return jsonError(context, error instanceof Error ? error.message : "取消导入失败", 502);
     }
@@ -405,7 +429,8 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     try {
       const result = await retryImportJob(context.env, repository, job, new URL(context.req.url).origin);
       const nextJob = Array.isArray(result) ? await repository.getImportJob(job.id) : result;
-      return context.json({ job: nextJob ?? (await repository.getImportJob(job.id)) });
+      const responseJob = nextJob ?? (await repository.getImportJob(job.id));
+      return context.json({ job: responseJob ? importJobStatusPayload(responseJob) : null });
     } catch (error) {
       return jsonError(context, error instanceof Error ? error.message : "重试导入失败", 502);
     }
@@ -455,10 +480,29 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     const denied = await requireMember(context, store, job.bookId, user);
     if (denied) return { response: denied };
     const suggested = aiImportRecordSchema.parse(record.suggestedTransaction);
-    const [category, member] = await Promise.all([
-      repository.findCategoryByName(job.userId, suggested.categoryName, suggested.type),
-      repository.findMember(job.bookId, job.userId),
-    ]);
+    const categoryCache = new Map<string, Awaited<ReturnType<D1LedgerRepository["findOrCreateCategory"]>>>();
+    const resolveCategory = async (name?: string) => {
+      const normalized = name?.trim();
+      if (!normalized) return null;
+      const cacheKey = `${suggested.type}:${normalized}`;
+      const cached = categoryCache.get(cacheKey);
+      if (cached) return cached;
+      const category = await repository.findOrCreateCategory(job.userId, normalized, suggested.type);
+      categoryCache.set(cacheKey, category);
+      return category;
+    };
+    const category = await resolveCategory(suggested.categoryName);
+    const member = await repository.findMember(job.bookId, job.userId);
+    const items = [];
+    for (const item of suggested.items ?? []) {
+      const itemCategory = await resolveCategory(item.categoryName);
+      items.push({
+        name: item.name,
+        amount: item.amount,
+        categoryId: itemCategory?.id,
+        note: item.note,
+      });
+    }
     const transaction = await repository.createTransaction(job.bookId, job.userId, {
       type: suggested.type,
       amount: suggested.amount,
@@ -466,7 +510,7 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
       memberId: member?.id,
       note: suggested.note,
       occurredAt: suggested.occurredAt,
-      items: [],
+      items,
     } as any);
     const updated = await repository.updateImportedRecord(
       record.id,
@@ -474,7 +518,8 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
       "confirmed",
       user.id,
     );
-    return { record: updated, transaction };
+    const updatedJob = await completeImportJobIfNoPending(repository, job);
+    return { record: updated, transaction, job: importJobStatusPayload(updatedJob) };
   };
 
   app.post("/imported-records/:id/confirm", async (context) => {
@@ -502,7 +547,8 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
       "ignored",
       user.id,
     );
-    return context.json({ record: updated });
+    const updatedJob = await completeImportJobIfNoPending(repository, job);
+    return context.json({ record: updated, job: importJobStatusPayload(updatedJob) });
   });
 
   app.post("/imports/:id/confirm-all", async (context) => {
@@ -524,8 +570,19 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
       (record) => record.status === "pending",
     );
     if (!stillPending) await repository.updateImportJob(job.id, "completed");
-    return context.json({ confirmed });
+    const updatedJob = await repository.getImportJob(job.id);
+    return context.json({ confirmed, job: updatedJob ? importJobStatusPayload(updatedJob) : null });
   });
+}
+
+async function completeImportJobIfNoPending(repository: D1LedgerRepository, job: ImportJob) {
+  const stillPending = (await repository.listImportedRecords(job.id)).some(
+    (record) => record.status === "pending",
+  );
+  if (!stillPending && job.status === "pending_confirmation") {
+    await repository.updateImportJob(job.id, "completed");
+  }
+  return (await repository.getImportJob(job.id)) ?? job;
 }
 
 type AlephWebhookPayload = {
@@ -672,7 +729,7 @@ async function finalizeReadyAlephJob(
     await onJob(current);
     return;
   }
-  const processing = await repository.updateImportJob(job.id, "ai_processing");
+  const processing = await repository.markImportJobAiProcessing(job.id, "ai_text_ready");
   if (processing) await onJob(processing);
   try {
     await finalizeAlephOcrJob(env, repository, job.id);
@@ -681,6 +738,40 @@ async function finalizeReadyAlephJob(
   }
   const finished = await repository.getImportJob(job.id);
   if (finished) await onJob(finished);
+}
+
+async function watchLocalImportJobs(
+  env: Env,
+  repository: D1LedgerRepository,
+  jobs: ImportJob[],
+  onJob: (job: ImportJob) => Promise<void> | void,
+) {
+  const ids = [...new Set(jobs.map((job) => job.id))];
+  const deadline = Date.now() + localImportWatchDurationMs(env);
+  const lastSignatures = new Map(ids.map((id) => [id, ""]));
+  while (Date.now() < deadline) {
+    let active = false;
+    for (const id of ids) {
+      const job = await repository.getImportJob(id);
+      if (!job) continue;
+      const signature = `${job.status}:${job.ocrStage ?? ""}:${job.ocrProgress ?? ""}:${job.updatedAt}`;
+      if (lastSignatures.get(id) !== signature || job.status === "ai_processing") {
+        lastSignatures.set(id, signature);
+        await onJob(job);
+      }
+      if (!terminalImportStatuses.has(job.status)) active = true;
+    }
+    if (!active) return;
+    await sleep(env.APP_ENV === "test" ? 20 : 1200);
+  }
+}
+
+function localImportWatchDurationMs(env: Env) {
+  return env.APP_ENV === "test" ? 60 : 25_000;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function serveInternalImportSource(context: ImportRouteContext) {
@@ -771,6 +862,7 @@ function parseSseMessage(raw: string): AlephSseMessage | null {
 }
 
 function importJobStatusPayload(job: ImportJob) {
+  const progressText = importProgressText(job);
   return {
     id: job.id,
     bookId: job.bookId,
@@ -784,12 +876,31 @@ function importJobStatusPayload(job: ImportJob) {
     ...(job.errorRequestId ? { errorRequestId: job.errorRequestId } : {}),
     ...(job.errorStage ? { errorStage: job.errorStage } : {}),
     retryable: Boolean(job.errorRetryable || job.retryable),
-    cancelable: Boolean(job.cancelable),
+    cancelable: isImportJobCancelable(job),
+    ...(progressText ? { progressText } : {}),
     ...(typeof job.ocrProgress === "number" ? { progress: job.ocrProgress } : {}),
     ...(job.ocrStage ? { stage: job.ocrStage } : {}),
     ...(typeof job.ocrCurrentPage === "number" ? { currentPage: job.ocrCurrentPage } : {}),
     ...(typeof job.ocrTotalPages === "number" ? { totalPages: job.ocrTotalPages } : {}),
   };
+}
+
+function importProgressText(job: ImportJob) {
+  if (job.status !== "ai_processing") return "";
+  switch (job.ocrStage) {
+    case "ai_text_ready":
+      return "整理识别文本";
+    case "ai_structuring":
+      return "AI 分析明细";
+    case "ai_saving":
+      return "生成待确认记录";
+    default:
+      return "AI 分析中";
+  }
+}
+
+function isImportJobCancelable(job: ImportJob) {
+  return !terminalImportStatuses.has(job.status) && job.status !== "cancel_requested";
 }
 
 function parseImportStatusFilter(value: string | undefined): ImportJobStatusFilter {

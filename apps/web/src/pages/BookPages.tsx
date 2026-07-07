@@ -15,20 +15,14 @@ import {
 } from "../components/ios/IosDesign";
 import { useAuth } from "../features/auth/AuthProvider";
 import { yuan } from "../features/formatting/money";
+import { mergeLocalImportPlaceholders } from "../features/imports/cache";
+import type { ImportJobStatus } from "../features/imports/status";
 import { useAppSheetActions } from "../features/sheets/SheetContext";
 import { useActiveBook } from "../hooks/useActiveBook";
 import { useApi } from "../hooks/useApi";
 
 type TransactionResponse = { transactions: LedgerTransaction[] };
-type ImportJob = {
-  id?: string;
-  fileName?: string;
-  status: string;
-  progress?: number;
-  stage?: string;
-  currentPage?: number;
-  totalPages?: number;
-};
+type ImportJob = ImportJobStatus;
 type ImportResponse = { imports: ImportJob[] };
 
 export function BookHomePage() {
@@ -48,7 +42,7 @@ export function BookHomePage() {
   const income = sum(monthTransactions, "income");
   const expense = sum(monthTransactions, "expense");
   const todayExpense = sum(todayTransactions, "expense");
-  const importJobs = imports?.imports ?? [];
+  const importJobs = mergeLocalImportPlaceholders(book?.id, user?.id, imports?.imports ?? []);
   const processing = importJobs.filter(isProcessingJob);
   const pending = importJobs.filter((job) => job.status === "pending_confirmation");
   const failed = importJobs.filter((job) => job.status === "failed");
@@ -242,7 +236,9 @@ function formatHomeImportProgress(jobs: ImportJob[]) {
   if (jobs.every((job) => job.status === "cancel_requested"))
     return jobs.length > 1 ? `${jobs.length} 个任务取消中` : "取消中";
   if (first.status === "ai_processing")
-    return jobs.length > 1 ? `${jobs.length} 个文件，AI 分析中` : "AI 分析中";
+    return jobs.length > 1
+      ? `${jobs.length} 个文件，${first.progressText || "AI 分析中"}`
+      : first.progressText || "AI 分析中";
   if (typeof first.currentPage === "number" && typeof first.totalPages === "number") {
     return jobs.length > 1
       ? `${jobs.length} 个文件，第 ${first.currentPage}/${first.totalPages} 页`

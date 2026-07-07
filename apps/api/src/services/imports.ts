@@ -139,6 +139,7 @@ export async function cancelImportJob(env: Env, repository: D1LedgerRepository, 
   }
   if (job.status === "cancel_requested") return job;
   if (job.status === "cancelled") return job;
+  if (terminalImportStatuses.has(job.status)) throw new Error("该导入任务已结束，不能取消");
   if (job.ocrJobId && job.status === "ocr_processing") {
     const alephJob = await runtimeOcrClient(env).cancelJob(job.ocrJobId);
     const requested = await repository.markImportJobCancelRequested(job.id, job.userId);
@@ -292,13 +293,23 @@ async function finalizeImportJob(
       await repository.recordImageOcrUsage(job.id, latest.userId, shanghaiUsageDate());
     return existing;
   }
-  await repository.updateImportJob(job.id, "ai_processing");
+  await repository.markImportJobAiProcessing(job.id, "ai_text_ready");
   let suggestions;
   try {
+    await repository.updateOcrProgress(job.id, { stage: "ai_structuring", progress: 100 });
     suggestions = await structureForConfirmation({
       bookId: latest.bookId,
       userId: latest.userId,
       normalized,
+      categories: (await repository.listCategories(latest.userId))
+        .map((category) => ({
+          name: category.name,
+          type: category.type,
+        }))
+        .filter(
+          (category): category is { name: string; type: "income" | "expense" } =>
+            category.type === "income" || category.type === "expense",
+        ),
       ai: runtimeAiProvider(env, { id: latest.userId, plan: await repository.getUserPlan(latest.userId) }),
     });
   } catch (error) {
@@ -308,6 +319,7 @@ async function finalizeImportJob(
   const beforeCreate = await repository.getImportJob(job.id);
   if (!beforeCreate || blockedFinalizeStatuses.has(beforeCreate.status))
     return repository.listImportedRecords(job.id);
+  await repository.updateOcrProgress(job.id, { stage: "ai_saving", progress: 100 });
   const records = await repository.createImportedRecords(job.id, suggestions);
   if (records.length && isImageImportFileType(latest.fileType)) {
     await repository.recordImageOcrUsage(job.id, latest.userId, shanghaiUsageDate());
@@ -333,11 +345,31 @@ async function confirmImportedRecords(
       categoryName?: string;
       note?: string;
       occurredAt: string;
+      items?: Array<{ name: string; amount: number; categoryName?: string; note?: string }>;
     };
-    const [category, member] = await Promise.all([
-      repository.findCategoryByName(job.userId, suggested.categoryName, suggested.type),
-      repository.findMember(job.bookId, job.userId),
-    ]);
+    const categoryCache = new Map<string, Awaited<ReturnType<D1LedgerRepository["findOrCreateCategory"]>>>();
+    const resolveCategory = async (name?: string) => {
+      const normalized = name?.trim();
+      if (!normalized) return null;
+      const cacheKey = `${suggested.type}:${normalized}`;
+      const cached = categoryCache.get(cacheKey);
+      if (cached) return cached;
+      const category = await repository.findOrCreateCategory(job.userId, normalized, suggested.type);
+      categoryCache.set(cacheKey, category);
+      return category;
+    };
+    const category = await resolveCategory(suggested.categoryName);
+    const member = await repository.findMember(job.bookId, job.userId);
+    const items = [];
+    for (const item of suggested.items ?? []) {
+      const itemCategory = await resolveCategory(item.categoryName);
+      items.push({
+        name: item.name,
+        amount: item.amount,
+        categoryId: itemCategory?.id,
+        note: item.note,
+      });
+    }
     await repository.createTransaction(job.bookId, job.userId, {
       type: suggested.type,
       amount: suggested.amount,
@@ -345,8 +377,8 @@ async function confirmImportedRecords(
       memberId: member?.id,
       note: suggested.note,
       occurredAt: suggested.occurredAt,
-      items: [],
-    });
+      items,
+    } as any);
     await repository.updateImportedRecord(record.id, record.suggestedTransaction, "confirmed");
   }
 }

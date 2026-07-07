@@ -7,7 +7,8 @@ import {
   type ImportFileUploadInputHandle,
 } from "../components/imports/ImportFileUploadInput";
 import { useAuth } from "../features/auth/AuthProvider";
-import { upsertImportJobsInCache } from "../features/imports/cache";
+import { removeImportJobsFromCache, upsertImportJobsInCache } from "../features/imports/cache";
+import { revokeUploadPlaceholderUrls } from "../features/imports/upload";
 import { useInvitationBadge } from "../features/invitations/useInvitationBadge";
 import { AppSheetHost } from "../features/sheets/AppSheetHost";
 import { AppSheetProvider, useAppSheetActions } from "../features/sheets/SheetContext";
@@ -101,9 +102,27 @@ function AppFrameInner({ children }: { children: ReactNode }) {
               ref={uploadInputRef}
               bookId={book?.id}
               onUploadingChange={setUploading}
-              onUploaded={(jobs) => {
+              onUploadStart={(placeholders) => {
+                upsertImportJobsInCache(book?.id, user?.id, placeholders);
+                openSheet({ type: "imports" });
+              }}
+              onUploaded={(jobs, placeholders) => {
+                const removed = removeImportJobsFromCache(
+                  book?.id,
+                  user?.id,
+                  placeholders.map((item) => item.id),
+                );
+                revokeUploadPlaceholderUrls(removed.length ? removed : placeholders);
                 upsertImportJobsInCache(book?.id, user?.id, jobs);
                 openSheet({ type: "imports" });
+              }}
+              onUploadError={(placeholders) => {
+                const removed = removeImportJobsFromCache(
+                  book?.id,
+                  user?.id,
+                  placeholders.map((item) => item.id),
+                );
+                revokeUploadPlaceholderUrls(removed.length ? removed : placeholders);
               }}
             />
           ) : null}

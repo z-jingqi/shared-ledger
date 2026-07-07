@@ -29,7 +29,8 @@ import {
   IosTopBar,
 } from "../components/ios/IosDesign";
 import { useAuth } from "../features/auth/AuthProvider";
-import { terminalImportStatuses } from "../features/imports/status";
+import { mergeLocalImportPlaceholders } from "../features/imports/cache";
+import { terminalImportStatuses, type ImportJobStatus } from "../features/imports/status";
 import { useInvitationBadge } from "../features/invitations/useInvitationBadge";
 import { useAppSheetActions, type AppSheet } from "../features/sheets/SheetContext";
 import { useActiveBook } from "../hooks/useActiveBook";
@@ -37,7 +38,7 @@ import { useApi } from "../hooks/useApi";
 import { api } from "../lib";
 
 type Resource = { id: string; name: string; type?: "income" | "expense"; icon?: string; sortOrder?: number };
-type ImportJobSummary = { id: string; fileName?: string; status: string };
+type ImportJobSummary = ImportJobStatus;
 type ProfileEditState = {
   avatarUploading: boolean;
   email: string;
@@ -78,7 +79,7 @@ export function SettingsPage() {
   );
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const imports = importsData?.imports ?? [];
+  const imports = mergeLocalImportPlaceholders(book?.id, user?.id, importsData?.imports ?? []);
   const pendingCount = imports.filter((job) => job.status === "pending_confirmation").length;
   const queryBookId = new URLSearchParams(location.search).get("bookId");
   const membersBookId = book?.id ?? queryBookId;

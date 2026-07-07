@@ -42,7 +42,7 @@ import {
   supportedFileAccept,
   unsupportedFileMessage,
 } from "../features/imports/files";
-import { upsertImportJobsInCache } from "../features/imports/cache";
+import { mergeLocalImportPlaceholders, upsertImportJobsInCache } from "../features/imports/cache";
 import { terminalImportStatuses, watchImportJobs, type ImportJobStatus } from "../features/imports/status";
 import { uploadImportFiles } from "../features/imports/upload";
 import { useAppSheetActions } from "../features/sheets/SheetContext";
@@ -86,6 +86,7 @@ type FormAttachment = {
   jobId?: string;
   errorMessage?: string;
   progress?: number;
+  progressText?: string;
   stage?: string;
   currentPage?: number;
   totalPages?: number;
@@ -303,6 +304,7 @@ function attachmentFromJob(item: FormAttachment, job: ImportJobStatus): FormAtta
     jobId: job.id,
     errorMessage: job.errorMessage,
     progress: job.progress,
+    progressText: job.progressText,
     stage: job.stage,
     currentPage: job.currentPage,
     totalPages: job.totalPages,
@@ -342,7 +344,7 @@ function useRecordsPageController() {
     () => Object.fromEntries((categories?.categories ?? []).map((item) => [item.id, item.name])),
     [categories?.categories],
   );
-  const importJobs = imports?.imports ?? emptyImportJobs;
+  const importJobs = mergeLocalImportPlaceholders(book?.id, user?.id, imports?.imports ?? emptyImportJobs);
   const activeImports = useMemo(() => importJobs.filter(isActiveImport), [importJobs]);
   const activeImportWatchKey = useMemo(
     () => activeImports.map((job) => `${job.id}:${job.status}`).join(","),
@@ -1756,7 +1758,9 @@ function formatActiveImportSummary(imports: ImportJobStatus[]) {
   if (imports.every((item) => item.status === "cancel_requested"))
     return imports.length > 1 ? `${imports.length} 个任务取消中` : "取消中";
   if (first.status === "ai_processing")
-    return imports.length > 1 ? `${imports.length} 个文件，AI 分析中` : "AI 分析中";
+    return imports.length > 1
+      ? `${imports.length} 个文件，${first.progressText || "AI 分析中"}`
+      : first.progressText || "AI 分析中";
   if (typeof first.currentPage === "number" && typeof first.totalPages === "number") {
     return imports.length > 1
       ? `${imports.length} 个文件，第 ${first.currentPage}/${first.totalPages} 页`

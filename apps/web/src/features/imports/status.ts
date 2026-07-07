@@ -8,6 +8,8 @@ export type ImportJobStatus = {
   fileName: string;
   fileType?: string;
   status: string;
+  localOnly?: boolean;
+  localPreviewUrl?: string;
   errorMessage?: string;
   errorCode?: string;
   errorRequestId?: string;
@@ -15,6 +17,7 @@ export type ImportJobStatus = {
   retryable?: boolean;
   cancelable?: boolean;
   progress?: number;
+  progressText?: string;
   stage?: string;
   currentPage?: number;
   totalPages?: number;
@@ -50,29 +53,54 @@ export function watchImportJobs(
     return () => {};
   }
 
-  const url = `${API}/imports/status-stream?ids=${encodeURIComponent(ids.join(","))}`;
-  const source = new EventSource(url, { withCredentials: true });
+  let source: EventSource | undefined;
+  let stopped = false;
+  let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  let suppressNextError = false;
+  const connect = () => {
+    if (stopped || pending.size === 0) return;
+    const url = `${API}/imports/status-stream?ids=${encodeURIComponent([...pending].join(","))}`;
+    source = new EventSource(url, { withCredentials: true });
 
-  source.addEventListener("job", (event) => {
-    try {
-      mark(JSON.parse((event as MessageEvent).data) as ImportJobStatus);
-      if (pending.size === 0) source.close();
-    } catch {
+    source.addEventListener("job", (event) => {
+      try {
+        mark(JSON.parse((event as MessageEvent).data) as ImportJobStatus);
+        if (pending.size === 0) {
+          stopped = true;
+          source?.close();
+        }
+      } catch {
+        notifyDisconnected();
+        stopped = true;
+        source?.close();
+      }
+    });
+    source.addEventListener("stream-idle", () => {
+      suppressNextError = true;
+      source?.close();
+      if (!stopped && pending.size > 0) reconnectTimer = setTimeout(connect, 1200);
+    });
+    source.addEventListener("stream-error", (event) => {
+      const payload = JSON.parse((event as MessageEvent).data || "{}") as { message?: string };
+      notifyDisconnected(payload.message);
+      stopped = true;
+      source?.close();
+    });
+    source.onerror = () => {
+      source?.close();
+      if (suppressNextError) {
+        suppressNextError = false;
+        return;
+      }
       notifyDisconnected();
-      source.close();
-    }
-  });
-  source.addEventListener("stream-error", (event) => {
-    const payload = JSON.parse((event as MessageEvent).data || "{}") as { message?: string };
-    notifyDisconnected(payload.message);
-    source.close();
-  });
-  source.onerror = () => {
-    notifyDisconnected();
-    source.close();
+      stopped = true;
+    };
   };
+  connect();
 
   return () => {
-    source.close();
+    stopped = true;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    source?.close();
   };
 }

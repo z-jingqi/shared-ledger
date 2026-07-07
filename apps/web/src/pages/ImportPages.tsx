@@ -12,6 +12,7 @@ import { IconTile, IosButton, IosCard, IosField, IosSegment, IosSheet } from "..
 import { useAuth } from "../features/auth/AuthProvider";
 import { yuan } from "../features/formatting/money";
 import {
+  mergeLocalImportPlaceholders,
   patchImportJobInCache,
   removeImportJobFromCache,
   replaceImportJobInCache,
@@ -19,8 +20,14 @@ import {
 } from "../features/imports/cache";
 import { createPreviewThumbnail } from "../features/imports/preview-thumbnail";
 import { terminalImportStatuses, watchImportJobs, type ImportJobStatus } from "../features/imports/status";
-import { cancelImportJob, deleteImportJob, retryImportJob } from "../features/imports/upload";
+import {
+  cancelImportJob,
+  deleteImportJob,
+  retryImportJob,
+  revokeUploadPlaceholderUrls,
+} from "../features/imports/upload";
 import { diagnoseImportOcrJob, type AlephToolsDiagnosticsResponse } from "../features/imports/diagnostics";
+import { useAppSheetActions } from "../features/sheets/SheetContext";
 import { useActiveBook } from "../hooks/useActiveBook";
 import { useApi } from "../hooks/useApi";
 import { api, ApiError, apiFetchWithRefresh } from "../lib";
@@ -41,6 +48,7 @@ type PendingRecord = {
     amount: number;
     occurredAt?: string;
     categoryName?: string;
+    items?: Array<{ name: string; amount: number; categoryName?: string; note?: string }>;
     confidence: number;
     warnings: string[];
   };
@@ -52,6 +60,7 @@ type PendingEditDraft = {
   amount: string;
   occurredAt: string;
   categoryName: string;
+  items: Array<{ name: string; amount: string; categoryName: string; note: string }>;
 };
 type PendingRecordsState = { records: PendingRecord[]; error: string };
 type PendingRecordsAction =
@@ -98,7 +107,8 @@ function pendingRecordsReducer(_: PendingRecordsState, action: PendingRecordsAct
   }
 }
 
-function usePendingRecords() {
+function usePendingRecords(jobId?: string) {
+  const { user } = useAuth();
   const { book } = useActiveBook();
   const { data: jobs, reload: reloadJobs } = useApi<{ imports: Job[] }>(
     book ? `/books/${book.id}/imports` : undefined,
@@ -106,8 +116,8 @@ function usePendingRecords() {
   const [{ records, error }, dispatchRecords] = useReducer(pendingRecordsReducer, { records: [], error: "" });
   const imports = jobs?.imports ?? emptyJobs;
   const pendingJobs = useMemo(
-    () => imports.filter((job) => job.status === "pending_confirmation"),
-    [imports],
+    () => imports.filter((job) => job.status === "pending_confirmation" && (!jobId || job.id === jobId)),
+    [imports, jobId],
   );
 
   useEffect(() => {
@@ -138,22 +148,23 @@ function usePendingRecords() {
     };
   }, [pendingJobs]);
 
-  return { records, error, reload: reloadJobs };
+  return { bookId: book?.id, records, error, reload: reloadJobs, userId: user?.id };
 }
 
 export function PendingImportsPage() {
   return <LegacyRecordsRedirect />;
 }
 
-export function PendingImportsSheet({ onClose }: { onClose: () => void }) {
-  const { records, error, reload } = usePendingRecords();
+export function PendingImportsSheet({ jobId, onClose }: { jobId?: string; onClose: () => void }) {
+  const { bookId, records, error, reload, userId } = usePendingRecords(jobId);
   const [busy, setBusy] = useState("");
   const [editing, setEditing] = useState<PendingRecord | undefined>();
   const close = onClose;
   const confirm = async (recordId: string) => {
     setBusy(recordId);
     try {
-      await api(`/imported-records/${recordId}/confirm`, { method: "POST" });
+      const result = await api<{ job?: Job }>(`/imported-records/${recordId}/confirm`, { method: "POST" });
+      if (result.job) replaceImportJobInCache(bookId, userId, result.job);
       toast.success("已确认入账", { duration: 2600, closeButton: true });
       await reload();
     } catch (cause) {
@@ -165,7 +176,8 @@ export function PendingImportsSheet({ onClose }: { onClose: () => void }) {
   const ignore = async (recordId: string) => {
     setBusy(recordId);
     try {
-      await api(`/imported-records/${recordId}/ignore`, { method: "POST" });
+      const result = await api<{ job?: Job }>(`/imported-records/${recordId}/ignore`, { method: "POST" });
+      if (result.job) replaceImportJobInCache(bookId, userId, result.job);
       toast.success("已忽略该记录", { duration: 2600, closeButton: true });
       await reload();
     } catch (cause) {
@@ -178,7 +190,12 @@ export function PendingImportsSheet({ onClose }: { onClose: () => void }) {
     setBusy("all");
     try {
       const jobIds = [...new Set(records.map((item) => item.importJobId))];
-      await Promise.all(jobIds.map((jobId) => api(`/imports/${jobId}/confirm-all`, { method: "POST" })));
+      const results = await Promise.all(
+        jobIds.map((jobId) => api<{ job?: Job }>(`/imports/${jobId}/confirm-all`, { method: "POST" })),
+      );
+      results.forEach((result) => {
+        if (result.job) replaceImportJobInCache(bookId, userId, result.job);
+      });
       toast.success("已全部确认", { duration: 2600, closeButton: true });
       await reload();
     } catch (cause) {
@@ -201,6 +218,14 @@ export function PendingImportsSheet({ onClose }: { onClose: () => void }) {
           amount: Number(draft.amount),
           occurredAt: draft.occurredAt,
           categoryName: draft.categoryName.trim() || undefined,
+          items: draft.items
+            .map((item) => ({
+              name: item.name.trim(),
+              amount: Number(item.amount),
+              categoryName: item.categoryName.trim() || undefined,
+              note: item.note.trim() || undefined,
+            }))
+            .filter((item) => item.name && Number.isFinite(item.amount) && item.amount > 0),
           confidence: record.suggestedTransaction.confidence,
           warnings: record.suggestedTransaction.warnings,
         }),
@@ -275,6 +300,7 @@ export function ImportHistoryPage() {
 export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
   const { user } = useAuth();
   const { book } = useActiveBook();
+  const { openSheet } = useAppSheetActions();
   const { data, error, reload } = useApi<{ imports: Job[]; retentionDays?: number }>(
     book ? `/books/${book.id}/imports` : undefined,
   );
@@ -282,7 +308,7 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
   const [busyJobId, setBusyJobId] = useState("");
   const stopWatchingRef = useRef<(() => void) | undefined>(undefined);
   const close = onClose;
-  const imports = data?.imports ?? emptyJobs;
+  const imports = mergeLocalImportPlaceholders(book?.id, user?.id, data?.imports ?? emptyJobs);
   const filteredImports = useMemo(
     () => imports.filter((job) => matchesJobFilter(job, filter)),
     [filter, imports],
@@ -292,6 +318,7 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
     const ids: string[] = [];
     const keyParts: string[] = [];
     for (const job of imports) {
+      if (job.localOnly) continue;
       if (terminalImportStatuses.has(job.status)) continue;
       ids.push(job.id);
       keyParts.push(`${job.id}:${job.status}`);
@@ -347,6 +374,12 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
     }
   };
   const cancel = async (jobId: string) => {
+    const localJob = imports.find((job) => job.id === jobId && job.localOnly);
+    if (localJob) {
+      const removed = removeImportJobFromCache(book?.id, user?.id, jobId);
+      if (removed) revokeUploadPlaceholderUrls([removed]);
+      return;
+    }
     setBusyJobId(jobId);
     const previous = patchImportJobInCache(book?.id, user?.id, jobId, {
       status: "cancel_requested",
@@ -369,6 +402,12 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
     }
   };
   const remove = async (jobId: string) => {
+    const localJob = imports.find((job) => job.id === jobId && job.localOnly);
+    if (localJob) {
+      const removed = removeImportJobFromCache(book?.id, user?.id, jobId);
+      if (removed) revokeUploadPlaceholderUrls([removed]);
+      return;
+    }
     setBusyJobId(jobId);
     const previous = removeImportJobFromCache(book?.id, user?.id, jobId);
     try {
@@ -407,6 +446,26 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
       }
       toast.error(cause instanceof Error ? cause.message : "诊断失败", {
         duration: 4000,
+        closeButton: true,
+      });
+    } finally {
+      setBusyJobId("");
+    }
+  };
+  const openPendingJob = async (jobId: string) => {
+    setBusyJobId(jobId);
+    try {
+      const result = await api<{ records: PendingRecord[] }>(`/imports/${jobId}/records`);
+      const pending = result.records.filter((record) => record.status === "pending");
+      if (!pending.length) {
+        toast.info("识别结果已处理", { duration: 2600, closeButton: true });
+        await reload();
+        return;
+      }
+      openSheet({ type: "pending-imports", jobId });
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "读取待确认记录失败", {
+        duration: 3000,
         closeButton: true,
       });
     } finally {
@@ -464,6 +523,7 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
                   onRetry={() => void retry(job.id)}
                   onCancel={() => void cancel(job.id)}
                   onDelete={() => void remove(job.id)}
+                  onConfirm={() => void openPendingJob(job.id)}
                   onDiagnose={
                     showDiagnostics && canDiagnoseImportJob(job) ? () => void diagnose(job) : undefined
                   }
@@ -530,6 +590,20 @@ function PendingRecordCard({
         </strong>
       </div>
       {tx.warnings.length > 0 && <p className="ios-pending-warning">{tx.warnings.join("；")}</p>}
+      {tx.items?.length ? (
+        <ul className="ios-pending-items">
+          {tx.items.slice(0, 3).map((item, index) => (
+            <li key={`${item.name}-${index}`}>
+              <span>
+                {item.name}
+                {item.categoryName ? <em>{item.categoryName}</em> : null}
+              </span>
+              <b>{yuan(item.amount)}</b>
+            </li>
+          ))}
+          {tx.items.length > 3 ? <li className="more">还有 {tx.items.length - 3} 项明细</li> : null}
+        </ul>
+      ) : null}
       <div className="ios-pending-actions">
         <button type="button" disabled={disabled} onClick={onIgnore}>
           忽略
@@ -563,7 +637,28 @@ function PendingEditSheet({
     amount: String(tx.amount ?? ""),
     occurredAt: tx.occurredAt?.slice(0, 10) ?? new Date().toISOString().slice(0, 10),
     categoryName: tx.categoryName ?? "",
+    items: (tx.items ?? []).map((item) => ({
+      name: item.name,
+      amount: String(item.amount),
+      categoryName: item.categoryName ?? "",
+      note: item.note ?? "",
+    })),
   });
+  const updateItem = (
+    index: number,
+    patch: Partial<{ name: string; amount: string; categoryName: string; note: string }>,
+  ) => {
+    setDraft((current) => ({
+      ...current,
+      items: current.items.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)),
+    }));
+  };
+  const removeItem = (index: number) => {
+    setDraft((current) => ({
+      ...current,
+      items: current.items.filter((_, itemIndex) => itemIndex !== index),
+    }));
+  };
   return (
     <IosSheet
       title="编辑识别记录"
@@ -619,6 +714,48 @@ function PendingEditSheet({
             onChange={(event) => setDraft((current) => ({ ...current, note: event.currentTarget.value }))}
           />
         </IosField>
+        <IosField label="明细">
+          <div className="ios-pending-item-editor">
+            {draft.items.map((item, index) => (
+              <div className="ios-pending-item-edit-row" key={index}>
+                <input
+                  aria-label={`明细 ${index + 1} 名称`}
+                  placeholder="名称"
+                  value={item.name}
+                  onChange={(event) => updateItem(index, { name: event.currentTarget.value })}
+                />
+                <input
+                  aria-label={`明细 ${index + 1} 金额`}
+                  inputMode="decimal"
+                  placeholder="金额"
+                  value={item.amount}
+                  onChange={(event) => updateItem(index, { amount: event.currentTarget.value })}
+                />
+                <input
+                  aria-label={`明细 ${index + 1} 分类`}
+                  placeholder="分类"
+                  value={item.categoryName}
+                  onChange={(event) => updateItem(index, { categoryName: event.currentTarget.value })}
+                />
+                <button type="button" onClick={() => removeItem(index)}>
+                  删除
+                </button>
+              </div>
+            ))}
+            <button
+              className="ios-pending-add-item"
+              type="button"
+              onClick={() =>
+                setDraft((current) => ({
+                  ...current,
+                  items: [...current.items, { name: "", amount: "", categoryName: "", note: "" }],
+                }))
+              }
+            >
+              添加明细
+            </button>
+          </div>
+        </IosField>
       </div>
     </IosSheet>
   );
@@ -630,6 +767,7 @@ function ImportJobCard({
   onRetry,
   onCancel,
   onDelete,
+  onConfirm,
   onDiagnose,
   onMissing,
 }: {
@@ -638,6 +776,7 @@ function ImportJobCard({
   onRetry: () => void;
   onCancel: () => void;
   onDelete: () => void;
+  onConfirm: () => void;
   onDiagnose?: () => void;
   onMissing?: (jobId: string) => void;
 }) {
@@ -650,12 +789,12 @@ function ImportJobCard({
       <ImportJobPreview job={job} tone={tone} fallbackIcon={Icon} onMissing={onMissing} />
       <span>
         <b>{job.fileName}</b>
-        <small>{statusText}</small>
+        {job.status === "ai_processing" ? <AiProgressText job={job} /> : <small>{statusText}</small>}
         {job.status === "failed" && job.errorStage && (
           <em className="ios-import-error-stage">{job.errorStage}</em>
         )}
         {job.status === "failed" && job.errorMessage && <p>{job.errorMessage}</p>}
-        {!terminalImportStatuses.has(job.status) && (
+        {!terminalImportStatuses.has(job.status) && job.status !== "ai_processing" && (
           <i>
             <em style={{ width: `${job.progress ?? 18}%` }} />
           </i>
@@ -670,9 +809,14 @@ function ImportJobCard({
             重试
           </button>
         )}
-        {!terminalImportStatuses.has(job.status) && job.cancelable && (
-          <button type="button" disabled={busy} onClick={onCancel}>
-            取消
+        {job.status === "pending_confirmation" && (
+          <button type="button" disabled={busy} onClick={onConfirm}>
+            去确认
+          </button>
+        )}
+        {!job.localOnly && !terminalImportStatuses.has(job.status) && (
+          <button type="button" disabled={busy || job.status === "cancel_requested"} onClick={onCancel}>
+            {job.status === "cancel_requested" ? "取消中" : "取消"}
           </button>
         )}
         {onDiagnose && (
@@ -688,6 +832,18 @@ function ImportJobCard({
       </div>
     </IosCard>
   );
+}
+
+function AiProgressText({ job }: { job: Job }) {
+  const messages = useMemo(() => aiProgressMessages(job), [job.progressText, job.stage]);
+  const [index, setIndex] = useState(0);
+  useEffect(() => {
+    setIndex(0);
+    if (messages.length <= 1) return undefined;
+    const timer = setInterval(() => setIndex((current) => (current + 1) % messages.length), 1600);
+    return () => clearInterval(timer);
+  }, [messages]);
+  return <small className="ios-import-ai-progress">{messages[index] ?? "AI 分析中"}</small>;
 }
 
 function ImportJobPreview({
@@ -727,8 +883,10 @@ function ImageJobThumbnail({
   const [thumbnailUrl, setThumbnailUrl] = useState("");
   const [failed, setFailed] = useState(false);
   const cacheKey = job.id;
+  const unsupportedPreview = !canBrowserPreviewImage(job);
 
   useEffect(() => {
+    if (job.localPreviewUrl || unsupportedPreview) return undefined;
     const element = holderRef.current;
     if (!element) return undefined;
     let cancelled = false;
@@ -754,7 +912,10 @@ function ImageJobThumbnail({
         const response = await apiFetchWithRefresh(`/imports/${job.id}/file`, { signal: controller?.signal });
         if (response.status === 404) {
           onMissing?.(job.id);
-          return;
+          throw new Error("导入原文件不存在");
+        }
+        if (response.status === 415) {
+          throw new Error("该文件类型没有图片预览");
         }
         if (!response.ok) throw new Error("图片预览读取失败");
         const source = await response.blob();
@@ -798,20 +959,38 @@ function ImageJobThumbnail({
       observer.disconnect();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [cacheKey, job.id, onMissing]);
+  }, [cacheKey, job.id, job.localPreviewUrl, onMissing, unsupportedPreview]);
 
   return (
     <div className={`ios-import-preview ${tone}`} ref={holderRef}>
-      {thumbnailUrl && !failed ? (
-        <img src={thumbnailUrl} alt={`${job.fileName} 缩略图`} />
+      {(job.localPreviewUrl || thumbnailUrl) && !failed && !unsupportedPreview ? (
+        <img src={job.localPreviewUrl || thumbnailUrl} alt={`${job.fileName} 缩略图`} />
       ) : (
         <>
           <FallbackIcon size={22} weight="fill" />
-          <small>{failed ? "预览失败" : "图片"}</small>
+          <small>{unsupportedPreview ? fileExtension(job.fileName) : failed ? "预览失败" : "图片"}</small>
         </>
       )}
     </div>
   );
+}
+
+function canBrowserPreviewImage(job: Job) {
+  const type = job.fileType?.toLowerCase() ?? "";
+  if (
+    [
+      "image/jpeg",
+      "image/jpg",
+      "image/png",
+      "image/webp",
+      "image/gif",
+      "image/bmp",
+      "image/x-ms-bmp",
+    ].includes(type)
+  )
+    return true;
+  const extension = fileExtension(job.fileName).toLowerCase();
+  return ["jpg", "jpeg", "png", "webp", "gif", "bmp"].includes(extension);
 }
 
 function getJobIcon() {
@@ -824,10 +1003,22 @@ function formatJobStatus(job: Job) {
   if (job.status === "failed") return "处理失败";
   if (job.status === "cancel_requested") return "取消中…";
   if (job.status === "cancelled") return "已取消";
+  if (job.status === "uploading") return job.progressText || "正在上传…";
   if (job.status === "uploaded") return "已上传，等待识别…";
-  if (job.status === "ai_processing") return "AI 正在结构化…";
+  if (job.status === "ai_processing") return job.progressText || "AI 分析中";
   if (job.status === "ocr_processing") return formatOcrProgress(job);
   return job.stage || "处理中…";
+}
+
+function aiProgressMessages(job: Job) {
+  const primary = job.progressText || formatJobStatus(job);
+  const byStage =
+    job.stage === "ai_text_ready"
+      ? ["整理识别文本", "准备分析明细", "匹配账本字段"]
+      : job.stage === "ai_saving"
+        ? ["生成待确认记录", "整理入账建议", "保存分析结果"]
+        : ["AI 分析明细", "匹配分类与金额", "生成入账建议"];
+  return [...new Set([primary, ...byStage])].filter(Boolean).slice(0, 3);
 }
 
 function formatOcrProgress(job: Job) {

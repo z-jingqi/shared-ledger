@@ -3,7 +3,7 @@ import type { AlephAIClient, InvokeRequest } from "@shared-ledger/ai";
 import { failAlephOcrJob, finalizeAlephOcrJob } from "../../src/services/imports";
 import { authHeaders, createD1TestApp, seedBook, seedUser } from "./harness";
 
-function aiClientWithImportedRecord(): AlephAIClient {
+function aiClientWithImportedRecord(record: Record<string, unknown> = {}): AlephAIClient {
   return {
     async invoke<TOutput = unknown>(_request: InvokeRequest) {
       return {
@@ -22,10 +22,33 @@ function aiClientWithImportedRecord(): AlephAIClient {
               note: "早餐",
               confidence: 0.95,
               warnings: [],
+              ...record,
             },
           ],
         } as TOutput,
       };
+    },
+    async *stream() {
+      yield { type: "done" as const, requestId: "stream_1" };
+    },
+    async getUserUsage(params) {
+      return {
+        project: params.project,
+        userId: params.userId,
+        plan: params.plan ?? "pro",
+        periodStart: "2026-06-01T00:00:00.000Z",
+        periodEnd: "2026-07-01T00:00:00.000Z",
+        credits: { used: 0, limit: 100, remaining: 100 },
+        requests: { used: 0, limit: 100, remaining: 100 },
+      };
+    },
+  };
+}
+
+function hangingAiClient(): AlephAIClient {
+  return {
+    async invoke() {
+      return new Promise<never>(() => undefined);
     },
     async *stream() {
       yield { type: "done" as const, requestId: "stream_1" };
@@ -100,6 +123,51 @@ describe("D1 image import and OCR quota integrity", () => {
     expect(context.alephTools.requests).toHaveLength(0);
   });
 
+  it("exposes orphan uploaded jobs as cancelable payloads and lets users cancel them", async () => {
+    const context = createD1TestApp();
+    const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
+    const book = seedBook(context.db, user, { id: "book_pro" });
+    const job = await context.repository.createImportJob({
+      bookId: book.id,
+      userId: user.id,
+      fileName: "IMG_4706.HEIC",
+      fileType: "image/heic",
+      r2Key: "imports/book_pro/stuck-IMG_4706.HEIC",
+    });
+    await context.files.put(job.r2Key, "image", {
+      httpMetadata: { contentType: "image/heic" },
+      customMetadata: { importJobId: job.id, bookId: book.id, uploadedBy: user.id },
+    });
+
+    const list = await context.app.request(
+      `/books/${book.id}/imports`,
+      { headers: authHeaders(user) },
+      context.env,
+    );
+    const listBody = await list.json<any>();
+
+    expect(list.status).toBe(200);
+    expect(listBody.imports[0]).toMatchObject({
+      id: job.id,
+      status: "uploaded",
+      cancelable: true,
+      retryable: false,
+    });
+    expect(listBody.imports[0]).not.toHaveProperty("r2Key");
+    expect(listBody.imports[0]).not.toHaveProperty("userId");
+
+    const cancelled = await context.app.request(
+      `/imports/${job.id}/cancel`,
+      { method: "POST", headers: authHeaders(user) },
+      context.env,
+    );
+    const cancelBody = await cancelled.json<any>();
+
+    expect(cancelled.status).toBe(200);
+    expect(cancelBody.job).toMatchObject({ id: job.id, status: "cancelled", cancelable: false });
+    expect(context.files.objects.has(job.r2Key)).toBe(false);
+  });
+
   it("counts image OCR usage once only after OCR and AI create imported records", async () => {
     const context = createD1TestApp();
     const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
@@ -139,6 +207,72 @@ describe("D1 image import and OCR quota integrity", () => {
     expect(await context.repository.listImportedRecords(job!.id)).toHaveLength(1);
     expect(context.db.rows.image_ocr_usage).toHaveLength(1);
     expect(context.db.rows.image_ocr_usage[0].import_job_id).toBe(job!.id);
+  });
+
+  it("confirms AI-imported categories and line items, then completes the import job", async () => {
+    const context = createD1TestApp();
+    const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
+    const book = seedBook(context.db, user, { id: "book_pro" });
+    const aiClient = aiClientWithImportedRecord({
+      amount: 18.5,
+      note: "超市购物",
+      categoryName: "餐饮",
+      items: [
+        { name: "牛奶", amount: 10.5, categoryName: "食品" },
+        { name: "面包", amount: 8, categoryName: "食品" },
+      ],
+    });
+    const form = new FormData();
+    form.set("file", new File(["image"], "receipt.jpg", { type: "image/jpeg" }));
+
+    const uploaded = await context.app.request(
+      `/books/${book.id}/imports`,
+      { method: "POST", headers: authHeaders(user), body: form },
+      { ...context.env, ALEPH_AI_TEST_CLIENT: aiClient },
+    );
+    const uploadedBody = await uploaded.json<any>();
+    const job = await context.repository.getImportJob(uploadedBody.job.id);
+    context.alephTools.jobStatus[job!.ocrJobId!] = {
+      jobId: job!.ocrJobId,
+      status: "ready",
+      resultAvailable: true,
+      progress: 100,
+    };
+
+    await finalizeAlephOcrJob(
+      { ...context.env, ALEPH_AI_TEST_CLIENT: aiClient },
+      context.repository,
+      job!.id,
+    );
+    const pending = await context.repository.listImportedRecords(job!.id);
+
+    expect(pending).toHaveLength(1);
+    expect((pending[0].suggestedTransaction as any).items).toHaveLength(2);
+
+    const confirmed = await context.app.request(
+      `/imported-records/${pending[0].id}/confirm`,
+      { method: "POST", headers: authHeaders(user) },
+      context.env,
+    );
+    const confirmedBody = await confirmed.json<any>();
+    const categories = await context.repository.listCategories(user.id);
+    const recordCategory = categories.find((category) => category.name === "餐饮");
+    const itemCategory = categories.find((category) => category.name === "食品");
+
+    expect(confirmed.status).toBe(200);
+    expect(confirmedBody.job).toMatchObject({ id: job!.id, status: "completed" });
+    expect(context.db.rows.transactions).toHaveLength(1);
+    expect(context.db.rows.transactions[0].category_id).toBe(recordCategory?.id);
+    expect(confirmedBody.transaction.items).toHaveLength(2);
+    expect(confirmedBody.transaction.items.map((item: { name: string }) => item.name)).toEqual([
+      "牛奶",
+      "面包",
+    ]);
+    expect(
+      confirmedBody.transaction.items.every(
+        (item: { categoryId?: string }) => item.categoryId === itemCategory?.id,
+      ),
+    ).toBe(true);
   });
 
   it("creates Aleph OCR sourceRef jobs and serves original source only to the bound Aleph job", async () => {
@@ -213,6 +347,31 @@ describe("D1 image import and OCR quota integrity", () => {
     expect(revoked.status).toBe(410);
   });
 
+  it("serves import image previews from shared ledger R2", async () => {
+    const context = createD1TestApp();
+    const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
+    const book = seedBook(context.db, user, { id: "book_pro" });
+    const form = new FormData();
+    form.set("file", new File(["image"], "receipt.jpg", { type: "image/jpeg" }));
+
+    const uploaded = await context.app.request(
+      `/books/${book.id}/imports`,
+      { method: "POST", headers: authHeaders(user), body: form },
+      context.env,
+    );
+    const uploadedBody = await uploaded.json<any>();
+
+    const preview = await context.app.request(
+      `/imports/${uploadedBody.job.id}/file`,
+      { headers: authHeaders(user) },
+      context.env,
+    );
+
+    expect(preview.status).toBe(200);
+    expect(preview.headers.get("Content-Type")).toBe("image/jpeg");
+    expect(await preview.text()).toBe("image");
+  });
+
   it("finalizes a ready OCR job from status stream snapshots when no Aleph events arrive", async () => {
     const context = createD1TestApp();
     const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
@@ -250,6 +409,108 @@ describe("D1 image import and OCR quota integrity", () => {
     expect(text).toContain('"status":"pending_confirmation"');
     expect(finalized?.status).toBe("pending_confirmation");
     expect(await context.repository.listImportedRecords(job!.id)).toHaveLength(1);
+  });
+
+  it("does not create records or count usage when cancelled during AI structuring", async () => {
+    const context = createD1TestApp();
+    const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
+    const book = seedBook(context.db, user, { id: "book_pro" });
+    const form = new FormData();
+    form.set("file", new File(["image"], "receipt.jpg", { type: "image/jpeg" }));
+    const baseAiClient = aiClientWithImportedRecord();
+    const env = {
+      ...context.env,
+      ALEPH_AI_TEST_CLIENT: {
+        async invoke<TOutput = unknown>() {
+          await context.repository.updateImportJob(context.db.rows.import_jobs[0].id as string, "cancelled");
+          return baseAiClient.invoke<TOutput>({} as InvokeRequest);
+        },
+        stream: baseAiClient.stream,
+        getUserUsage: baseAiClient.getUserUsage,
+      } satisfies AlephAIClient,
+    };
+
+    const uploaded = await context.app.request(
+      `/books/${book.id}/imports`,
+      { method: "POST", headers: authHeaders(user), body: form },
+      env,
+    );
+    const uploadedBody = await uploaded.json<any>();
+    const job = await context.repository.getImportJob(uploadedBody.job.id);
+    context.alephTools.jobStatus[job!.ocrJobId!] = {
+      jobId: job!.ocrJobId,
+      status: "ready",
+      resultAvailable: true,
+      progress: 100,
+    };
+
+    await finalizeAlephOcrJob(env, context.repository, job!.id);
+
+    expect((await context.repository.getImportJob(job!.id))?.status).toBe("cancelled");
+    expect(await context.repository.listImportedRecords(job!.id)).toHaveLength(0);
+    expect(context.db.rows.image_ocr_usage).toHaveLength(0);
+  });
+
+  it("marks AI structuring timeouts as retryable AI failures", async () => {
+    const context = createD1TestApp();
+    const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
+    const book = seedBook(context.db, user, { id: "book_pro" });
+    const form = new FormData();
+    form.set("file", new File(["image"], "receipt.jpg", { type: "image/jpeg" }));
+    const env = {
+      ...context.env,
+      ALEPH_AI_IMPORT_TIMEOUT_MS: "5",
+      ALEPH_AI_TEST_CLIENT: hangingAiClient(),
+    };
+
+    const uploaded = await context.app.request(
+      `/books/${book.id}/imports`,
+      { method: "POST", headers: authHeaders(user), body: form },
+      env,
+    );
+    const uploadedBody = await uploaded.json<any>();
+    const job = await context.repository.getImportJob(uploadedBody.job.id);
+    context.alephTools.jobStatus[job!.ocrJobId!] = {
+      jobId: job!.ocrJobId,
+      status: "ready",
+      resultAvailable: true,
+      progress: 100,
+    };
+
+    await expect(finalizeAlephOcrJob(env, context.repository, job!.id)).rejects.toThrow("AI 分析超时");
+    const failed = await context.repository.getImportJob(job!.id);
+
+    expect(failed?.status).toBe("failed");
+    expect(failed?.errorStage).toBe("ai");
+    expect(failed?.errorRetryable).toBe(true);
+    expect(failed?.errorCode).toBe("provider_unavailable");
+  });
+
+  it("streams AI processing snapshots without OCR disconnect errors", async () => {
+    const context = createD1TestApp();
+    const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
+    const book = seedBook(context.db, user, { id: "book_pro" });
+    const job = await context.repository.createImportJob({
+      bookId: book.id,
+      userId: user.id,
+      fileName: "receipt.jpg",
+      fileType: "image/jpeg",
+      r2Key: "imports/test/receipt.jpg",
+    });
+    await context.repository.markImportJobAiProcessing(job.id, "ai_structuring");
+
+    const stream = await context.app.request(
+      `/imports/status-stream?ids=${job.id}`,
+      { headers: authHeaders(user) },
+      { ...context.env, APP_ENV: "test" },
+    );
+    const text = await stream.text();
+
+    expect(stream.status).toBe(200);
+    expect(text).toContain('"status":"ai_processing"');
+    expect(text).toContain('"progressText":"AI 分析明细"');
+    expect(text).not.toContain("stream-error");
+    expect(text).toContain("stream-idle");
   });
 
   it("marks OCR cancellation as requested, keeps quota active, and skips later finalization", async () => {

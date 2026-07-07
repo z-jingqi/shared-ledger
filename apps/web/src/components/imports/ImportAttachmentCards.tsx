@@ -11,6 +11,7 @@ export type ImportAttachmentView = {
   retryable?: boolean;
   cancelable?: boolean;
   progress?: number;
+  progressText?: string;
   stage?: string;
   currentPage?: number;
   totalPages?: number;
@@ -98,14 +99,14 @@ export function ImportAttachmentCards({
               <span className="import-card-overlay">
                 <CircleNotchIcon size={28} weight="bold" />
                 {importProgressLabel(attachment)}
-                {attachment.status === "processing" && onCancel && attachment.cancelable !== false && (
+                {attachment.status === "processing" && onCancel && (
                   <button
                     className="import-cancel-inline"
                     type="button"
-                    disabled={cancellingId === attachment.id}
+                    disabled={cancellingId === attachment.id || attachment.stage === "cancel_requested"}
                     onClick={() => setConfirming(attachment)}
                   >
-                    取消
+                    {attachment.stage === "cancel_requested" ? "取消中" : "取消"}
                   </button>
                 )}
               </span>
@@ -154,7 +155,9 @@ export function ImportAttachmentCards({
 
 function importProgressLabel(attachment: ImportAttachmentView) {
   if (attachment.status === "uploading") return "上传中";
-  if (attachment.stage === "ai_processing" || attachment.stage === "ready") return "AI 分析中";
+  if (attachment.stage === "cancel_requested") return "取消中";
+  if (attachment.stage?.startsWith("ai_")) return attachment.progressText || "AI 分析中";
+  if (attachment.stage === "ready") return "AI 分析中";
   if (typeof attachment.currentPage === "number" && typeof attachment.totalPages === "number") {
     return `第 ${attachment.currentPage}/${attachment.totalPages} 页`;
   }

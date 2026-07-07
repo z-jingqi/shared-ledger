@@ -30,6 +30,17 @@ let importBatchRequests: Array<{
   files: string[];
   autoConfirm: FormDataEntryValue | null;
 }> = [];
+let importBatchResponseOverride: (() => Promise<Response>) | undefined;
+let mockImportJobs: Array<{
+  id: string;
+  fileName: string;
+  fileType?: string;
+  status: string;
+  progress?: number;
+  progressText?: string;
+  stage?: string;
+  cancelable?: boolean;
+}> = [];
 let importCancelRequests: string[] = [];
 let aiSearchRequests: Array<{
   bookId?: string;
@@ -284,6 +295,8 @@ describe("shared ledger mobile UI", () => {
     transactionRequests = [];
     bookMutationRequests = [];
     importBatchRequests = [];
+    importBatchResponseOverride = undefined;
+    mockImportJobs = [];
     importCancelRequests = [];
     aiSearchRequests = [];
     aiChatRequests = [];
@@ -915,6 +928,7 @@ describe("shared ledger mobile UI", () => {
             files: body.getAll("files").map((file) => (file instanceof File ? file.name : String(file))),
             autoConfirm: body.get("autoConfirm"),
           });
+          if (importBatchResponseOverride) return importBatchResponseOverride();
           return Promise.resolve(
             json({
               jobs: [
@@ -933,11 +947,34 @@ describe("shared ledger mobile UI", () => {
           importCancelRequests.push(path);
           return Promise.resolve(json({ ok: true }));
         }
+        if (path.includes("/imports/job_new/records"))
+          return Promise.resolve(
+            json({
+              records: [
+                {
+                  id: "pending_job_new",
+                  importJobId: "job_new",
+                  status: "pending",
+                  suggestedTransaction: {
+                    type: "expense",
+                    amount: 18.5,
+                    occurredAt: "2026-06-28",
+                    note: "超市购物",
+                    categoryName: "餐饮",
+                    items: [{ name: "牛奶", amount: 18.5, categoryName: "餐饮" }],
+                    confidence: 0.92,
+                    warnings: [],
+                  },
+                },
+              ],
+            }),
+          );
         if (path.includes("/imports/job_new"))
           return Promise.resolve(
             json({ job: { id: "job_new", fileName: "invoice.jpg", status: "pending_confirmation" } }),
           );
-        if (path.includes("/books/book_test/imports")) return Promise.resolve(json({ imports: [] }));
+        if (path.includes("/books/book_test/imports"))
+          return Promise.resolve(json({ imports: mockImportJobs }));
         if (path.includes("/books/book_test") && method === "PATCH") {
           const body = JSON.parse(bodyText ?? "{}") as { name?: string; currency?: string };
           bookMutationRequests.push({ path, method, body });
@@ -1626,6 +1663,123 @@ describe("shared ledger mobile UI", () => {
     });
     expect(window.location.pathname).toBe("/home");
     expect(await screen.findByRole("heading", { name: "识别进度" })).toBeInTheDocument();
+  });
+  it("shows an upload placeholder before the backend returns a real import job", async () => {
+    const user = userEvent.setup();
+    plan = "pro";
+    const file = new File(["receipt"], "receipt.png", { type: "image/png" });
+    let resolveBatch: (response: Response) => void = () => {};
+    importBatchResponseOverride = () =>
+      new Promise<Response>((resolve) => {
+        resolveBatch = resolve;
+      });
+    render(<App />);
+
+    await findBookSwitcher();
+    const input = await waitFor(() => {
+      const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]');
+      if (!fileInput) throw new Error("Expected upload input to be rendered");
+      return fileInput;
+    });
+    await user.click(await screen.findByRole("button", { name: "打开添加菜单" }));
+    await user.click(screen.getByRole("menuitem", { name: /上传图片/ }));
+    const uploadPromise = user.upload(input, file);
+
+    expect(await screen.findByRole("heading", { name: "识别进度" })).toBeInTheDocument();
+    expect(screen.getByText("receipt.png")).toBeInTheDocument();
+    expect(screen.getByText("正在上传…")).toBeInTheDocument();
+
+    resolveBatch(
+      json({
+        jobs: [
+          {
+            id: "job_new",
+            fileName: "receipt.png",
+            fileType: "image/png",
+            status: "ocr_processing",
+            progress: 12,
+            stage: "extracting",
+          },
+        ],
+      }),
+    );
+    await uploadPromise;
+    await waitFor(() => expect(importBatchRequests).toHaveLength(1));
+  });
+  it("renders HEIC import jobs as file type previews instead of broken images", async () => {
+    const user = userEvent.setup();
+    plan = "pro";
+    mockImportJobs = [
+      {
+        id: "job_heic",
+        fileName: "IMG_4706.HEIC",
+        fileType: "image/heic",
+        status: "ocr_processing",
+        progress: 0,
+        stage: "queued",
+      },
+    ];
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: /图片任务处理中/ }));
+
+    expect(await screen.findByRole("heading", { name: "识别进度" })).toBeInTheDocument();
+    expect(screen.getByText("HEIC")).toBeInTheDocument();
+    expect(screen.queryByText("预览失败")).not.toBeInTheDocument();
+  });
+  it("opens job-specific pending records from the import job confirm action", async () => {
+    const user = userEvent.setup();
+    plan = "pro";
+    const file = new File(["receipt"], "receipt.png", { type: "image/png" });
+    const pendingJob = {
+      id: "job_new",
+      fileName: "receipt.png",
+      fileType: "image/png",
+      status: "pending_confirmation",
+    };
+    importBatchResponseOverride = () => {
+      mockImportJobs = [pendingJob];
+      return Promise.resolve(json({ jobs: [pendingJob] }));
+    };
+    render(<App />);
+
+    await findBookSwitcher();
+    const input = await waitFor(() => {
+      const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]');
+      if (!fileInput) throw new Error("Expected upload input to be rendered");
+      return fileInput;
+    });
+    await user.click(await screen.findByRole("button", { name: "打开添加菜单" }));
+    await user.click(screen.getByRole("menuitem", { name: /上传图片/ }));
+    await user.upload(input, file);
+
+    await user.click(await screen.findByRole("button", { name: "去确认" }));
+
+    expect(await screen.findByRole("heading", { name: "待确认记录" })).toBeInTheDocument();
+    expect(screen.getByText("超市购物")).toBeInTheDocument();
+    expect(screen.getByText("牛奶")).toBeInTheDocument();
+  });
+  it("shows cancel action for queued import jobs even when cancelable is false", async () => {
+    const user = userEvent.setup();
+    plan = "pro";
+    mockImportJobs = [
+      {
+        id: "job_new",
+        fileName: "receipt.png",
+        fileType: "image/png",
+        status: "ocr_processing",
+        progress: 0,
+        stage: "queued",
+        cancelable: false,
+      },
+    ];
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: /图片任务处理中/ }));
+    expect(await screen.findByRole("heading", { name: "识别进度" })).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "取消" }));
+
+    await waitFor(() => expect(importCancelRequests).toContain("/api/imports/job_new/cancel"));
   });
   it("hides image upload entry from the add menu for free users", async () => {
     const user = userEvent.setup();

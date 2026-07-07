@@ -4,7 +4,7 @@ export type AppSheet =
   | { type: "record-form"; recordId?: string; initialType?: "expense" | "income" }
   | { type: "record-detail"; transactionId: string }
   | { type: "imports" }
-  | { type: "pending-imports" }
+  | { type: "pending-imports"; jobId?: string }
   | { type: "members" }
   | { type: "ai" }
   | { type: "settings-export" }

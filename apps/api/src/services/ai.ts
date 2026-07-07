@@ -34,9 +34,15 @@ export function runtimeAiProvider(env: Env, user: RuntimeAiUser): AiProvider {
   return createAlephAiProvider({
     client: runtimeAlephClient(env),
     env: runtimeAlephEnv(env),
+    importTimeoutMs: runtimeImportTimeoutMs(env),
     project,
     user,
   });
+}
+
+function runtimeImportTimeoutMs(env: Env) {
+  const configured = Number(env.ALEPH_AI_IMPORT_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : undefined;
 }
 
 export async function getRuntimeAiUsage(env: Env, user: RuntimeAiUser): Promise<UserUsageResponse> {
