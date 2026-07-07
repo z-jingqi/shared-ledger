@@ -74,10 +74,16 @@ async function resolveD1DatabaseId() {
   }
 
   const databases = parseD1List(stdout);
-  const match = databases.find((database) => database.name === databaseName || database.database_name === databaseName);
+  const match = databases.find(
+    (database) => database.name === databaseName || database.database_name === databaseName,
+  );
   const databaseId = match?.uuid ?? match?.id ?? match?.database_id;
   if (!databaseId) {
-    const names = databases.map((database) => database.name ?? database.database_name).filter(Boolean).join(", ") || "none";
+    const names =
+      databases
+        .map((database) => database.name ?? database.database_name)
+        .filter(Boolean)
+        .join(", ") || "none";
     throw new Error(
       `Could not find D1 database "${databaseName}". ` +
         `Set CLOUDFLARE_D1_DATABASE_NAME_${suffix} or CLOUDFLARE_D1_DATABASE_ID_${suffix}. ` +
