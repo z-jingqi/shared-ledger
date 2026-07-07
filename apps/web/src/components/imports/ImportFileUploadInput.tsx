@@ -90,11 +90,6 @@ export function ImportFileUploadInput({
     await onUploadStart?.(placeholders);
     try {
       const { jobs } = await uploadImportFiles(bookId, selectedFiles);
-      toast.success("图片已上传", {
-        description: "识别会在后台继续，完成后进入待确认。",
-        duration: 3000,
-        closeButton: true,
-      });
       await onUploaded?.(jobs, placeholders);
     } catch (cause) {
       await onUploadError?.(placeholders);

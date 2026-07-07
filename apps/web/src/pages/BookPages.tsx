@@ -37,8 +37,10 @@ export function BookHomePage() {
   const hasBook = Boolean(book?.id);
   const displayBook = book ?? { id: "", name: "一起记", currency: "CNY" };
   const transactions = txData?.transactions ?? [];
-  const monthTransactions = transactions.filter((item) => isSameMonth(item.occurredAt, new Date()));
-  const todayTransactions = transactions.filter((item) => isSameDay(item.occurredAt, new Date()));
+  const now = new Date();
+  const currentMonthLabel = `${now.getMonth() + 1}月净收支`;
+  const monthTransactions = transactions.filter((item) => isSameMonth(item.occurredAt, now));
+  const todayTransactions = transactions.filter((item) => isSameDay(item.occurredAt, now));
   const income = sum(monthTransactions, "income");
   const expense = sum(monthTransactions, "expense");
   const todayExpense = sum(todayTransactions, "expense");
@@ -79,7 +81,7 @@ export function BookHomePage() {
       />
       <IosScroll className="ios-home-scroll">
         <section className="ios-balance-hero">
-          <span>6月净收支</span>
+          <span>{currentMonthLabel}</span>
           <strong>{yuan(income - expense, displayBook.currency)}</strong>
           <div>
             <p>

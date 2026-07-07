@@ -101,6 +101,7 @@ const findBookSwitcher = (bookName = "家庭账本") =>
 const queryAddOverlay = () =>
   screen.queryByRole("dialog", { name: /添加|新增|记一笔|记账方式/ }) ??
   screen.queryByRole("menu", { name: /添加|新增|记一笔|记账方式/ });
+const currentMonthNetLabel = () => `${new Date().getMonth() + 1}月净收支`;
 const openManualAddForm = async (user: ReturnType<typeof userEvent.setup>) => {
   await findBookSwitcher();
   const addButton =
@@ -1020,7 +1021,7 @@ describe("shared ledger mobile UI", () => {
   it("loads a real book response and hides AI for a free user", async () => {
     render(<App />);
     expect(await findBookSwitcher()).toBeInTheDocument();
-    expect(screen.getByText("6月净收支")).toBeInTheDocument();
+    expect(screen.getByText(currentMonthNetLabel())).toBeInTheDocument();
     expect(screen.queryByText("6月结余")).not.toBeInTheDocument();
     expect(screen.getByRole("navigation")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "首页" })).toHaveAttribute(
@@ -1097,7 +1098,7 @@ describe("shared ledger mobile UI", () => {
     expect(window.location.pathname).toBe("/home");
     expect(window.location.search).toContain("bookId=book_b");
     expect(await findBookSwitcher("旅行账本")).toBeInTheDocument();
-    expect(screen.getByText("6月净收支")).toBeInTheDocument();
+    expect(screen.getByText(currentMonthNetLabel())).toBeInTheDocument();
     expect((await screen.findAllByText(/300\.00/)).length).toBeGreaterThan(0);
   });
   it("shows AI controls for a pro session", async () => {

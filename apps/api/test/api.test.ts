@@ -105,6 +105,11 @@ function responseFormatName(request: InvokeRequest) {
     ?.name;
 }
 
+function responseFormatSchema(request: InvokeRequest) {
+  return (request.input.response_format as { json_schema?: { schema?: unknown } } | undefined)?.json_schema
+    ?.schema as any;
+}
+
 async function createAiSession(app: ReturnType<typeof createApp>, bookId = "book_home") {
   const response = await app.request(
     "/ai/sessions",
@@ -779,6 +784,7 @@ describe("Hono REST API", () => {
             amount: 12,
             occurredAt: "2026-06-27",
             note: "早餐",
+            items: [],
             confidence: 0.9,
             warnings: [],
           },
@@ -805,6 +811,8 @@ describe("Hono REST API", () => {
       user: { id: "user_demo", plan: "pro" },
     });
     expect(responseFormatName(request)).toBe("ledger_import_records");
+    expect(responseFormatSchema(request).properties.records.items.required).toContain("items");
+    expect(request.input.max_tokens).toBe(5000);
     expect(request.input.model).toBeUndefined();
   });
 });

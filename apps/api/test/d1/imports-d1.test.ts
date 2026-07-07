@@ -20,6 +20,7 @@ function aiClientWithImportedRecord(record: Record<string, unknown> = {}): Aleph
               amount: 12,
               occurredAt: "2026-06-28",
               note: "早餐",
+              items: [],
               confidence: 0.95,
               warnings: [],
               ...record,
@@ -207,6 +208,58 @@ describe("D1 image import and OCR quota integrity", () => {
     expect(await context.repository.listImportedRecords(job!.id)).toHaveLength(1);
     expect(context.db.rows.image_ocr_usage).toHaveLength(1);
     expect(context.db.rows.image_ocr_usage[0].import_job_id).toBe(job!.id);
+  });
+
+  it("uses structured OCR markdown for import AI when available", async () => {
+    const context = createD1TestApp();
+    const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
+    const book = seedBook(context.db, user, { id: "book_pro" });
+    let aiText = "";
+    const aiClient: AlephAIClient = {
+      ...aiClientWithImportedRecord({
+        items: [{ name: "拿铁", amount: 12, categoryName: "餐饮" }],
+      }),
+      async invoke<TOutput = unknown>(request: InvokeRequest) {
+        const message = (request.input as any).messages?.find((item: any) => item.role === "user") as
+          | { content?: string }
+          | undefined;
+        aiText = JSON.parse(message?.content ?? "{}").text ?? "";
+        return aiClientWithImportedRecord({
+          items: [{ name: "拿铁", amount: 12, categoryName: "餐饮" }],
+        }).invoke<TOutput>(request);
+      },
+    };
+    const form = new FormData();
+    form.set("file", new File(["image"], "receipt.jpg", { type: "image/jpeg" }));
+
+    const uploaded = await context.app.request(
+      `/books/${book.id}/imports`,
+      { method: "POST", headers: authHeaders(user), body: form },
+      { ...context.env, ALEPH_AI_TEST_CLIENT: aiClient },
+    );
+    const uploadedBody = await uploaded.json<any>();
+    const job = await context.repository.getImportJob(uploadedBody.job.id);
+    context.alephTools.jobStatus[job!.ocrJobId!] = {
+      jobId: job!.ocrJobId,
+      status: "ready",
+      resultAvailable: true,
+      progress: 100,
+    };
+    context.alephTools.result[job!.ocrJobId!] = {
+      markdown: "| 品名 | 金额 |\n| --- | ---: |\n| 拿铁 | 12.00 |",
+      plainText: "合计 12.00",
+      pages: [{ text: "拿铁 12.00", confidence: 0.95 }],
+    };
+
+    await finalizeAlephOcrJob(
+      { ...context.env, ALEPH_AI_TEST_CLIENT: aiClient },
+      context.repository,
+      job!.id,
+    );
+
+    expect(aiText).toContain("OCR markdown");
+    expect(aiText).toContain("拿铁");
+    expect(aiText).toContain("OCR plain text");
   });
 
   it("confirms AI-imported categories and line items, then completes the import job", async () => {

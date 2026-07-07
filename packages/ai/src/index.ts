@@ -59,7 +59,9 @@ const importSystemPrompt = [
   "Return only JSON matching the supplied schema.",
   "Use all information supported by the text: merchant/receipt purpose as note, date, total amount, transaction type, category, and line items.",
   "Prefer category names from the provided existing categories. If none fits and the text clearly implies a category, return a concise new categoryName.",
-  "For receipt line items, include every clear item name and amount. If a line item is uncertain, omit that item and add a short warning.",
+  "For receipts, items is mandatory. Include every clear product/service line with its name and amount; do not omit line items just because the total amount is known.",
+  "If the OCR text contains product/service lines but a line amount is unreadable, omit only that uncertain line and add a short warning.",
+  "If you return an empty items array for a receipt, add a warning explaining why line items could not be extracted.",
   "Do not invent unsupported records or unsupported amounts. Leave only truly unknowable fields empty and explain them in warnings.",
 ].join("\n");
 const chatSystemPrompt = [
@@ -225,7 +227,7 @@ export function createAlephAiProvider(runtime: LedgerAiRuntime): AiProvider {
             ],
             responseFormat: responseFormat("ledger_import_records", importRecordsJsonSchema),
             temperature: 0,
-            maxTokens: 2400,
+            maxTokens: 5000,
           }),
         ),
         runtime.importTimeoutMs ?? 45_000,
@@ -318,7 +320,7 @@ const moneyJsonSchema = {
 const importRecordJsonSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["type", "amount", "occurredAt", "confidence", "warnings"],
+  required: ["type", "amount", "occurredAt", "items", "confidence", "warnings"],
   properties: {
     type: { type: "string", enum: ["income", "expense"] },
     amount: moneyJsonSchema,

@@ -165,7 +165,6 @@ export function PendingImportsSheet({ jobId, onClose }: { jobId?: string; onClos
     try {
       const result = await api<{ job?: Job }>(`/imported-records/${recordId}/confirm`, { method: "POST" });
       if (result.job) replaceImportJobInCache(bookId, userId, result.job);
-      toast.success("已确认入账", { duration: 2600, closeButton: true });
       await reload();
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : "确认失败", { duration: 3000, closeButton: true });
@@ -178,7 +177,6 @@ export function PendingImportsSheet({ jobId, onClose }: { jobId?: string; onClos
     try {
       const result = await api<{ job?: Job }>(`/imported-records/${recordId}/ignore`, { method: "POST" });
       if (result.job) replaceImportJobInCache(bookId, userId, result.job);
-      toast.success("已忽略该记录", { duration: 2600, closeButton: true });
       await reload();
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : "忽略失败", { duration: 3000, closeButton: true });
@@ -196,7 +194,6 @@ export function PendingImportsSheet({ jobId, onClose }: { jobId?: string; onClos
       results.forEach((result) => {
         if (result.job) replaceImportJobInCache(bookId, userId, result.job);
       });
-      toast.success("已全部确认", { duration: 2600, closeButton: true });
       await reload();
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : "全部确认失败", {
@@ -231,7 +228,6 @@ export function PendingImportsSheet({ jobId, onClose }: { jobId?: string; onClos
         }),
       });
       setEditing(undefined);
-      toast.success("识别记录已更新", { duration: 2600, closeButton: true });
       await reload();
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : "保存失败", { duration: 3000, closeButton: true });
@@ -365,7 +361,6 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
     try {
       const { job } = await retryImportJob(jobId);
       if (job) replaceImportJobInCache(book?.id, user?.id, job);
-      toast.success("已重新开始识别", { duration: 2600, closeButton: true });
       await reload();
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : "重试失败", { duration: 3000, closeButton: true });
@@ -390,10 +385,6 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
     try {
       const { job } = await cancelImportJob(jobId);
       if (job) replaceImportJobInCache(book?.id, user?.id, job);
-      toast.success(job?.status === "cancelled" ? "已取消导入" : "正在取消导入", {
-        duration: 2600,
-        closeButton: true,
-      });
     } catch (cause) {
       if (previous) replaceImportJobInCache(book?.id, user?.id, previous);
       toast.error(cause instanceof Error ? cause.message : "取消失败", { duration: 3000, closeButton: true });
@@ -412,7 +403,6 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
     const previous = removeImportJobFromCache(book?.id, user?.id, jobId);
     try {
       await deleteImportJob(jobId);
-      toast.success("已删除导入任务", { duration: 2600, closeButton: true });
     } catch (cause) {
       if (previous) replaceImportJobInCache(book?.id, user?.id, previous);
       toast.error(cause instanceof Error ? cause.message : "删除失败", { duration: 3000, closeButton: true });

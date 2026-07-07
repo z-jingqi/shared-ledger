@@ -83,7 +83,12 @@ export async function finalizeAlephOcrJob(env: Env, repository: D1LedgerReposito
   }
   const result = await runtimeOcrClient(env).getResult(job.ocrJobId);
   await repository.revokeImportSourceAccess(job.id);
-  const rawText = result.plainText?.trim() || result.markdown?.trim();
+  const markdownText = result.markdown?.trim();
+  const plainText = result.plainText?.trim();
+  const rawText =
+    markdownText && plainText && markdownText !== plainText
+      ? `OCR markdown:\n${markdownText}\n\nOCR plain text:\n${plainText}`
+      : (markdownText ?? plainText);
   if (!rawText) {
     await repository.markImportJobFailed(job.id, {
       message: "Aleph Tools 未返回可识别文本",

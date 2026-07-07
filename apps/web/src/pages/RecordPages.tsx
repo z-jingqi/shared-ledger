@@ -980,9 +980,6 @@ function TransactionFormEditor({
       });
       if (attachments.length) {
         await uploadAttachments();
-        toast.success("记录已保存，附件已进入识别", { duration: 3000, closeButton: true });
-      } else {
-        toast.success(id ? "记录已更新" : "已记一笔", { duration: 2600, closeButton: true });
       }
       clearRecordDraft(draftKey);
       if (continueAfterSave && !id) {
@@ -1256,7 +1253,6 @@ export function RecordDetailSheet({
         transactionId: transaction.id,
         scopes: ["transactions", "transaction"],
       });
-      toast.success("记录已删除", { duration: 2600, closeButton: true });
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : "删除失败", { duration: 3000, closeButton: true });
     }
