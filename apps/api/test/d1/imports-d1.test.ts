@@ -574,8 +574,73 @@ describe("D1 image import and OCR quota integrity", () => {
     expect(stream.status).toBe(200);
     expect(text).toContain('"status":"ai_processing"');
     expect(text).toContain('"progressText":"AI 分析明细"');
+    expect(text.match(/event: job/g)).toHaveLength(1);
     expect(text).not.toContain("stream-error");
     expect(text).toContain("stream-idle");
+    expect(text).toContain('"retryAfterMs":40');
+  });
+
+  it("marks stale AI processing jobs as retryable failures in status streams", async () => {
+    const context = createD1TestApp();
+    const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
+    const book = seedBook(context.db, user, { id: "book_pro" });
+    const job = await context.repository.createImportJob({
+      bookId: book.id,
+      userId: user.id,
+      fileName: "receipt.jpg",
+      fileType: "image/jpeg",
+      r2Key: "imports/test/receipt.jpg",
+    });
+    await context.repository.markImportJobAiProcessing(job.id, "ai_items");
+    context.db.rows.import_jobs[0].updated_at = new Date(Date.now() - 120_000).toISOString();
+
+    const stream = await context.app.request(
+      `/imports/status-stream?ids=${job.id}`,
+      { headers: authHeaders(user) },
+      { ...context.env, APP_ENV: "test" },
+    );
+    const text = await stream.text();
+    const failed = await context.repository.getImportJob(job.id);
+
+    expect(stream.status).toBe(200);
+    expect(text).toContain('"status":"failed"');
+    expect(text).toContain('"errorStage":"ai"');
+    expect(text).toContain('"retryable":true');
+    expect(failed?.status).toBe("failed");
+    expect(failed?.errorStage).toBe("ai");
+    expect(failed?.errorRetryable).toBe(true);
+    expect(await context.repository.listImportedRecords(job.id)).toHaveLength(0);
+    expect(context.db.rows.image_ocr_usage).toHaveLength(0);
+  });
+
+  it("marks stale AI processing jobs as retryable failures in import lists", async () => {
+    const context = createD1TestApp();
+    const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
+    const book = seedBook(context.db, user, { id: "book_pro" });
+    const job = await context.repository.createImportJob({
+      bookId: book.id,
+      userId: user.id,
+      fileName: "receipt.jpg",
+      fileType: "image/jpeg",
+      r2Key: "imports/test/receipt.jpg",
+    });
+    await context.repository.markImportJobAiProcessing(job.id, "ai_items");
+    context.db.rows.import_jobs[0].updated_at = new Date(Date.now() - 120_000).toISOString();
+
+    const response = await context.app.request(
+      `/books/${book.id}/imports`,
+      { headers: authHeaders(user) },
+      { ...context.env, APP_ENV: "test" },
+    );
+    const body = await response.json<any>();
+
+    expect(response.status).toBe(200);
+    expect(body.imports[0]).toMatchObject({
+      id: job.id,
+      status: "failed",
+      errorStage: "ai",
+      retryable: true,
+    });
   });
 
   it("marks OCR cancellation as requested, keeps quota active, and skips later finalization", async () => {

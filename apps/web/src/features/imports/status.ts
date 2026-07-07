@@ -38,8 +38,13 @@ export function watchImportJobs(
   }
 
   const pending = new Set(ids);
+  const lastSignatures = new Map<string, string>();
   const mark = (job: ImportJobStatus) => {
-    onJob(job);
+    const signature = jobSignature(job);
+    if (lastSignatures.get(job.id) !== signature) {
+      lastSignatures.set(job.id, signature);
+      onJob(job);
+    }
     if (terminalImportStatuses.has(job.status)) pending.delete(job.id);
     if (pending.size === 0) options.onDone?.();
   };
@@ -83,10 +88,13 @@ export function watchImportJobs(
         // Debug-only payload; ignore malformed raw OCR snapshots.
       }
     });
-    source.addEventListener("stream-idle", () => {
+    source.addEventListener("stream-idle", (event) => {
       suppressNextError = true;
       source?.close();
-      if (!stopped && pending.size > 0) reconnectTimer = setTimeout(connect, 1200);
+      const payload = parseStreamIdlePayload((event as MessageEvent).data);
+      if (!stopped && pending.size > 0 && payload.retryAfterMs > 0) {
+        reconnectTimer = setTimeout(connect, payload.retryAfterMs);
+      }
     });
     source.addEventListener("stream-error", (event) => {
       const payload = JSON.parse((event as MessageEvent).data || "{}") as { message?: string };
@@ -111,4 +119,28 @@ export function watchImportJobs(
     if (reconnectTimer) clearTimeout(reconnectTimer);
     source?.close();
   };
+}
+
+function jobSignature(job: ImportJobStatus) {
+  return [
+    job.status,
+    job.stage ?? "",
+    job.progress ?? "",
+    job.progressText ?? "",
+    job.currentPage ?? "",
+    job.totalPages ?? "",
+    job.updatedAt ?? "",
+    job.errorMessage ?? "",
+    job.errorCode ?? "",
+  ].join(":");
+}
+
+function parseStreamIdlePayload(data: string) {
+  try {
+    const payload = JSON.parse(data || "{}") as { retryAfterMs?: unknown };
+    const retryAfterMs = Number(payload.retryAfterMs);
+    return { retryAfterMs: Number.isFinite(retryAfterMs) && retryAfterMs >= 0 ? retryAfterMs : 10_000 };
+  } catch {
+    return { retryAfterMs: 10_000 };
+  }
 }
