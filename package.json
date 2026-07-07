@@ -18,6 +18,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "pnpm -r --if-present typecheck",
+    "precommit": "pnpm lint-staged && pnpm lint && pnpm typecheck && pnpm format:check",
     "db:generate": "pnpm --filter @shared-ledger/db generate",
     "db:migrate:local": "node scripts/migrate-local-db.mjs",
     "db:seed:local": "node scripts/seed-local-db.mjs",
@@ -43,6 +44,6 @@
     "*.{ts,tsx,js,jsx,json,jsonc,css,md,yml,yaml}": "prettier --write"
   },
   "simple-git-hooks": {
-    "pre-commit": "pnpm lint-staged"
+    "pre-commit": "pnpm precommit"
   }
 }
