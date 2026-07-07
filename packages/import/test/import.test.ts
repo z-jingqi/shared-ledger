@@ -34,6 +34,7 @@ describe("image OCR import workflow", () => {
               amount: 38.5,
               occurredAt: "2026-06-28",
               note: "超市购物",
+              items: [],
               confidence: 0.9,
               warnings: [],
             },
