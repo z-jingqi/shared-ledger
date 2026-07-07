@@ -10,6 +10,8 @@ export type Env = {
   AI_ORCHESTRATOR?: WorkerServiceBinding;
   ALEPH_AI_ENV?: string;
   ALEPH_AI_IMPORT_TIMEOUT_MS?: string;
+  ALEPH_AI_IMPORT_SUMMARY_MAX_TOKENS?: string;
+  ALEPH_AI_IMPORT_ITEMS_MAX_TOKENS?: string;
   ALEPH_AI_SERVICE_TOKEN?: string;
   ALEPH_AI_TEST_CLIENT?: AlephAIClient;
   ALEPH_TOOLS?: WorkerServiceBinding;

@@ -35,13 +35,19 @@ export function runtimeAiProvider(env: Env, user: RuntimeAiUser): AiProvider {
     client: runtimeAlephClient(env),
     env: runtimeAlephEnv(env),
     importTimeoutMs: runtimeImportTimeoutMs(env),
+    importSummaryMaxTokens: runtimePositiveNumber(env.ALEPH_AI_IMPORT_SUMMARY_MAX_TOKENS),
+    importItemsMaxTokens: runtimePositiveNumber(env.ALEPH_AI_IMPORT_ITEMS_MAX_TOKENS),
     project,
     user,
   });
 }
 
 function runtimeImportTimeoutMs(env: Env) {
-  const configured = Number(env.ALEPH_AI_IMPORT_TIMEOUT_MS);
+  return runtimePositiveNumber(env.ALEPH_AI_IMPORT_TIMEOUT_MS);
+}
+
+function runtimePositiveNumber(value: string | undefined) {
+  const configured = Number(value);
   return Number.isFinite(configured) && configured > 0 ? configured : undefined;
 }
 
@@ -106,11 +112,19 @@ function createTestAlephClient(): AlephAIClient {
         provider: "test",
         model: "test-model",
         usage: { inputTokens: 1, outputTokens: 1, creditsCharged: 1 },
-        output: (format === "ledger_import_records"
-          ? { records: [] }
-          : format === "ledger_skill_selection"
-            ? testSkillSelection(payload)
-            : testSkillStep(payload)) as TOutput,
+        output: (format === "import_receipt_summary"
+          ? {
+              type: "expense",
+              amount: 1,
+              occurredAt: "2026-06-28",
+              confidence: 0.9,
+              warnings: [],
+            }
+          : format === "import_items_chunk"
+            ? { items: [], confidence: 0.9, warnings: [] }
+            : format === "ledger_skill_selection"
+              ? testSkillSelection(payload)
+              : testSkillStep(payload)) as TOutput,
       };
     },
     async *stream(request: InvokeRequest) {

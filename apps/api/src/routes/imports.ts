@@ -900,6 +900,15 @@ function importJobStatusPayload(job: ImportJob) {
 function importProgressText(job: ImportJob) {
   if (job.status !== "ai_processing") return "";
   switch (job.ocrStage) {
+    case "ai_summary":
+      return "分析票据信息";
+    case "ai_items":
+      if (typeof job.ocrCurrentPage === "number" && typeof job.ocrTotalPages === "number") {
+        return `提取明细 ${job.ocrCurrentPage}/${job.ocrTotalPages}`;
+      }
+      return "提取明细";
+    case "ai_merging":
+      return "合并识别结果";
     case "ai_text_ready":
       return "整理识别文本";
     case "ai_structuring":

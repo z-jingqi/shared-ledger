@@ -5,7 +5,24 @@ import { authHeaders, createD1TestApp, seedBook, seedUser } from "./harness";
 
 function aiClientWithImportedRecord(record: Record<string, unknown> = {}): AlephAIClient {
   return {
-    async invoke<TOutput = unknown>(_request: InvokeRequest) {
+    async invoke<TOutput = unknown>(request: InvokeRequest) {
+      const format = responseFormatName(request);
+      const output =
+        format === "import_items_chunk"
+          ? {
+              items: Array.isArray(record.items) ? record.items : [],
+              confidence: typeof record.confidence === "number" ? record.confidence : 0.95,
+              warnings: Array.isArray(record.warnings) ? record.warnings : [],
+            }
+          : {
+              type: "expense",
+              amount: 12,
+              occurredAt: "2026-06-28",
+              note: "早餐",
+              confidence: 0.95,
+              warnings: [],
+              ...record,
+            };
       return {
         requestId: "ai_import_1",
         status: "ok",
@@ -13,20 +30,7 @@ function aiClientWithImportedRecord(record: Record<string, unknown> = {}): Aleph
         provider: "test",
         model: "test-model",
         usage: { inputTokens: 1, outputTokens: 1, creditsCharged: 1 },
-        output: {
-          records: [
-            {
-              type: "expense",
-              amount: 12,
-              occurredAt: "2026-06-28",
-              note: "早餐",
-              items: [],
-              confidence: 0.95,
-              warnings: [],
-              ...record,
-            },
-          ],
-        } as TOutput,
+        output: output as TOutput,
       };
     },
     async *stream() {
@@ -44,6 +48,11 @@ function aiClientWithImportedRecord(record: Record<string, unknown> = {}): Aleph
       };
     },
   };
+}
+
+function responseFormatName(request: InvokeRequest) {
+  return (request.input?.response_format as { json_schema?: { name?: string } } | undefined)?.json_schema
+    ?.name;
 }
 
 function hangingAiClient(): AlephAIClient {
@@ -223,7 +232,8 @@ describe("D1 image import and OCR quota integrity", () => {
         const message = (request.input as any).messages?.find((item: any) => item.role === "user") as
           | { content?: string }
           | undefined;
-        aiText = JSON.parse(message?.content ?? "{}").text ?? "";
+        const payload = JSON.parse(message?.content ?? "{}");
+        aiText += `${payload.summaryText ?? ""}\n${payload.text ?? ""}`;
         return aiClientWithImportedRecord({
           items: [{ name: "拿铁", amount: 12, categoryName: "餐饮" }],
         }).invoke<TOutput>(request);

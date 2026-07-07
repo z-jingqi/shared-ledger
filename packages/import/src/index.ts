@@ -1,4 +1,5 @@
 import type { AiProvider } from "@shared-ledger/ai";
+import type { AiImportProgress } from "@shared-ledger/ai";
 import { aiImportRecordSchema, supportedFileTypes, type TransactionType } from "@shared-ledger/shared";
 import { z } from "zod";
 
@@ -12,6 +13,7 @@ export async function structureForConfirmation(input: {
   normalized: NormalizedImport;
   ai: AiProvider;
   categories?: Array<{ name: string; type: TransactionType }>;
+  onProgress?: (progress: AiImportProgress) => Promise<void> | void;
 }) {
   const records = await input.ai.structureImport({
     bookId: input.bookId,
@@ -19,6 +21,7 @@ export async function structureForConfirmation(input: {
     text: input.normalized.rawText,
     page: "图片识别",
     categories: input.categories,
+    onImportProgress: input.onProgress,
   });
   return records.map((record) => {
     const warnings = [...record.warnings, ...input.normalized.warnings];

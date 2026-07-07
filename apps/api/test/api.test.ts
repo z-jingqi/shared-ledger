@@ -87,6 +87,15 @@ function recordingAlephClient(options?: {
 
 function defaultAiInvokeOutput(request: InvokeRequest) {
   const name = responseFormatName(request);
+  if (name === "import_receipt_summary")
+    return {
+      type: "expense",
+      amount: 1,
+      occurredAt: "2026-06-28",
+      confidence: 0.9,
+      warnings: [],
+    };
+  if (name === "import_items_chunk") return { items: [], confidence: 0.9, warnings: [] };
   if (name === "ledger_skill_selection") return { skillName: "general.chat", confidence: 1 };
   if (name === "ledger_skill_step")
     return {
@@ -777,19 +786,22 @@ describe("Hono REST API", () => {
 
   it("routes import structuring through Aleph object planning", async () => {
     const { client, requests } = recordingAlephClient({
-      invokeOutput: {
-        records: [
-          {
-            type: "expense",
-            amount: 12,
-            occurredAt: "2026-06-27",
-            note: "早餐",
-            items: [],
-            confidence: 0.9,
-            warnings: [],
-          },
-        ],
-      },
+      invokeOutput: (request: InvokeRequest) =>
+        responseFormatName(request) === "import_receipt_summary"
+          ? {
+              type: "expense",
+              amount: 12,
+              occurredAt: "2026-06-27",
+              note: "早餐",
+              categoryName: "餐饮",
+              confidence: 0.9,
+              warnings: [],
+            }
+          : {
+              items: [{ name: "豆浆", amount: 12, categoryName: "餐饮" }],
+              confidence: 0.88,
+              warnings: [],
+            },
     });
     const ai = runtimeAiProvider(
       { APP_ENV: "test", ALEPH_AI_TEST_CLIENT: client },
@@ -801,18 +813,118 @@ describe("Hono REST API", () => {
       normalized: { rawText: "早餐 12 元", warnings: ["OCR 置信度较低"] },
       ai,
     });
-    const request = requests[0];
+    const [summaryRequest, itemsRequest] = requests;
 
-    expect(records[0]).toMatchObject({ type: "expense", amount: 12, warnings: ["OCR 置信度较低"] });
-    expect(request).toMatchObject({
+    expect(records[0]).toMatchObject({
+      type: "expense",
+      amount: 12,
+      categoryName: "餐饮",
+      items: [{ name: "豆浆", amount: 12, categoryName: "餐饮" }],
+      warnings: ["OCR 置信度较低"],
+    });
+    expect(summaryRequest).toMatchObject({
       project: "shared-ledger",
       task: "ledger.skill_step",
       mode: "object",
       user: { id: "user_demo", plan: "pro" },
     });
-    expect(responseFormatName(request)).toBe("ledger_import_records");
-    expect(responseFormatSchema(request).properties.records.items.required).toContain("items");
-    expect(request.input.max_tokens).toBe(5000);
-    expect(request.input.model).toBeUndefined();
+    expect(responseFormatName(summaryRequest)).toBe("import_receipt_summary");
+    expect(responseFormatName(itemsRequest)).toBe("import_items_chunk");
+    expect(responseFormatSchema(itemsRequest).properties.items.items.required).toContain("amount");
+    expect(summaryRequest.input.max_tokens).toBe(900);
+    expect(itemsRequest.input.max_tokens).toBe(1800);
+    expect(requests.some((request) => request.input.max_tokens === 5000)).toBe(false);
+    expect(summaryRequest.input.model).toBeUndefined();
+  });
+
+  it("splits long OCR imports into item chunks and deduplicates overlap", async () => {
+    const { client, requests } = recordingAlephClient({
+      invokeOutput: (request: InvokeRequest) => {
+        const name = responseFormatName(request);
+        if (name === "import_receipt_summary") {
+          return {
+            type: "expense",
+            amount: 24,
+            occurredAt: "2026-06-27",
+            note: "超市",
+            confidence: 0.9,
+            warnings: [],
+          };
+        }
+        const content = String(request.input.messages.at(-1)?.content ?? "");
+        const chunkIndex = Number(JSON.parse(content).chunkIndex);
+        return {
+          items:
+            chunkIndex === 1
+              ? [{ name: "牛奶", amount: 12, categoryName: "食品" }]
+              : [
+                  { name: "牛奶", amount: 12, categoryName: "食品" },
+                  { name: "面包", amount: 12, categoryName: "食品" },
+                ],
+          confidence: 0.85,
+          warnings: [],
+        };
+      },
+    });
+    const ai = runtimeAiProvider(
+      { APP_ENV: "test", ALEPH_AI_TEST_CLIENT: client },
+      { id: "user_demo", plan: "pro" },
+    );
+    const rawText = Array.from({ length: 120 }, (_, index) => `商品 ${index + 1} 1.00`).join("\n");
+    const records = await structureForConfirmation({
+      bookId: "book_home",
+      userId: "user_demo",
+      normalized: { rawText, warnings: [] },
+      ai,
+    });
+
+    expect(records[0]?.items).toEqual([
+      { name: "牛奶", amount: 12, categoryName: "食品" },
+      { name: "面包", amount: 12, categoryName: "食品" },
+    ]);
+    expect(requests.filter((request) => responseFormatName(request) === "import_items_chunk")).toHaveLength(
+      2,
+    );
+    expect(requests.every((request) => request.input.max_tokens !== 5000)).toBe(true);
+  });
+
+  it("bisects an import item chunk once when Aleph reports oversized input", async () => {
+    let itemAttempts = 0;
+    const { client, requests } = recordingAlephClient({
+      invokeOutput: (request: InvokeRequest) => {
+        const name = responseFormatName(request);
+        if (name === "import_receipt_summary") {
+          return {
+            type: "expense",
+            amount: 10,
+            occurredAt: "2026-06-27",
+            confidence: 0.9,
+            warnings: [],
+          };
+        }
+        itemAttempts += 1;
+        if (itemAttempts === 1) throw new AlephAIError("input_too_large", "too large");
+        return {
+          items: [{ name: `商品${itemAttempts}`, amount: 5 }],
+          confidence: 0.8,
+          warnings: [],
+        };
+      },
+    });
+    const ai = runtimeAiProvider(
+      { APP_ENV: "test", ALEPH_AI_TEST_CLIENT: client },
+      { id: "user_demo", plan: "pro" },
+    );
+    const records = await structureForConfirmation({
+      bookId: "book_home",
+      userId: "user_demo",
+      normalized: { rawText: "商品A 5\n商品B 5", warnings: [] },
+      ai,
+    });
+
+    expect(records[0]?.items).toHaveLength(2);
+    expect(requests.filter((request) => responseFormatName(request) === "import_items_chunk")).toHaveLength(
+      3,
+    );
   });
 });

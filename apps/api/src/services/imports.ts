@@ -333,6 +333,14 @@ async function finalizeImportJob(
             category.type === "income" || category.type === "expense",
         ),
       ai: runtimeAiProvider(env, { id: latest.userId, plan: await repository.getUserPlan(latest.userId) }),
+      onProgress: async (progress) => {
+        await repository.updateOcrProgress(job.id, {
+          stage: progress.stage,
+          progress: 100,
+          currentPage: progress.chunkIndex ?? null,
+          totalPages: progress.chunkTotal ?? null,
+        });
+      },
     });
   } catch (error) {
     await markFailed(repository, job.id, error, "ai");
