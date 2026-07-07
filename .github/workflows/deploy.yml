@@ -1,5 +1,6 @@
 name: Deploy changed Cloudflare layers
 on:
+  workflow_dispatch:
   push:
     branches: [main, develop]
 permissions:
@@ -41,7 +42,7 @@ jobs:
               - '.github/workflows/deploy.yml'
   deploy-web:
     needs: changes
-    if: needs.changes.outputs.web == 'true' || needs.changes.outputs.shared == 'true' || needs.changes.outputs.infrastructure == 'true'
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.web == 'true' || needs.changes.outputs.shared == 'true' || needs.changes.outputs.infrastructure == 'true'
     runs-on: ubuntu-latest
     environment: preview
     steps:
@@ -61,7 +62,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
   migrate-database:
     needs: changes
-    if: needs.changes.outputs.migration == 'true'
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.migration == 'true'
     runs-on: ubuntu-latest
     environment: preview
     steps:
@@ -80,7 +81,7 @@ jobs:
     needs: [changes, migrate-database]
     if: |
       always() &&
-      (needs.changes.outputs.api == 'true' || needs.changes.outputs.shared == 'true' || needs.changes.outputs.infrastructure == 'true') &&
+      (github.event_name == 'workflow_dispatch' || needs.changes.outputs.api == 'true' || needs.changes.outputs.shared == 'true' || needs.changes.outputs.infrastructure == 'true') &&
       (needs.migrate-database.result == 'success' || needs.migrate-database.result == 'skipped')
     runs-on: ubuntu-latest
     environment: preview
