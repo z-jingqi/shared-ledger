@@ -19,6 +19,10 @@ import {
   upsertImportJobsInCache,
 } from "../features/imports/cache";
 import { createPreviewThumbnail } from "../features/imports/preview-thumbnail";
+import {
+  logOcrRawDataForImportJob,
+  rememberOcrRawDataFromDiagnostics,
+} from "../features/imports/ocr-raw-debug";
 import { terminalImportStatuses, watchImportJobs, type ImportJobStatus } from "../features/imports/status";
 import {
   cancelImportJob,
@@ -419,12 +423,15 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
   const diagnose = async (job: Job) => {
     setBusyJobId(job.id);
     try {
-      const diagnostics = await diagnoseImportOcrJob(job.id);
+      const diagnostics = await diagnoseImportOcrJob(job.id, { includeOcrRaw: true });
+      rememberOcrRawDataFromDiagnostics(job.id, diagnostics.sharedLedgerDebug);
+      logOcrRawDataForImportJob(job.id);
       const summary = summarizeAlephToolsDiagnostics(diagnostics);
       const options = { description: summary.description, duration: 6000, closeButton: true };
       if (summary.ok) toast.success(summary.title, options);
       else toast.warning(summary.title, options);
     } catch (cause) {
+      logOcrRawDataForImportJob(job.id);
       if (cause instanceof ApiError && cause.status === 404) {
         removeMissing(job.id);
         toast.warning("识别任务已不存在", {
@@ -1026,7 +1033,18 @@ function canDeleteImportJob(job: Job) {
 }
 
 function canDiagnoseImportJob(job: Job) {
-  return isImageJob(job) && ["ocr_processing", "cancel_requested", "failed"].includes(job.status);
+  return (
+    isImageJob(job) &&
+    !job.localOnly &&
+    [
+      "ocr_processing",
+      "cancel_requested",
+      "ai_processing",
+      "pending_confirmation",
+      "completed",
+      "failed",
+    ].includes(job.status)
+  );
 }
 
 function isOcrDiagnosticsEnvironment() {

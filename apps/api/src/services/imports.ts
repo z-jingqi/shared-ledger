@@ -5,7 +5,7 @@ import { D1LedgerRepository } from "../repository";
 import { runtimeAiProvider } from "./ai";
 import { createImportSourceAccess } from "./import-source";
 import { AlephToolsError, ocrConfidence, runtimeOcrClient } from "./ocr";
-import type { AlephErrorPayload, AlephOcrJob } from "./ocr";
+import type { AlephErrorPayload, AlephOcrJob, AlephOcrResult } from "./ocr";
 import type { ImportedRecord, ImportJob } from "../store";
 import type { Env } from "../types";
 
@@ -13,6 +13,12 @@ const terminalImportStatuses = new Set(["completed", "pending_confirmation", "fa
 const blockedFinalizeStatuses = new Set(["cancel_requested", ...terminalImportStatuses]);
 type AlephPhase = "ocr";
 type FailureStage = AlephPhase | "ai";
+type OcrRawResultObserver = (payload: {
+  importJobId: string;
+  ocrJobId: string;
+  capturedAt: string;
+  result: AlephOcrResult;
+}) => Promise<void> | void;
 
 export function isOcrImportFileType(fileType: string) {
   return fileType.startsWith("image/");
@@ -53,7 +59,12 @@ export async function submitAlephOcrJob(
   return (await repository.getImportJob(job.id)) ?? attached;
 }
 
-export async function finalizeAlephOcrJob(env: Env, repository: D1LedgerRepository, importJobId: string) {
+export async function finalizeAlephOcrJob(
+  env: Env,
+  repository: D1LedgerRepository,
+  importJobId: string,
+  options: { onOcrRawResult?: OcrRawResultObserver } = {},
+) {
   const job = await repository.getImportJob(importJobId);
   if (!job) throw new Error("导入任务不存在");
   if (!job.ocrJobId) throw new Error("导入任务未关联 Aleph 任务");
@@ -82,6 +93,12 @@ export async function finalizeAlephOcrJob(env: Env, repository: D1LedgerReposito
     });
   }
   const result = await runtimeOcrClient(env).getResult(job.ocrJobId);
+  await options.onOcrRawResult?.({
+    importJobId: job.id,
+    ocrJobId: job.ocrJobId,
+    capturedAt: new Date().toISOString(),
+    result,
+  });
   await repository.revokeImportSourceAccess(job.id);
   const markdownText = result.markdown?.trim();
   const plainText = result.plainText?.trim();

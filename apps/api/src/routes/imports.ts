@@ -285,6 +285,9 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
         const run = async () => {
           try {
             jobs.forEach((job) => job && sendJob(job));
+            const sendOcrRawResult = shouldExposeOcrRawDebugData(context.env)
+              ? (payload: unknown) => sendEvent("ocr-result", payload)
+              : undefined;
             const activeAlephJobs = jobs.filter((job): job is ImportJob => {
               if (!job) return false;
               return (
@@ -309,10 +312,16 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
             }
             await Promise.all([
               ...activeAlephJobs.map((job) =>
-                proxyAlephEvents(context.env, repository, job, async (nextJob) => {
-                  if (stopped) return;
-                  sendJob(nextJob);
-                }),
+                proxyAlephEvents(
+                  context.env,
+                  repository,
+                  job,
+                  async (nextJob) => {
+                    if (stopped) return;
+                    sendJob(nextJob);
+                  },
+                  sendOcrRawResult,
+                ),
               ),
               ...(activeLocalJobs.length
                 ? [
@@ -629,11 +638,12 @@ async function proxyAlephEvents(
   repository: D1LedgerRepository,
   job: ImportJob,
   onJob: (job: ImportJob) => Promise<void> | void,
+  onOcrRawResult?: (payload: unknown) => Promise<void> | void,
 ) {
   const externalJobId = job.ocrJobId;
   if (!externalJobId) return;
 
-  if (await syncAlephJobSnapshot(env, repository, job, onJob)) return;
+  if (await syncAlephJobSnapshot(env, repository, job, onJob, onOcrRawResult)) return;
 
   const stream = await runtimeOcrClient(env).streamJobEvents(externalJobId, job.ocrEventSequence);
   for await (const message of parseSseStream(stream)) {
@@ -674,12 +684,12 @@ async function proxyAlephEvents(
       return;
     }
     if (isReady) {
-      await finalizeReadyAlephJob(env, repository, job, onJob);
+      await finalizeReadyAlephJob(env, repository, job, onJob, onOcrRawResult);
       return;
     }
   }
 
-  if (await syncAlephJobSnapshot(env, repository, job, onJob)) return;
+  if (await syncAlephJobSnapshot(env, repository, job, onJob, onOcrRawResult)) return;
   const latest = await repository.getImportJob(job.id);
   if (!latest || terminalImportStatuses.has(latest.status)) return;
   throw new Error("Aleph Tools 进度连接已断开，可刷新恢复");
@@ -690,6 +700,7 @@ async function syncAlephJobSnapshot(
   repository: D1LedgerRepository,
   job: ImportJob,
   onJob: (job: ImportJob) => Promise<void> | void,
+  onOcrRawResult?: (payload: unknown) => Promise<void> | void,
 ) {
   if (!job.ocrJobId) return false;
   const alephJob = await runtimeOcrClient(env).getJob(job.ocrJobId);
@@ -712,7 +723,7 @@ async function syncAlephJobSnapshot(
     return true;
   }
   if (alephJob.status === "ready") {
-    await finalizeReadyAlephJob(env, repository, job, onJob);
+    await finalizeReadyAlephJob(env, repository, job, onJob, onOcrRawResult);
     return true;
   }
   return false;
@@ -723,6 +734,7 @@ async function finalizeReadyAlephJob(
   repository: D1LedgerRepository,
   job: ImportJob,
   onJob: (job: ImportJob) => Promise<void> | void,
+  onOcrRawResult?: (payload: unknown) => Promise<void> | void,
 ) {
   const current = await repository.getImportJob(job.id);
   if (current && (terminalImportStatuses.has(current.status) || current.status === "cancel_requested")) {
@@ -732,7 +744,7 @@ async function finalizeReadyAlephJob(
   const processing = await repository.markImportJobAiProcessing(job.id, "ai_text_ready");
   if (processing) await onJob(processing);
   try {
-    await finalizeAlephOcrJob(env, repository, job.id);
+    await finalizeAlephOcrJob(env, repository, job.id, { onOcrRawResult });
   } catch (error) {
     await markFailed(repository, job.id, error, "ocr");
   }
@@ -901,6 +913,10 @@ function importProgressText(job: ImportJob) {
 
 function isImportJobCancelable(job: ImportJob) {
   return !terminalImportStatuses.has(job.status) && job.status !== "cancel_requested";
+}
+
+function shouldExposeOcrRawDebugData(env: Env) {
+  return env.APP_ENV !== "prod";
 }
 
 function parseImportStatusFilter(value: string | undefined): ImportJobStatusFilter {

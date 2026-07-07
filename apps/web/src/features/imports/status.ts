@@ -1,4 +1,5 @@
 import { API } from "../../lib";
+import { rememberOcrRawDataFromStatusStream } from "./ocr-raw-debug";
 
 export const terminalImportStatuses = new Set(["completed", "pending_confirmation", "failed", "cancelled"]);
 
@@ -73,6 +74,13 @@ export function watchImportJobs(
         notifyDisconnected();
         stopped = true;
         source?.close();
+      }
+    });
+    source.addEventListener("ocr-result", (event) => {
+      try {
+        rememberOcrRawDataFromStatusStream(JSON.parse((event as MessageEvent).data || "{}"));
+      } catch {
+        // Debug-only payload; ignore malformed raw OCR snapshots.
       }
     });
     source.addEventListener("stream-idle", () => {

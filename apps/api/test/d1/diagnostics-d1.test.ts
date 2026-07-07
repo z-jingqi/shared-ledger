@@ -107,6 +107,53 @@ describe("D1 Aleph Tools diagnostics", () => {
     expect(request?.url).toBe("https://aleph-tools.internal/v1/platform/check?jobId=ocr_from_import");
   });
 
+  it("can include OCR raw result for non-production import diagnostics", async () => {
+    const context = createD1TestApp();
+    const user = seedUser(context.db, { id: "user_diag", name: "Diag", plan: "pro" });
+    const book = seedBook(context.db, user, { id: "book_diag" });
+    const job = await context.repository.createImportJob({
+      bookId: book.id,
+      userId: user.id,
+      fileName: "receipt.jpg",
+      fileType: "image/jpeg",
+      r2Key: "imports/receipt.jpg",
+    });
+    await context.repository.attachOcrJob(job.id, "ocr_with_result");
+    context.alephTools.jobStatus.ocr_with_result = {
+      jobId: "ocr_with_result",
+      status: "ready",
+      progress: 100,
+      stage: "ready",
+      resultAvailable: true,
+    };
+    context.alephTools.result.ocr_with_result = {
+      plainText: "小票原文 12 元",
+      markdown: "| 商品 | 金额 |\n| 早餐 | 12 |",
+      pages: [{ text: "小票原文 12 元", confidence: 0.95 }],
+    };
+
+    const response = await context.app.request(
+      `/diagnostics/aleph-tools?importJobId=${job.id}&includeOcrRaw=1`,
+      { headers: authHeaders(user) },
+      context.env,
+    );
+    const body = await response.json<any>();
+
+    expect(response.status).toBe(200);
+    expect(body.sharedLedgerDebug).toMatchObject({
+      importJobId: job.id,
+      ocrJobId: "ocr_with_result",
+      ocrRawResult: {
+        plainText: "小票原文 12 元",
+        markdown: "| 商品 | 金额 |\n| 早餐 | 12 |",
+      },
+    });
+    expect(context.alephTools.requests.map((request) => request.url)).toEqual([
+      "https://aleph-tools.internal/v1/platform/check?jobId=ocr_with_result",
+      "https://aleph-tools.internal/v1/jobs/ocr_with_result/result",
+    ]);
+  });
+
   it("does not allow diagnosing another user's import job", async () => {
     const context = createD1TestApp();
     const owner = seedUser(context.db, { id: "user_owner", name: "Owner", plan: "pro" });

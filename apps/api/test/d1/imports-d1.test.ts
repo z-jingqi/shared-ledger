@@ -459,6 +459,8 @@ describe("D1 image import and OCR quota integrity", () => {
 
     expect(stream.status).toBe(200);
     expect(text).toContain("event: job");
+    expect(text).toContain("event: ocr-result");
+    expect(text).toContain('"plainText":"早餐 12 元"');
     expect(text).toContain('"status":"pending_confirmation"');
     expect(finalized?.status).toBe("pending_confirmation");
     expect(await context.repository.listImportedRecords(job!.id)).toHaveLength(1);
