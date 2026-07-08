@@ -1,24 +1,16 @@
-import { AlephAIError } from "@shared-ledger/ai";
+import { LedgerAIError } from "@shared-ledger/ai";
 import { structureForConfirmation } from "@shared-ledger/import";
 import type { NormalizedImport } from "@shared-ledger/import";
 import { D1LedgerRepository } from "../repository";
-import { runtimeAiProvider } from "./ai";
-import { createImportSourceAccess } from "./import-source";
-import { AlephToolsError, ocrConfidence, runtimeOcrClient } from "./ocr";
-import type { AlephErrorPayload, AlephOcrJob, AlephOcrResult } from "./ocr";
 import type { ImportedRecord, ImportJob } from "../store";
-import type { Env } from "../types";
+import type { Env, ImportPipelineMessage, ImportPipelineStep } from "../types";
+import { runtimeAiProvider } from "./ai";
+import { assertGoogleVisionInlineImageSize, prepareImageForGoogleVision } from "./image-conversion";
+import { GoogleVisionOcrError, ocrConfidence, runtimeOcrClient, type GoogleVisionOcrResult } from "./ocr";
 
 const terminalImportStatuses = new Set(["completed", "pending_confirmation", "failed", "cancelled"]);
 const blockedFinalizeStatuses = new Set(["cancel_requested", ...terminalImportStatuses]);
-type AlephPhase = "ocr";
-type FailureStage = AlephPhase | "ai";
-type OcrRawResultObserver = (payload: {
-  importJobId: string;
-  ocrJobId: string;
-  capturedAt: string;
-  result: AlephOcrResult;
-}) => Promise<void> | void;
+type FailureStage = "ocr" | "ai";
 
 export function isOcrImportFileType(fileType: string) {
   return fileType.startsWith("image/");
@@ -28,131 +20,193 @@ export function isImageImportFileType(fileType: string) {
   return fileType.startsWith("image/");
 }
 
-export async function submitAlephOcrJob(
-  env: Env,
-  repository: D1LedgerRepository,
-  job: ImportJob,
-  options: { requestOrigin?: string } = {},
-) {
+export async function submitOcrJob(env: Env, repository: D1LedgerRepository, job: ImportJob) {
   if (!isImageImportFileType(job.fileType)) throw new Error("当前只支持图片识别");
-  const sourceFile = await readStoredSourceFile(env, repository, job);
-  const sourceAccess = await createImportSourceAccess(repository, job.id);
-  const callbackUrl = `${apiPublicOrigin(env, options.requestOrigin)}/imports/aleph-webhook`;
-  const alephJob = await runtimeOcrClient(env).createOcrJob(
-    {
-      type: "client_source",
-      sourceId: job.id,
-      accessToken: sourceAccess.token,
-      filename: job.fileName,
-      mimeType: job.fileType,
-      sizeBytes: sourceFile.sizeBytes,
-      checksumSha256: sourceFile.checksumSha256,
-    },
-    {
-      callbackUrl,
-      metadata: { importJobId: job.id, phase: "ocr" },
-      idempotencyKey: `ocr:${job.id}:${job.retryCount ?? 0}`,
-    },
-  );
-  const attached = await repository.attachOcrJob(job.id, alephJob.jobId, "ocr");
-  if (attached) await updateAlephSnapshot(repository, attached.id, alephJob);
-  return (await repository.getImportJob(job.id)) ?? attached;
+  runtimeOcrClient(env);
+  await enqueueImportPipelineStep(env, job.id, "convert");
+  return (await repository.getImportJob(job.id)) ?? job;
 }
 
-export async function finalizeAlephOcrJob(
-  env: Env,
-  repository: D1LedgerRepository,
-  importJobId: string,
-  options: { onOcrRawResult?: OcrRawResultObserver } = {},
-) {
-  const job = await repository.getImportJob(importJobId);
-  if (!job) throw new Error("导入任务不存在");
-  if (!job.ocrJobId) throw new Error("导入任务未关联 Aleph 任务");
-  if (blockedFinalizeStatuses.has(job.status)) return repository.listImportedRecords(job.id);
+export async function enqueueImportPipelineStep(env: Env, jobId: string, step: ImportPipelineStep) {
+  if (!env.IMPORT_PIPELINE_QUEUE) throw new Error("IMPORT_PIPELINE_QUEUE 未配置，无法处理导入任务");
+  await env.IMPORT_PIPELINE_QUEUE.send({ jobId, step });
+}
 
-  const existing = await repository.listImportedRecords(job.id);
-  if (existing.length) {
-    if (job.status !== "completed" && job.status !== "pending_confirmation") {
-      await repository.updateImportJob(job.id, job.autoConfirm ? "completed" : "pending_confirmation");
-    }
-    if (isImageImportFileType(job.fileType))
-      await repository.recordImageOcrUsage(job.id, job.userId, shanghaiUsageDate());
-    return existing;
-  }
-
-  const snapshot = await runtimeOcrClient(env).getJob(job.ocrJobId);
-  if (!snapshot.resultAvailable) {
-    throw new AlephToolsError({
-      code: "JOB_NOT_READY",
-      message: "Job result is not ready",
-      jobId: job.ocrJobId,
-      jobStatus: snapshot.status,
-      stage: snapshot.stage ?? "ocr",
-      retryable: true,
-      terminal: false,
+export async function processImportPipelineBatch(env: Env, batch: MessageBatch<ImportPipelineMessage>) {
+  if (!env.DB) throw new Error("导入队列需要 D1 绑定");
+  const repository = new D1LedgerRepository(env.DB);
+  for (const message of batch.messages) {
+    await processImportPipelineMessage(env, repository, message.body, {
+      attempts: queueMessageAttempts(message),
     });
   }
-  const result = await runtimeOcrClient(env).getResult(job.ocrJobId);
-  await options.onOcrRawResult?.({
-    importJobId: job.id,
-    ocrJobId: job.ocrJobId,
-    capturedAt: new Date().toISOString(),
-    result,
+}
+
+export async function processImportPipelineMessage(
+  env: Env,
+  repository: D1LedgerRepository,
+  message: ImportPipelineMessage,
+  options: { attempts?: number } = {},
+) {
+  try {
+    switch (message.step) {
+      case "convert":
+        await processImportConversionStep(env, repository, message.jobId);
+        break;
+      case "ocr":
+        await processImportOcrStep(env, repository, message.jobId);
+        break;
+      case "ai":
+        await processImportAiStep(env, repository, message.jobId);
+        break;
+      default:
+        message.step satisfies never;
+    }
+  } catch (error) {
+    const failureStage: FailureStage = message.step === "ai" ? "ai" : "ocr";
+    const attempts = options.attempts ?? 1;
+    if (shouldRetryQueueMessage(error, message.step, attempts)) throw error;
+    await markFailed(repository, message.jobId, error, failureStage);
+  }
+}
+
+async function processImportConversionStep(env: Env, repository: D1LedgerRepository, importJobId: string) {
+  let job = await repository.getImportJob(importJobId);
+  if (!job || blockedFinalizeStatuses.has(job.status)) return;
+  if (job.status !== "uploaded" && job.status !== "converting") return;
+  if (job.status === "uploaded") job = (await repository.markImportJobConverting(job.id)) ?? job;
+  await repository.updateOcrProgress(job.id, { stage: "conversion_reading", progress: 15 });
+
+  const source = await readR2Object(env, job.r2Key, {
+    message: "导入原文件不存在",
+    code: "SOURCE_NOT_FOUND",
   });
-  await repository.revokeImportSourceAccess(job.id);
-  const markdownText = result.markdown?.trim();
-  const plainText = result.plainText?.trim();
-  const rawText =
-    markdownText && plainText && markdownText !== plainText
-      ? `OCR markdown:\n${markdownText}\n\nOCR plain text:\n${plainText}`
-      : (markdownText ?? plainText);
-  if (!rawText) {
-    await repository.markImportJobFailed(job.id, {
-      message: "Aleph Tools 未返回可识别文本",
-      code: "EMPTY_OCR_RESULT",
+  const latestBeforeConversion = await repository.getImportJob(job.id);
+  if (!latestBeforeConversion || blockedFinalizeStatuses.has(latestBeforeConversion.status)) return;
+
+  await repository.updateOcrProgress(job.id, { stage: "conversion_processing", progress: 20 });
+  const output = await prepareImageForGoogleVision(latestBeforeConversion, source);
+  const latestBeforeWrite = await repository.getImportJob(job.id);
+  if (!latestBeforeWrite || blockedFinalizeStatuses.has(latestBeforeWrite.status)) return;
+
+  const ocrInputKey = output.converted ? ocrInputR2Key(latestBeforeWrite, output.fileType) : job.r2Key;
+  if (output.converted) {
+    await env.FILES?.put(ocrInputKey, output.bytes, {
+      httpMetadata: { contentType: output.fileType },
+      customMetadata: {
+        importJobId: job.id,
+        bookId: latestBeforeWrite.bookId,
+        sourceR2Key: job.r2Key,
+        purpose: "ocr-input",
+      },
+    });
+  }
+  await repository.setImportJobOcrInput(job.id, {
+    r2Key: ocrInputKey,
+    fileType: output.fileType,
+    converted: output.converted,
+  });
+
+  const latestAfterConversion = await repository.getImportJob(job.id);
+  if (!latestAfterConversion || blockedFinalizeStatuses.has(latestAfterConversion.status)) return;
+  await enqueueImportPipelineStep(env, job.id, "ocr");
+}
+
+async function processImportOcrStep(env: Env, repository: D1LedgerRepository, importJobId: string) {
+  let job = await repository.getImportJob(importJobId);
+  if (!job || blockedFinalizeStatuses.has(job.status)) return;
+  if (!job.ocrInputR2Key || !job.ocrInputFileType) {
+    throw new GoogleVisionOcrError({
+      code: "MISSING_OCR_INPUT",
+      message: "导入任务缺少 OCR 输入文件",
       stage: "ocr",
       retryable: false,
       terminal: true,
-      externalJobId: job.ocrJobId,
     });
-    throw new Error("Aleph Tools 未返回可识别文本");
   }
+  const ocrInputR2Key = job.ocrInputR2Key;
+  const ocrInputFileType = job.ocrInputFileType;
+  if (job.status !== "ocr_processing") {
+    job = (await repository.markImportJobOcrProcessing(job.id, ocrJobIdFor(job), "google-vision")) ?? job;
+  }
+
+  const bytes = await readR2Object(env, ocrInputR2Key, {
+    message: "OCR 输入文件不存在",
+    code: "OCR_INPUT_NOT_FOUND",
+  });
+  assertGoogleVisionInlineImageSize(bytes);
+  const latestBeforeOcr = await repository.getImportJob(job.id);
+  if (!latestBeforeOcr || blockedFinalizeStatuses.has(latestBeforeOcr.status)) return;
+
+  await repository.updateOcrProgress(job.id, { progress: 65, stage: "ocr_analyzing" });
+  const result = await runtimeOcrClient(env).recognizeImage({
+    bytes,
+    sourceMimeType: job.fileType,
+    processedMimeType: ocrInputFileType,
+    converted: ocrInputR2Key !== job.r2Key || ocrInputFileType !== job.fileType,
+  });
+
+  const latestAfterOcr = await repository.getImportJob(job.id);
+  if (!latestAfterOcr || blockedFinalizeStatuses.has(latestAfterOcr.status)) return;
+
+  const rawText = normalizedOcrText(result);
+  if (!rawText) {
+    throw new GoogleVisionOcrError({
+      code: "EMPTY_OCR_RESULT",
+      message: "Google Vision 未返回可识别文本",
+      stage: "ocr",
+      retryable: false,
+      terminal: true,
+    });
+  }
+
+  await repository.saveImportOcrResult({
+    importJobId: job.id,
+    provider: "google-vision",
+    engineVersion: result.metadata.engineVersion,
+    rawText,
+    rawJson: result.raw,
+    converted: ocrInputR2Key !== job.r2Key || ocrInputFileType !== job.fileType,
+    sourceMimeType: job.fileType,
+    processedMimeType: ocrInputFileType,
+    actorId: job.userId,
+  });
   await repository.updateOcrProgress(job.id, {
     progress: 100,
     stage: "ready",
     completedAt: new Date().toISOString(),
   });
-  const confidence = ocrConfidence(result);
-  return finalizeImportJob(env, repository, job, {
-    rawText,
-    warnings: confidence < 0.8 ? ["OCR 置信度较低"] : [],
+  await enqueueImportPipelineStep(env, job.id, "ai");
+}
+
+async function processImportAiStep(env: Env, repository: D1LedgerRepository, importJobId: string) {
+  const job = await repository.getImportJob(importJobId);
+  if (!job || blockedFinalizeStatuses.has(job.status)) return;
+  const result = await repository.getImportOcrResult(job.id);
+  if (!result?.rawText) {
+    await repository.markImportJobFailed(job.id, {
+      message: "导入任务缺少 OCR 结果，不能分析",
+      code: "MISSING_OCR_RESULT",
+      stage: "ai",
+      retryable: false,
+      terminal: true,
+    });
+    return;
+  }
+  const confidenceWarning = result.rawJson ? ocrConfidence(rawJsonToOcrResult(result.rawJson)) < 0.8 : false;
+  await finalizeImportJob(env, repository, job, {
+    rawText: result.rawText,
+    warnings: confidenceWarning ? ["OCR 置信度较低"] : [],
   });
 }
 
-export async function failAlephOcrJob(
-  repository: D1LedgerRepository,
-  importJobId: string,
-  error: string | AlephErrorPayload = "Aleph 处理失败",
-  sequence?: number,
-  phase: AlephPhase = "ocr",
-) {
-  const current = await repository.getImportJob(importJobId);
-  if (current && blockedFinalizeStatuses.has(current.status)) return current;
-  await repository.updateOcrProgress(importJobId, {
-    stage: "failed",
-    progress: 0,
-    eventSequence: sequence,
-  });
-  const payload = normalizeAlephError(error, phase);
-  return repository.markImportJobFailed(importJobId, {
-    message: payload.message,
-    code: payload.code,
-    stage: payload.stage ?? phase,
-    requestId: payload.requestId,
-    retryable: payload.retryable,
-    terminal: payload.terminal,
-    externalJobId: payload.jobId,
-  });
+export async function finalizeSavedOcrResult(env: Env, repository: D1LedgerRepository, importJobId: string) {
+  const job = await repository.getImportJob(importJobId);
+  if (job?.status === "failed" && job.errorStage === "ai" && job.errorRetryable) {
+    await repository.prepareImportJobAiRetry(importJobId);
+  }
+  await processImportPipelineMessage(env, repository, { jobId: importJobId, step: "ai" });
+  return repository.listImportedRecords(importJobId);
 }
 
 export async function cancelImportJob(env: Env, repository: D1LedgerRepository, job: ImportJob) {
@@ -162,109 +216,28 @@ export async function cancelImportJob(env: Env, repository: D1LedgerRepository, 
   if (job.status === "cancel_requested") return job;
   if (job.status === "cancelled") return job;
   if (terminalImportStatuses.has(job.status)) throw new Error("该导入任务已结束，不能取消");
-  if (job.ocrJobId && job.status === "ocr_processing") {
-    const alephJob = await runtimeOcrClient(env).cancelJob(job.ocrJobId);
-    const requested = await repository.markImportJobCancelRequested(job.id, job.userId);
-    await env.FILES?.delete(job.r2Key).catch(() => undefined);
-    if (alephJob.status === "cancelled" || alephJob.terminal) {
-      return cancelAlephOcrJob(repository, job.id);
-    }
-    return requested;
-  }
-  await env.FILES?.delete(job.r2Key).catch(() => undefined);
-  return repository.updateImportJob(job.id, "cancelled");
+  const updated = await repository.updateImportJob(job.id, "cancelled");
+  await Promise.all([
+    env.FILES?.delete(job.r2Key).catch(() => undefined),
+    job.ocrInputR2Key && job.ocrInputR2Key !== job.r2Key
+      ? env.FILES?.delete(job.ocrInputR2Key).catch(() => undefined)
+      : Promise.resolve(),
+  ]);
+  return updated;
 }
 
-export async function requestAlephOcrCancellation(
-  repository: D1LedgerRepository,
-  importJobId: string,
-  sequence?: number,
-) {
-  const current = await repository.getImportJob(importJobId);
-  if (current && terminalImportStatuses.has(current.status)) return current;
-  await repository.updateOcrProgress(importJobId, {
-    stage: "cancel_requested",
-    eventSequence: sequence,
-  });
-  return repository.markImportJobCancelRequested(importJobId);
-}
-
-export async function cancelAlephOcrJob(
-  repository: D1LedgerRepository,
-  importJobId: string,
-  sequence?: number,
-) {
-  const current = await repository.getImportJob(importJobId);
-  if (!current) return null;
-  if (
-    current.status === "completed" ||
-    current.status === "pending_confirmation" ||
-    current.status === "failed"
-  )
-    return current;
-  if (current.status === "cancelled") return current;
-  await repository.updateOcrProgress(importJobId, {
-    progress: 100,
-    stage: "cancelled",
-    eventSequence: sequence,
-  });
-  return repository.updateImportJob(importJobId, "cancelled");
-}
-
-export async function updateOcrSnapshot(
-  repository: D1LedgerRepository,
-  importJobId: string,
-  alephJob: Partial<AlephOcrJob>,
-  sequence?: number,
-) {
-  return updateAlephSnapshot(repository, importJobId, alephJob, sequence);
-}
-
-export async function updateAlephSnapshot(
-  repository: D1LedgerRepository,
-  importJobId: string,
-  alephJob: Partial<AlephOcrJob>,
-  sequence?: number,
-) {
-  return repository
-    .updateOcrProgress(importJobId, {
-      progress: typeof alephJob.progress === "number" ? alephJob.progress : undefined,
-      stage: alephJob.stage ?? alephJob.status,
-      currentPage: alephJob.currentPage,
-      totalPages: alephJob.totalPages,
-      completedAt: alephJob.completedAt,
-      eventSequence: sequence,
-    })
-    .then(async () =>
-      repository.updateAlephState(importJobId, {
-        progress: typeof alephJob.progress === "number" ? alephJob.progress : undefined,
-        stage: alephJob.stage ?? alephJob.status,
-        currentPage: alephJob.currentPage,
-        totalPages: alephJob.totalPages,
-        completedAt: alephJob.completedAt,
-        eventSequence: sequence,
-        cancelable: alephJob.cancelable,
-        retryable: alephJob.retryable,
-      }),
-    );
-}
-
-export async function retryImportJob(
-  env: Env,
-  repository: D1LedgerRepository,
-  job: ImportJob,
-  requestOrigin?: string,
-) {
+export async function retryImportJob(env: Env, repository: D1LedgerRepository, job: ImportJob) {
   if (job.status !== "failed" || !job.errorRetryable) throw new Error("该导入任务当前不可重试");
   if (job.errorStage === "ai") {
     const prepared = await repository.prepareImportJobAiRetry(job.id);
-    if (!prepared?.ocrJobId) throw new Error("导入任务缺少 OCR 结果，不能重试 AI");
-    await finalizeAlephOcrJob(env, repository, prepared.id);
-    return (await repository.getImportJob(prepared.id)) ?? prepared;
+    if (!prepared) throw new Error("导入任务不存在");
+    await enqueueImportPipelineStep(env, prepared.id, "ai");
+    return prepared;
   }
   const prepared = await repository.prepareImportJobRetry(job.id);
   if (!prepared) throw new Error("导入任务不存在");
-  return submitAlephOcrJob(env, repository, prepared, { requestOrigin });
+  await enqueueImportPipelineStep(env, prepared.id, "convert");
+  return prepared;
 }
 
 export async function markFailed(
@@ -275,7 +248,7 @@ export async function markFailed(
 ) {
   const current = await repository.getImportJob(importJobId);
   if (current && blockedFinalizeStatuses.has(current.status)) return current;
-  if (error instanceof AlephToolsError) {
+  if (error instanceof GoogleVisionOcrError) {
     return repository.markImportJobFailed(importJobId, {
       message: error.message,
       code: error.code,
@@ -283,17 +256,18 @@ export async function markFailed(
       requestId: error.requestId,
       retryable: error.retryable,
       terminal: error.terminal,
-      externalJobId: error.jobId,
+      externalJobId: current?.ocrJobId,
     });
   }
-  const alephError = error instanceof AlephAIError ? error : undefined;
+  const aiError = error instanceof LedgerAIError ? error : undefined;
   return repository.markImportJobFailed(importJobId, {
     message: error instanceof Error ? error.message : "导入处理失败",
-    code: alephError?.code ?? (stage === "ai" ? "AI_PROCESSING_FAILED" : "INTERNAL_ERROR"),
+    code: aiError?.code ?? (stage === "ai" ? "AI_PROCESSING_FAILED" : "INTERNAL_ERROR"),
     stage,
-    requestId: alephError?.requestId,
-    retryable: stage === "ai" && alephError?.code !== "quota_exceeded",
-    terminal: stage !== "ai" || alephError?.code === "quota_exceeded",
+    requestId: aiError?.requestId,
+    retryable: stage === "ai" && aiError?.code !== "quota_exceeded",
+    terminal: stage !== "ai" || aiError?.code === "quota_exceeded",
+    externalJobId: current?.ocrJobId,
   });
 }
 
@@ -413,45 +387,68 @@ async function confirmImportedRecords(
   }
 }
 
-async function readStoredSourceFile(env: Env, repository: D1LedgerRepository, job: ImportJob) {
-  const object = await env.FILES?.get(job.r2Key);
+async function readR2Object(env: Env, r2Key: string, error: { message: string; code: string }) {
+  const object = await env.FILES?.get(r2Key);
   if (!object) {
-    await repository.markImportJobFailed(job.id, {
-      message: "导入原文件不存在",
-      code: "SOURCE_NOT_FOUND",
+    throw new GoogleVisionOcrError({
+      message: error.message,
+      code: error.code,
       stage: "ocr",
       retryable: false,
       terminal: true,
     });
-    throw new Error("导入原文件不存在");
   }
-  const bytes = await object.arrayBuffer();
+  return object.arrayBuffer();
+}
+
+function normalizedOcrText(result: GoogleVisionOcrResult) {
+  const markdownText = result.markdown?.trim();
+  const plainText = result.plainText?.trim();
+  return markdownText && plainText && markdownText !== plainText
+    ? `OCR markdown:\n${markdownText}\n\nOCR plain text:\n${plainText}`
+    : (markdownText ?? plainText ?? "");
+}
+
+function rawJsonToOcrResult(rawJson: Record<string, unknown>): GoogleVisionOcrResult {
   return {
-    sizeBytes: bytes.byteLength,
-    checksumSha256: await sha256Hex(bytes),
+    plainText: "",
+    pages: (
+      (rawJson as { responses?: Array<{ fullTextAnnotation?: { pages?: Array<{ confidence?: number }> } }> })
+        .responses?.[0]?.fullTextAnnotation?.pages ?? []
+    ).map((page) => ({
+      text: "",
+      confidence: page.confidence,
+    })),
+    raw: rawJson,
+    metadata: {
+      input: {
+        converted: false,
+        sourceMimeType: "",
+        processedMimeType: "",
+      },
+      engine: "google-vision",
+      engineVersion: "v1",
+    },
   };
 }
 
-async function sha256Hex(bytes: ArrayBuffer) {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+function ocrInputR2Key(job: ImportJob, fileType: string) {
+  const extension = fileType === "image/png" ? "png" : "jpg";
+  return `imports/${job.bookId}/ocr/${job.id}.${extension}`;
 }
 
-function normalizeAlephError(error: string | AlephErrorPayload, stage: AlephPhase): AlephErrorPayload {
-  if (typeof error !== "string") return error;
-  return {
-    code: "JOB_FAILED",
-    message: error,
-    stage,
-    retryable: false,
-    terminal: true,
-  };
+function ocrJobIdFor(job: ImportJob) {
+  return `ocr_${job.id}_${job.retryCount ?? 0}`;
 }
 
-function apiPublicOrigin(env: Env, requestOrigin?: string) {
-  const origin = env.API_PUBLIC_ORIGIN ?? requestOrigin;
-  if (!origin) throw new Error("API_PUBLIC_ORIGIN 未配置，无法创建 OCR webhook 回调");
-  return origin.replace(/\/+$/, "");
+function shouldRetryQueueMessage(error: unknown, step: ImportPipelineStep, attempts: number) {
+  if (step === "ai") return false;
+  if (!(error instanceof GoogleVisionOcrError) || !error.retryable) return false;
+  return attempts < 3;
+}
+
+function queueMessageAttempts(message: Message<ImportPipelineMessage>) {
+  return typeof message.attempts === "number" && Number.isFinite(message.attempts) ? message.attempts : 1;
 }
 
 function shanghaiUsageDate(date = new Date()) {

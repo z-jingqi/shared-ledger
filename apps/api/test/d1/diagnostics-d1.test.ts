@@ -1,16 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { authHeaders, createD1TestApp, seedBook, seedUser } from "./harness";
 
-describe("D1 Aleph Tools diagnostics", () => {
+describe("D1 OCR diagnostics", () => {
   it("requires a signed-in user", async () => {
     const context = createD1TestApp();
 
-    const response = await context.app.request("/diagnostics/aleph-tools", undefined, context.env);
+    const response = await context.app.request("/diagnostics/ocr", undefined, context.env);
     const body = await response.json<any>();
 
     expect(response.status).toBe(401);
     expect(body.error).toBe("请先登录");
-    expect(context.alephTools.requests).toHaveLength(0);
   });
 
   it("does not expose diagnostics in production", async () => {
@@ -18,7 +17,7 @@ describe("D1 Aleph Tools diagnostics", () => {
     const user = seedUser(context.db, { id: "user_diag", name: "Diag", plan: "pro" });
 
     const response = await context.app.request(
-      "/diagnostics/aleph-tools",
+      "/diagnostics/ocr",
       { headers: authHeaders(user) },
       { ...context.env, APP_ENV: "prod" },
     );
@@ -26,51 +25,25 @@ describe("D1 Aleph Tools diagnostics", () => {
 
     expect(response.status).toBe(404);
     expect(body.error).toBe("诊断接口不可用");
-    expect(context.alephTools.requests).toHaveLength(0);
   });
 
-  it("proxies Aleph Tools platform diagnostics through the service binding", async () => {
+  it("reports Google Vision configuration state", async () => {
     const context = createD1TestApp();
     const user = seedUser(context.db, { id: "user_diag", name: "Diag", plan: "pro" });
 
     const response = await context.app.request(
-      "/diagnostics/aleph-tools",
+      "/diagnostics/ocr",
       { headers: authHeaders(user) },
       context.env,
     );
     const body = await response.json<any>();
-    const request = context.alephTools.requests[0];
 
     expect(response.status).toBe(200);
-    expect(body.success).toBe(true);
-    expect(body.data.ok).toBe(true);
-    expect(body.data.checks.auth.ok).toBe(true);
-    expect(body.data.checks.storage.ok).toBe(true);
-    expect(body.data.checks.processing.ok).toBe(true);
-    expect(body.data.checks.googleVision.ok).toBe(true);
-    expect(body.data.checks.imageConversion.ok).toBe(true);
-    expect(body.data.job).toBeUndefined();
-    expect(request?.url).toBe("https://aleph-tools.internal/v1/platform/check");
-    expect(request?.headers.get("Authorization")).toBe("Bearer test-tools-key");
+    expect(body.ok).toBe(true);
+    expect(body.checks.googleVision).toMatchObject({ ok: true, configured: true });
   });
 
-  it("rejects raw Aleph OCR job ids from user-facing diagnostics", async () => {
-    const context = createD1TestApp();
-    const user = seedUser(context.db, { id: "user_diag", name: "Diag", plan: "pro" });
-
-    const response = await context.app.request(
-      "/diagnostics/aleph-tools?jobId=ocr_external",
-      { headers: authHeaders(user) },
-      context.env,
-    );
-    const body = await response.json<any>();
-
-    expect(response.status).toBe(400);
-    expect(body.error).toBe("请使用 importJobId 诊断导入任务");
-    expect(context.alephTools.requests).toHaveLength(0);
-  });
-
-  it("resolves import job ownership before checking an Aleph OCR job", async () => {
+  it("can include saved OCR raw result for non-production import diagnostics", async () => {
     const context = createD1TestApp();
     const user = seedUser(context.db, { id: "user_diag", name: "Diag", plan: "pro" });
     const book = seedBook(context.db, user, { id: "book_diag" });
@@ -81,77 +54,41 @@ describe("D1 Aleph Tools diagnostics", () => {
       fileType: "image/jpeg",
       r2Key: "imports/receipt.jpg",
     });
-    await context.repository.attachOcrJob(job.id, "ocr_from_import");
-    context.alephTools.jobStatus.ocr_from_import = {
-      jobId: "ocr_from_import",
-      status: "processing",
-      progress: 20,
-      stage: "reading_source",
-      resultAvailable: false,
-    };
+    await context.repository.markImportJobOcrProcessing(job.id, "ocr_with_result", "google-vision");
+    await context.repository.saveImportOcrResult({
+      importJobId: job.id,
+      provider: "google-vision",
+      engineVersion: "v1",
+      rawText: "小票原文 12 元",
+      rawJson: { responses: [{ fullTextAnnotation: { text: "小票原文 12 元" } }] },
+      converted: false,
+      sourceMimeType: "image/jpeg",
+      processedMimeType: "image/jpeg",
+      actorId: user.id,
+    });
 
     const response = await context.app.request(
-      `/diagnostics/aleph-tools?importJobId=${job.id}`,
-      { headers: authHeaders(user) },
-      context.env,
-    );
-    const body = await response.json<any>();
-    const request = context.alephTools.requests[0];
-
-    expect(response.status).toBe(200);
-    expect(body.data.job).toMatchObject({
-      found: true,
-      storage: { sourceAvailable: true },
-      snapshot: { jobId: "ocr_from_import" },
-    });
-    expect(request?.url).toBe("https://aleph-tools.internal/v1/platform/check?jobId=ocr_from_import");
-  });
-
-  it("can include OCR raw result for non-production import diagnostics", async () => {
-    const context = createD1TestApp();
-    const user = seedUser(context.db, { id: "user_diag", name: "Diag", plan: "pro" });
-    const book = seedBook(context.db, user, { id: "book_diag" });
-    const job = await context.repository.createImportJob({
-      bookId: book.id,
-      userId: user.id,
-      fileName: "receipt.jpg",
-      fileType: "image/jpeg",
-      r2Key: "imports/receipt.jpg",
-    });
-    await context.repository.attachOcrJob(job.id, "ocr_with_result");
-    context.alephTools.jobStatus.ocr_with_result = {
-      jobId: "ocr_with_result",
-      status: "ready",
-      progress: 100,
-      stage: "ready",
-      resultAvailable: true,
-    };
-    context.alephTools.result.ocr_with_result = {
-      plainText: "小票原文 12 元",
-      markdown: "| 商品 | 金额 |\n| 早餐 | 12 |",
-      pages: [{ text: "小票原文 12 元", confidence: 0.95 }],
-    };
-
-    const response = await context.app.request(
-      `/diagnostics/aleph-tools?importJobId=${job.id}&includeOcrRaw=1`,
+      `/diagnostics/ocr?importJobId=${job.id}&includeOcrRaw=1`,
       { headers: authHeaders(user) },
       context.env,
     );
     const body = await response.json<any>();
 
     expect(response.status).toBe(200);
+    expect(body.importJob).toMatchObject({
+      id: job.id,
+      status: "ocr_processing",
+      ocrJobId: "ocr_with_result",
+      hasOcrResult: true,
+    });
     expect(body.sharedLedgerDebug).toMatchObject({
       importJobId: job.id,
       ocrJobId: "ocr_with_result",
       ocrRawResult: {
-        plainText: "小票原文 12 元",
-        markdown: "| 商品 | 金额 |\n| 早餐 | 12 |",
+        provider: "google-vision",
+        rawText: "小票原文 12 元",
       },
     });
-    expect(context.alephTools.requests.map((request) => request.url)).toEqual([
-      "https://aleph-tools.internal/v1/platform/check?jobId=ocr_with_result",
-      "https://aleph-tools.internal/v1/jobs/ocr_with_result/result",
-    ]);
   });
 
   it("does not allow diagnosing another user's import job", async () => {
@@ -166,10 +103,10 @@ describe("D1 Aleph Tools diagnostics", () => {
       fileType: "image/jpeg",
       r2Key: "imports/receipt.jpg",
     });
-    await context.repository.attachOcrJob(job.id, "ocr_owner");
+    await context.repository.markImportJobOcrProcessing(job.id, "ocr_owner", "google-vision");
 
     const response = await context.app.request(
-      `/diagnostics/aleph-tools?importJobId=${job.id}`,
+      `/diagnostics/ocr?importJobId=${job.id}`,
       { headers: authHeaders(viewer) },
       context.env,
     );
@@ -177,6 +114,5 @@ describe("D1 Aleph Tools diagnostics", () => {
 
     expect(response.status).toBe(403);
     expect(body.error).toBe("不能诊断其他用户的导入任务");
-    expect(context.alephTools.requests).toHaveLength(0);
   });
 });

@@ -1,24 +1,32 @@
-import type { AlephAIClient } from "@shared-ledger/ai";
+import type { LedgerAiTestClient } from "@shared-ledger/ai";
 
-export type WorkerServiceBinding = {
-  fetch(request: Request): Promise<Response>;
+export type ImportPipelineStep = "convert" | "ocr" | "ai";
+
+export type ImportPipelineMessage = {
+  jobId: string;
+  step: ImportPipelineStep;
 };
 
 export type Env = {
   DB?: D1Database;
   FILES?: R2Bucket;
-  AI_ORCHESTRATOR?: WorkerServiceBinding;
-  ALEPH_AI_ENV?: string;
-  ALEPH_AI_IMPORT_TIMEOUT_MS?: string;
-  ALEPH_AI_IMPORT_STALE_MS?: string;
-  ALEPH_AI_IMPORT_SUMMARY_MAX_TOKENS?: string;
-  ALEPH_AI_IMPORT_ITEMS_MAX_TOKENS?: string;
-  ALEPH_AI_SERVICE_TOKEN?: string;
-  ALEPH_AI_TEST_CLIENT?: AlephAIClient;
-  ALEPH_TOOLS?: WorkerServiceBinding;
-  ALEPH_TOOLS_API_KEY?: string;
-  ALEPH_TOOLS_WEBHOOK_SECRET?: string;
-  API_PUBLIC_ORIGIN?: string;
+  IMPORT_PIPELINE_QUEUE?: Queue<ImportPipelineMessage>;
+  AI_PROVIDER?: "openrouter" | "openai" | "workers-ai";
+  AI_IMPORT_TIMEOUT_MS?: string;
+  AI_IMPORT_STALE_MS?: string;
+  AI_IMPORT_SUMMARY_MAX_TOKENS?: string;
+  AI_IMPORT_ITEMS_MAX_TOKENS?: string;
+  AI_TEST_CLIENT?: LedgerAiTestClient;
+  OPENROUTER_API_KEY?: string;
+  OPENROUTER_MODEL?: string;
+  OPENROUTER_BASE_URL?: string;
+  OPENAI_API_KEY?: string;
+  OPENAI_MODEL?: string;
+  OPENAI_BASE_URL?: string;
+  WORKERS_AI_BASE_URL?: string;
+  WORKERS_AI_API_TOKEN?: string;
+  WORKERS_AI_MODEL?: string;
+  GOOGLE_VISION_API_KEY?: string;
   APP_ENV?: string;
   WEB_ORIGIN?: string;
   AUTH_COOKIE_SECRET?: string;

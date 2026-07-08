@@ -1,27 +1,44 @@
+import { createOpenAI } from "@ai-sdk/openai";
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { generateObject, generateText, streamText, type LanguageModel, type ModelMessage } from "ai";
 import {
-  AlephAIError,
-  createAlephAIClient,
-  type AlephAIClient,
-  type ChatMessage,
-  type ErrorCode,
-  type InvokeRequest,
-  type JsonObject,
-  type StreamEvent,
-  type UserUsageResponse,
-} from "./platform-client";
-import {
-  ledgerSkillNames,
   ledgerSkillSelectionSchema,
   ledgerToolStepSchema,
   type LedgerSkillDefinition,
   type LedgerSkillSelection,
   type LedgerToolStep,
 } from "@shared-ledger/ledger-skills";
-import { aiImportItemSchema, aiImportRecordSchema } from "@shared-ledger/shared";
+import { aiImportItemSchema, aiImportRecordSchema, type TransactionType } from "@shared-ledger/shared";
 import { z } from "zod";
 
-export { AlephAIError, createAlephAIClient };
-export type { AlephAIClient, ErrorCode, InvokeRequest, JsonObject, StreamEvent, UserUsageResponse };
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
+export type JsonObject = { [key: string]: JsonValue };
+
+export type ErrorCode =
+  | "validation_failed"
+  | "unauthorized"
+  | "forbidden"
+  | "input_too_large"
+  | "quota_exceeded"
+  | "provider_unavailable"
+  | "provider_error"
+  | "internal_error";
+
+export class LedgerAIError extends Error {
+  readonly code: ErrorCode;
+  readonly requestId?: string;
+  readonly details?: JsonObject;
+
+  constructor(code: ErrorCode, message: string, options: { requestId?: string; details?: JsonObject } = {}) {
+    super(message);
+    this.name = "LedgerAIError";
+    this.code = code;
+    if (options.requestId !== undefined) this.requestId = options.requestId;
+    if (options.details !== undefined) this.details = options.details;
+  }
+}
 
 export type AiContext = {
   bookId: string;
@@ -34,15 +51,6 @@ export type AiContext = {
 export type AiChatMessage = { role: "system" | "user" | "assistant" | "tool"; content?: string };
 export type AiTextStream = { textStream: AsyncIterable<string> };
 export type LedgerAiUser = { id: string; plan: string };
-export type LedgerAiRuntime = {
-  client: AlephAIClient;
-  env: string;
-  user: LedgerAiUser;
-  project?: string;
-  importTimeoutMs?: number;
-  importSummaryMaxTokens?: number;
-  importItemsMaxTokens?: number;
-};
 export type AiImportProgress = {
   stage: "ai_summary" | "ai_items" | "ai_merging";
   text: string;
@@ -58,10 +66,62 @@ export interface AiProvider {
   chat(input: AiContext): Promise<string>;
 }
 
-const projectId = "shared-ledger";
-const chatTask = "ledger.chat";
-const skillSelectTask = "ledger.skill_select";
-const skillStepTask = "ledger.skill_step";
+export type LedgerAiProviderName = "openrouter" | "openai" | "workers-ai";
+export type LedgerLanguageModelConfig =
+  | {
+      provider: "openrouter";
+      model: string;
+      apiKey: string;
+      baseURL?: string;
+      appName?: string;
+      appUrl?: string;
+    }
+  | {
+      provider: "openai";
+      model: string;
+      apiKey: string;
+      baseURL?: string;
+    }
+  | {
+      provider: "workers-ai";
+      model: string;
+      apiKey?: string;
+      baseURL: string;
+    };
+
+export type LedgerAiTestClient = {
+  generateObject<TOutput>(input: {
+    schemaName: string;
+    system: string;
+    prompt: string;
+    temperature?: number;
+    maxOutputTokens?: number;
+  }): Promise<TOutput>;
+  streamText(input: {
+    system: string;
+    messages: ModelMessage[];
+    temperature?: number;
+    maxOutputTokens?: number;
+  }): AsyncIterable<string>;
+  generateText(input: {
+    system: string;
+    prompt: string;
+    temperature?: number;
+    maxOutputTokens?: number;
+  }): Promise<string>;
+};
+
+export type LedgerAiRuntime = {
+  model?: LanguageModel;
+  provider?: LedgerAiProviderName | "test";
+  modelId?: string;
+  user: LedgerAiUser;
+  importTimeoutMs?: number;
+  importSummaryMaxTokens?: number;
+  importItemsMaxTokens?: number;
+  testClient?: LedgerAiTestClient;
+};
+
 const importSummaryMaxChars = 12_000;
 const importChunkMaxChars = 2_500;
 const importChunkMaxLines = 80;
@@ -69,10 +129,14 @@ const importChunkOverlapLines = 2;
 const importChunkMaxCount = 25;
 const defaultImportSummaryMaxTokens = 900;
 const defaultImportItemsMaxTokens = 1800;
+const defaultChatMaxTokens = 1400;
+const defaultSkillMaxTokens = 900;
+const defaultToolStepMaxTokens = 1800;
 
 const importSummarySystemPrompt = [
   "You extract the receipt-level bookkeeping summary from OCR text.",
   "Return only JSON matching the supplied schema.",
+  "If OCR layout rows are present, use them as the primary evidence for receipt item rows and totals.",
   "Use the merchant/receipt purpose as note, the transaction date, the final paid/received total, transaction type, and a likely category.",
   "Prefer category names from the provided existing categories. If none fits and the text clearly implies a category, return a concise new categoryName.",
   "Do not extract product/service line items in this step.",
@@ -82,8 +146,12 @@ const importSummarySystemPrompt = [
 const importItemsSystemPrompt = [
   "You extract receipt line items from one OCR text chunk.",
   "Return only JSON matching the supplied schema.",
-  "Only include explicit product/service lines that have a supported amount in this chunk.",
+  "If an OCR layout rows table is present, treat each row in that table as the primary item source.",
+  "For table rows, use lineAmount as the item amount. Do not use unitPrice or quantity as amount when lineAmount is present.",
+  "Only include explicit product/service lines that have a supported paid line amount in this chunk.",
   "Do not include merchant names, addresses, dates, receipt numbers, tax/subtotal/total/payment/change/discount summary lines, or card/payment lines as items.",
+  "Never create placeholder items such as 其他商品, unknown item, or miscellaneous.",
+  "Never use unmatched numeric columns, unit prices, quantities, summary totals, payment amounts, or discounts as item amounts.",
   "Prefer category names from the provided existing categories. If none fits and the item clearly implies a category, return a concise categoryName.",
   "If the chunk contains product/service lines but line amounts are unreadable, omit only those uncertain lines and add a short warning.",
   "Do not invent unsupported records or unsupported amounts. Leave only truly unknowable fields empty and explain them in warnings.",
@@ -131,141 +199,221 @@ export type AiSkillStepInput = AiSkillSelectionInput & {
   maxSteps: number;
 };
 
-export function createAlephAiProvider(runtime: LedgerAiRuntime): AiProvider {
-  const project = runtime.project ?? projectId;
+export function createLedgerLanguageModel(config: LedgerLanguageModelConfig): LanguageModel {
+  if (config.provider === "openrouter") {
+    return createOpenRouter({
+      apiKey: config.apiKey,
+      baseURL: config.baseURL,
+      appName: config.appName ?? "shared-ledger",
+      appUrl: config.appUrl,
+    }).chat(config.model, { structuredOutputs: { strict: false } });
+  }
+  if (config.provider === "openai") {
+    return createOpenAI({ apiKey: config.apiKey, baseURL: config.baseURL }).chat(config.model);
+  }
+  return createOpenAICompatible<string, string, string, string>({
+    name: "workers-ai",
+    baseURL: config.baseURL,
+    apiKey: config.apiKey,
+    includeUsage: true,
+    supportsStructuredOutputs: true,
+  }).chatModel(config.model);
+}
 
-  function invokeRequest(input: {
-    task: string;
-    mode: "object" | "stream";
-    messages: ChatMessage[];
-    responseFormat?: JsonObject;
+export function createLedgerAiProvider(runtime: LedgerAiRuntime): AiProvider {
+  async function generateStructured<TOutput>(input: {
+    schemaName: string;
+    schema: z.ZodType<TOutput>;
+    system: string;
+    payload: unknown;
     temperature?: number;
-    maxTokens?: number;
-  }) {
-    return {
-      project,
-      env: runtime.env,
-      task: input.task,
-      user: runtime.user,
-      mode: input.mode,
-      input: {
-        messages: input.messages,
-        ...(input.responseFormat ? { response_format: input.responseFormat } : {}),
-        ...(input.temperature === undefined ? {} : { temperature: input.temperature }),
-        ...(input.maxTokens === undefined ? {} : { max_tokens: input.maxTokens }),
-      },
-    };
+    maxOutputTokens?: number;
+  }): Promise<TOutput> {
+    const prompt = JSON.stringify(input.payload, null, 2);
+    try {
+      if (runtime.testClient) {
+        return input.schema.parse(
+          await runtime.testClient.generateObject<TOutput>({
+            schemaName: input.schemaName,
+            system: input.system,
+            prompt,
+            temperature: input.temperature,
+            maxOutputTokens: input.maxOutputTokens,
+          }),
+        );
+      }
+      const result = await withTimeout(
+        generateObject<typeof input.schema, "object", TOutput>({
+          model: requireModel(runtime),
+          output: "object",
+          schema: input.schema,
+          schemaName: input.schemaName,
+          system: input.system,
+          prompt,
+          temperature: input.temperature,
+          maxOutputTokens: input.maxOutputTokens,
+          maxRetries: 1,
+        }),
+        runtime.importTimeoutMs ?? 45_000,
+      );
+      return result.object;
+    } catch (error) {
+      const normalized = normalizeAiError(error);
+      if (!runtime.testClient && shouldFallbackToJsonText(normalized)) {
+        try {
+          const result = await withTimeout(
+            generateText({
+              model: requireModel(runtime),
+              system: [
+                input.system,
+                "Return only one valid JSON object. Do not wrap it in Markdown.",
+                schemaHintForStructuredOutput(input.schemaName),
+              ].join("\n"),
+              prompt,
+              temperature: input.temperature,
+              maxOutputTokens: input.maxOutputTokens,
+              maxRetries: 1,
+            }),
+            runtime.importTimeoutMs ?? 45_000,
+          );
+          return input.schema.parse(parseJsonObjectFromText(result.text));
+        } catch (fallbackError) {
+          throw normalizeAiError(fallbackError);
+        }
+      }
+      throw normalized;
+    }
   }
 
   return {
     streamChat(messages: AiChatMessage[], context: Pick<AiContext, "bookId" | "page">) {
-      const alephMessages: ChatMessage[] = [
-        {
-          role: "system",
-          content: `${chatSystemPrompt}\n页面：${context.page ?? "账本"}\n账本：${context.bookId}`,
-        },
-        ...messages.map(toAlephMessage),
-      ];
-      return {
-        textStream: streamDeltas(
-          runtime.client.stream(
-            invokeRequest({
-              task: chatTask,
-              mode: "stream",
-              messages: alephMessages,
-              temperature: 0.4,
-              maxTokens: 1400,
-            }),
-          ),
-        ),
-      };
+      const system = `${chatSystemPrompt}\n页面：${context.page ?? "账本"}\n账本：${context.bookId}`;
+      if (runtime.testClient) {
+        return {
+          textStream: runtime.testClient.streamText({
+            system,
+            messages: messages.map(toModelMessage),
+            temperature: 0.4,
+            maxOutputTokens: defaultChatMaxTokens,
+          }),
+        };
+      }
+      try {
+        const result = streamText({
+          model: requireModel(runtime),
+          system,
+          messages: messages.map(toModelMessage),
+          temperature: 0.4,
+          maxOutputTokens: defaultChatMaxTokens,
+          timeout: { totalMs: 60_000, chunkMs: 20_000 },
+          maxRetries: 1,
+        });
+        return { textStream: result.textStream };
+      } catch (error) {
+        throw normalizeAiError(error);
+      }
     },
     async chat(input: AiContext) {
-      let text = "";
-      for await (const delta of this.streamChat([{ role: "user", content: input.text }], input).textStream) {
-        text += delta;
+      try {
+        if (runtime.testClient) {
+          return runtime.testClient.generateText({
+            system: `${chatSystemPrompt}\n页面：${input.page ?? "账本"}\n账本：${input.bookId}`,
+            prompt: input.text,
+            temperature: 0.4,
+            maxOutputTokens: defaultChatMaxTokens,
+          });
+        }
+        const result = await generateText({
+          model: requireModel(runtime),
+          system: `${chatSystemPrompt}\n页面：${input.page ?? "账本"}\n账本：${input.bookId}`,
+          prompt: input.text,
+          temperature: 0.4,
+          maxOutputTokens: defaultChatMaxTokens,
+          timeout: { totalMs: 60_000 },
+          maxRetries: 1,
+        });
+        return result.text;
+      } catch (error) {
+        throw normalizeAiError(error);
       }
-      return text;
     },
     async selectSkill(input: AiSkillSelectionInput): Promise<LedgerSkillSelection> {
-      const response = await runtime.client.invoke<unknown>(
-        invokeRequest({
-          task: skillSelectTask,
-          mode: "object",
-          messages: [
-            { role: "system", content: skillSelectSystemPrompt },
-            { role: "user", content: JSON.stringify(skillSelectionPayload(input), null, 2) },
-          ],
-          responseFormat: responseFormat("ledger_skill_selection", skillSelectionJsonSchema),
+      return ledgerSkillSelectionSchema.parse(
+        await generateStructured({
+          schemaName: "ledger_skill_selection",
+          schema: ledgerSkillSelectionSchema,
+          system: skillSelectSystemPrompt,
+          payload: skillSelectionPayload(input),
           temperature: 0.1,
-          maxTokens: 900,
+          maxOutputTokens: defaultSkillMaxTokens,
         }),
       );
-      return ledgerSkillSelectionSchema.parse(response.output);
     },
     async planSkillStep(input: AiSkillStepInput): Promise<LedgerToolStep> {
-      const response = await runtime.client.invoke<unknown>(
-        invokeRequest({
-          task: skillStepTask,
-          mode: "object",
-          messages: [
-            { role: "system", content: skillStepSystemPrompt },
-            { role: "user", content: JSON.stringify(skillStepPayload(input), null, 2) },
-          ],
-          responseFormat: responseFormat("ledger_skill_step", skillStepJsonSchema(input.selectedSkill)),
+      const step = ledgerToolStepSchema.parse(
+        await generateStructured({
+          schemaName: "ledger_skill_step",
+          schema: ledgerToolStepSchema,
+          system: skillStepSystemPrompt,
+          payload: skillStepPayload(input),
           temperature: 0.1,
-          maxTokens: 1800,
+          maxOutputTokens: defaultToolStepMaxTokens,
         }),
       );
-      const step = ledgerToolStepSchema.parse(response.output);
       if (step.skillName !== input.selectedSkill.name) {
-        throw new AlephAIError("validation_failed", `AI selected mismatched skill: ${step.skillName}`);
+        throw new LedgerAIError("validation_failed", `AI selected mismatched skill: ${step.skillName}`);
       }
       if (!input.selectedSkill.tools.some((tool) => tool.name === step.toolName)) {
-        throw new AlephAIError("validation_failed", `AI selected unavailable tool: ${step.toolName}`);
+        throw new LedgerAIError("validation_failed", `AI selected unavailable tool: ${step.toolName}`);
       }
       return step;
     },
     async structureImport(input: AiContext): Promise<z.infer<typeof aiImportRecordSchema>[]> {
+      const layoutRows = parseOcrLayoutRows(input.text, input.categories ?? []);
       const chunks = chunkOcrText(input.text);
       if (chunks.length > importChunkMaxCount) {
-        throw new AlephAIError(
+        throw new LedgerAIError(
           "input_too_large",
           `OCR 文本过长，请拆分图片后重试。当前需要 ${chunks.length} 段，最多支持 ${importChunkMaxCount} 段。`,
         );
       }
 
       await notifyImportProgress(input, { stage: "ai_summary", text: "分析票据信息" });
-      const summaryResponse = await withTimeout(
-        runtime.client.invoke<unknown>(
-          invokeRequest({
-            task: skillStepTask,
-            mode: "object",
-            messages: [
-              { role: "system", content: importSummarySystemPrompt },
-              {
-                role: "user",
-                content: JSON.stringify(
-                  {
-                    bookId: input.bookId,
-                    userId: input.userId,
-                    page: input.page ?? "导入",
-                    existingCategories: input.categories ?? [],
-                    summaryText: buildImportSummaryText(input.text),
-                  },
-                  null,
-                  2,
-                ),
-              },
-            ],
-            responseFormat: responseFormat("import_receipt_summary", importReceiptSummaryJsonSchema),
+      let summary: ImportReceiptSummary;
+      try {
+        summary = importReceiptSummaryOutputSchema.parse(
+          await generateStructured({
+            schemaName: "import_receipt_summary",
+            schema: importReceiptSummaryOutputSchema,
+            system: importSummarySystemPrompt,
+            payload: {
+              bookId: input.bookId,
+              userId: input.userId,
+              page: input.page ?? "导入",
+              existingCategories: input.categories ?? [],
+              summaryText: buildImportSummaryText(input.text),
+            },
             temperature: 0,
-            maxTokens: runtime.importSummaryMaxTokens ?? defaultImportSummaryMaxTokens,
+            maxOutputTokens: runtime.importSummaryMaxTokens ?? defaultImportSummaryMaxTokens,
           }),
-        ),
-        runtime.importTimeoutMs ?? 45_000,
-      );
-      const summary = importReceiptSummaryOutputSchema.parse(summaryResponse.output);
+        );
+      } catch (error) {
+        summary = fallbackImportReceiptSummary(input.text, input.categories ?? [], error);
+      }
+      if (layoutRows.length && layoutRowsMatchTotal(layoutRows, summary.amount)) {
+        await notifyImportProgress(input, { stage: "ai_merging", text: "合并识别结果" });
+        return [
+          aiImportRecordSchema.parse({
+            ...summary,
+            items: layoutRows.map((row) => ({
+              name: row.name,
+              amount: row.amount,
+              ...(row.categoryName ? { categoryName: row.categoryName } : {}),
+            })),
+            warnings: uniqueWarnings(summary.warnings),
+          }),
+        ];
+      }
       const chunkResults: ImportChunkResult[] = [];
 
       for (const [index, chunk] of chunks.entries()) {
@@ -278,14 +426,14 @@ export function createAlephAiProvider(runtime: LedgerAiRuntime): AiProvider {
         });
         chunkResults.push(
           await extractImportItemsChunk({
+            generateStructured,
             input,
-            runtime,
-            invokeRequest,
             chunk,
             chunkIndex: index,
             chunkNumber,
             chunkTotal: chunks.length,
             depth: 0,
+            maxOutputTokens: runtime.importItemsMaxTokens ?? defaultImportItemsMaxTokens,
           }),
         );
       }
@@ -297,15 +445,6 @@ export function createAlephAiProvider(runtime: LedgerAiRuntime): AiProvider {
   };
 }
 
-type InvokeRequestBuilder = (input: {
-  task: string;
-  mode: "object" | "stream";
-  messages: ChatMessage[];
-  responseFormat?: JsonObject;
-  temperature?: number;
-  maxTokens?: number;
-}) => InvokeRequest;
-
 type ImportReceiptSummary = z.infer<typeof importReceiptSummaryOutputSchema>;
 type ImportChunkItem = z.infer<typeof aiImportItemSchema> & { sourceChunkIndex: number };
 type ImportChunkResult = {
@@ -314,6 +453,31 @@ type ImportChunkResult = {
   warnings: string[];
   items: ImportChunkItem[];
 };
+type GenerateStructured = <TOutput>(input: {
+  schemaName: string;
+  schema: z.ZodType<TOutput>;
+  system: string;
+  payload: unknown;
+  temperature?: number;
+  maxOutputTokens?: number;
+}) => Promise<TOutput>;
+
+function requireModel(runtime: LedgerAiRuntime): LanguageModel {
+  if (!runtime.model) throw new LedgerAIError("validation_failed", "AI provider 未配置");
+  return runtime.model;
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new LedgerAIError("provider_unavailable", "AI 分析超时")), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 async function notifyImportProgress(input: AiContext, progress: AiImportProgress) {
   await input.onImportProgress?.(progress);
@@ -371,49 +535,164 @@ function splitOcrLines(text: string) {
     .filter(Boolean);
 }
 
+function parseOcrLayoutRows(
+  text: string,
+  categories: Array<{ name: string; type: TransactionType }>,
+): Array<z.infer<typeof aiImportItemSchema>> {
+  const rows: Array<z.infer<typeof aiImportItemSchema>> = [];
+  for (const line of splitOcrLines(text)) {
+    if (!line.startsWith("|") || !line.endsWith("|")) continue;
+    const cells = line
+      .slice(1, -1)
+      .split("|")
+      .map((cell) => cell.trim());
+    if (cells.length < 4 || cells[0]?.toLowerCase() === "name" || cells.every((cell) => /^-+$/.test(cell))) {
+      continue;
+    }
+    const [name, , , amountText] = cells;
+    const amount = parseImportMoney(amountText ?? "");
+    if (!name || amount === undefined) continue;
+    const categoryName = inferItemCategoryName(name, categories);
+    rows.push({
+      name,
+      amount,
+      ...(categoryName ? { categoryName } : {}),
+    });
+  }
+  return rows;
+}
+
+function layoutRowsMatchTotal(rows: Array<z.infer<typeof aiImportItemSchema>>, amount: number) {
+  if (!rows.length) return false;
+  const itemSum = rows.reduce((total, item) => total + item.amount, 0);
+  return Math.abs(itemSum - amount) <= 0.01;
+}
+
+function fallbackImportReceiptSummary(
+  text: string,
+  categories: Array<{ name: string; type: TransactionType }>,
+  cause: unknown,
+): ImportReceiptSummary {
+  const amount = extractReceiptAmount(text);
+  const occurredAt = extractReceiptOccurredAt(text);
+  if (amount === undefined || !occurredAt) throw cause;
+  return {
+    type: "expense",
+    amount,
+    occurredAt,
+    note: extractReceiptNote(text),
+    categoryName: inferOverallCategoryName(text, categories),
+    confidence: 0.72,
+    warnings: ["AI 摘要解析失败，已使用 OCR 规则兜底"],
+  };
+}
+
+function parseImportMoney(value: string) {
+  const normalized = value.trim().replace(/[￥¥,\s]/g, "");
+  if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) return undefined;
+  const amount = Number.parseFloat(normalized);
+  return Number.isFinite(amount) && amount > 0 ? Number(amount.toFixed(2)) : undefined;
+}
+
+function extractReceiptAmount(text: string) {
+  const plainText = plainOcrText(text);
+  const priorityPatterns = [
+    /(?:实收|应收|支付|付款|微信|支付宝|银行卡|合计金额|总计|total|paid)\s*[:：]?\s*[￥¥]?\s*(\d+(?:\.\d{1,2})?)/gi,
+  ];
+  for (const pattern of priorityPatterns) {
+    const matches = Array.from(plainText.matchAll(pattern))
+      .map((match) => parseImportMoney(match[1] ?? ""))
+      .filter((amount): amount is number => amount !== undefined);
+    if (matches.length) return matches.at(-1);
+  }
+  return undefined;
+}
+
+function extractReceiptOccurredAt(text: string) {
+  const plainText = plainOcrText(text);
+  const dateTime = plainText.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (dateTime) {
+    const [, year, month, day, hour, minute, second = "00"] = dateTime;
+    return `${year}-${pad2(month)}-${pad2(day)}T${pad2(hour)}:${minute}:${second}`;
+  }
+  const date = plainText.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (date) {
+    const [, year, month, day] = date;
+    return `${year}-${pad2(month)}-${pad2(day)}T12:00:00`;
+  }
+  return undefined;
+}
+
+function extractReceiptNote(text: string) {
+  const firstLine = splitOcrLines(plainOcrText(text))[0] ?? "图片识别";
+  return firstLine
+    .replace(/欢迎您.*$/, "")
+    .replace(/\s+/g, "")
+    .slice(0, 80);
+}
+
+function inferOverallCategoryName(text: string, categories: Array<{ name: string; type: TransactionType }>) {
+  return findExistingExpenseCategory(categories, ["购物", "食品", "餐饮", "日用品"]) ?? "购物";
+}
+
+function inferItemCategoryName(name: string, categories: Array<{ name: string; type: TransactionType }>) {
+  const compact = name.replace(/\s+/g, "");
+  if (/卫生巾|纸|巾|洗|牙|皂|清洁|日用/.test(compact)) {
+    return findExistingExpenseCategory(categories, ["日用品", "购物"]) ?? "日用品";
+  }
+  if (/虾|蒜|肋排|娃娃菜|小葱|丝瓜|鸡|牛腱|鸭|西瓜|蓝莓|菜椒|番茄|鸡蛋|马铃薯|土豆|水果|蔬菜/.test(compact)) {
+    return findExistingExpenseCategory(categories, ["食材", "食品", "餐饮", "购物"]) ?? "食材";
+  }
+  return findExistingExpenseCategory(categories, ["购物", "日用品"]) ?? "购物";
+}
+
+function findExistingExpenseCategory(
+  categories: Array<{ name: string; type: TransactionType }>,
+  names: string[],
+) {
+  const expenseCategories = categories.filter((category) => category.type === "expense");
+  return names.find((name) => expenseCategories.some((category) => category.name === name));
+}
+
+function plainOcrText(text: string) {
+  const marker = "OCR plain text:";
+  const markerIndex = text.indexOf(marker);
+  return markerIndex >= 0 ? text.slice(markerIndex + marker.length).trim() : text;
+}
+
+function pad2(value: string) {
+  return value.padStart(2, "0");
+}
+
 async function extractImportItemsChunk(input: {
+  generateStructured: GenerateStructured;
   input: AiContext;
-  runtime: LedgerAiRuntime;
-  invokeRequest: InvokeRequestBuilder;
   chunk: string;
   chunkIndex: number;
   chunkNumber: number;
   chunkTotal: number;
   depth: number;
+  maxOutputTokens: number;
 }): Promise<ImportChunkResult> {
   try {
-    const response = await withTimeout(
-      input.runtime.client.invoke<unknown>(
-        input.invokeRequest({
-          task: skillStepTask,
-          mode: "object",
-          messages: [
-            { role: "system", content: importItemsSystemPrompt },
-            {
-              role: "user",
-              content: JSON.stringify(
-                {
-                  bookId: input.input.bookId,
-                  userId: input.input.userId,
-                  page: input.input.page ?? "导入",
-                  existingCategories: input.input.categories ?? [],
-                  chunkIndex: input.chunkNumber,
-                  chunkTotal: input.chunkTotal,
-                  text: input.chunk,
-                },
-                null,
-                2,
-              ),
-            },
-          ],
-          responseFormat: responseFormat("import_items_chunk", importItemsChunkJsonSchema),
-          temperature: 0,
-          maxTokens: input.runtime.importItemsMaxTokens ?? defaultImportItemsMaxTokens,
-        }),
-      ),
-      input.runtime.importTimeoutMs ?? 45_000,
+    const parsed = importItemsChunkOutputSchema.parse(
+      await input.generateStructured({
+        schemaName: "import_items_chunk",
+        schema: importItemsChunkOutputSchema,
+        system: importItemsSystemPrompt,
+        payload: {
+          bookId: input.input.bookId,
+          userId: input.input.userId,
+          page: input.input.page ?? "导入",
+          existingCategories: input.input.categories ?? [],
+          chunkIndex: input.chunkNumber,
+          chunkTotal: input.chunkTotal,
+          text: input.chunk,
+        },
+        temperature: 0,
+        maxOutputTokens: input.maxOutputTokens,
+      }),
     );
-    const parsed = importItemsChunkOutputSchema.parse(response.output);
     return {
       chunkIndex: input.chunkIndex,
       confidence: parsed.confidence,
@@ -426,7 +705,11 @@ async function extractImportItemsChunk(input: {
       if (split) {
         const [left, right] = split;
         const leftResult = await extractImportItemsChunk({ ...input, chunk: left, depth: input.depth + 1 });
-        const rightResult = await extractImportItemsChunk({ ...input, chunk: right, depth: input.depth + 1 });
+        const rightResult = await extractImportItemsChunk({
+          ...input,
+          chunk: right,
+          depth: input.depth + 1,
+        });
         return {
           chunkIndex: input.chunkIndex,
           confidence: Math.min(leftResult.confidence, rightResult.confidence),
@@ -441,7 +724,7 @@ async function extractImportItemsChunk(input: {
 
 function shouldSplitImportChunkError(error: unknown) {
   if (error instanceof z.ZodError) return true;
-  if (error instanceof AlephAIError) {
+  if (error instanceof LedgerAIError) {
     return ["input_too_large", "validation_failed", "provider_error", "provider_unavailable"].includes(
       error.code,
     );
@@ -451,7 +734,7 @@ function shouldSplitImportChunkError(error: unknown) {
 
 function normalizeImportChunkError(error: unknown) {
   if (error instanceof z.ZodError) {
-    return new AlephAIError("validation_failed", "AI 明细结构不完整，请重试", {
+    return new LedgerAIError("validation_failed", "AI 明细结构不完整，请重试", {
       details: { issues: error.issues.slice(0, 5) } as unknown as JsonObject,
     });
   }
@@ -521,35 +804,45 @@ function uniqueWarnings(warnings: string[]) {
   return Array.from(new Set(warnings.map((warning) => warning.trim()).filter(Boolean)));
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number) {
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return promise;
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeout = setTimeout(() => {
-      reject(new AlephAIError("provider_unavailable", "AI 分析超时，请稍后重试"));
-    }, timeoutMs);
-  });
-  return Promise.race([promise, timeoutPromise]).finally(() => {
-    if (timeout) clearTimeout(timeout);
-  });
+function shouldFallbackToJsonText(error: LedgerAIError) {
+  return ["provider_error", "provider_unavailable", "validation_failed"].includes(error.code);
 }
 
-function toAlephMessage(message: AiChatMessage): ChatMessage {
-  return {
-    role: message.role,
-    content: message.content ?? "",
-  };
-}
-
-async function* streamDeltas(events: AsyncIterable<StreamEvent>) {
-  for await (const event of events) {
-    if (event.type === "delta") yield event.delta;
-    if (event.type === "error")
-      throw new AlephAIError(event.error.code, event.error.message, {
-        requestId: event.requestId,
-        details: event.error.details,
-      });
+function schemaHintForStructuredOutput(schemaName: string) {
+  if (schemaName === "import_receipt_summary") {
+    return [
+      'JSON shape: {"type":"expense","amount":123.45,"occurredAt":"YYYY-MM-DDTHH:mm:ss","note":"merchant or purpose","categoryName":"category","confidence":0.9,"warnings":[]}.',
+      "Use only income or expense for type. amount must be a positive number.",
+    ].join("\n");
   }
+  if (schemaName === "import_items_chunk") {
+    return [
+      'JSON shape: {"items":[{"name":"item name","amount":12.34,"categoryName":"category","note":"optional"}],"confidence":0.9,"warnings":[]}.',
+      "items must be an array. Every item amount must be the paid line amount.",
+    ].join("\n");
+  }
+  return "Return a JSON object matching the requested schema.";
+}
+
+function parseJsonObjectFromText(text: string) {
+  const trimmed = text.trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim();
+    if (fenced) return JSON.parse(fenced);
+    const start = trimmed.indexOf("{");
+    const end = trimmed.lastIndexOf("}");
+    if (start >= 0 && end > start) return JSON.parse(trimmed.slice(start, end + 1));
+    throw new LedgerAIError("validation_failed", "AI 没有返回有效 JSON");
+  }
+}
+
+function toModelMessage(message: AiChatMessage): ModelMessage {
+  return {
+    role: message.role === "tool" ? "assistant" : message.role,
+    content: message.content ?? "",
+  } as ModelMessage;
 }
 
 function skillSelectionPayload(input: AiSkillSelectionInput) {
@@ -582,90 +875,38 @@ function skillStepPayload(input: AiSkillStepInput) {
   };
 }
 
-function responseFormat(name: string, schema: JsonObject): JsonObject {
-  return {
-    type: "json_schema",
-    json_schema: {
-      name,
-      strict: false,
-      schema,
-    },
-  };
+function normalizeAiError(error: unknown): LedgerAIError {
+  if (error instanceof LedgerAIError) return error;
+  const anyError = error as { statusCode?: unknown; status?: unknown; response?: { status?: unknown } };
+  const status = Number(anyError?.statusCode ?? anyError?.status ?? anyError?.response?.status);
+  const message = error instanceof Error ? error.message : "AI 服务不可用";
+  const lower = message.toLowerCase();
+  if (status === 401) return new LedgerAIError("unauthorized", message, errorDetails(error));
+  if (status === 403) return new LedgerAIError("forbidden", message, errorDetails(error));
+  if (status === 429 || lower.includes("quota") || lower.includes("rate limit")) {
+    return new LedgerAIError("quota_exceeded", message, errorDetails(error));
+  }
+  if (status === 400 || lower.includes("validation") || lower.includes("schema")) {
+    return new LedgerAIError("validation_failed", message, errorDetails(error));
+  }
+  if (lower.includes("too large") || lower.includes("context length") || lower.includes("maximum context")) {
+    return new LedgerAIError("input_too_large", message, errorDetails(error));
+  }
+  if (status === 503 || status === 504 || lower.includes("timeout") || lower.includes("timed out")) {
+    return new LedgerAIError("provider_unavailable", message, errorDetails(error));
+  }
+  return new LedgerAIError("provider_error", message, errorDetails(error));
 }
 
-const moneyJsonSchema = {
-  type: "number",
-  exclusiveMinimum: 0,
-  multipleOf: 0.01,
-} as unknown as JsonObject;
-
-const importItemJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["name", "amount"],
-  properties: {
-    name: { type: "string", maxLength: 120 },
-    amount: moneyJsonSchema,
-    categoryName: { type: "string", maxLength: 30 },
-    note: { type: "string", maxLength: 500 },
-  },
-} as unknown as JsonObject;
-
-const importReceiptSummaryJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["type", "amount", "occurredAt", "confidence", "warnings"],
-  properties: {
-    type: { type: "string", enum: ["income", "expense"] },
-    amount: moneyJsonSchema,
-    occurredAt: { type: "string" },
-    note: { type: "string", maxLength: 500 },
-    categoryName: { type: "string", maxLength: 30 },
-    confidence: { type: "number", minimum: 0, maximum: 1 },
-    warnings: { type: "array", items: { type: "string" } },
-  },
-} as unknown as JsonObject;
-
-const importItemsChunkJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["items", "confidence", "warnings"],
-  properties: {
-    items: {
-      type: "array",
-      items: importItemJsonSchema,
-    },
-    confidence: { type: "number", minimum: 0, maximum: 1 },
-    warnings: { type: "array", items: { type: "string" } },
-  },
-} as unknown as JsonObject;
-
-const skillSelectionJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["skillName", "confidence"],
-  properties: {
-    skillName: { type: "string", enum: ledgerSkillNames },
-    reason: { type: "string", maxLength: 500 },
-    confidence: { type: "number", minimum: 0, maximum: 1 },
-  },
-} as unknown as JsonObject;
-
-function skillStepJsonSchema(skill: LedgerSkillDefinition) {
+function errorDetails(error: unknown): { requestId?: string; details?: JsonObject } {
+  const value = error as { requestId?: unknown; cause?: unknown; data?: unknown };
+  const details: JsonObject = {};
+  if (typeof value?.cause === "string") details.cause = value.cause;
+  if (value?.data && typeof value.data === "object") details.data = value.data as JsonObject;
   return {
-    type: "object",
-    additionalProperties: false,
-    required: ["skillName", "toolName", "args", "requiresConfirmation", "confidence"],
-    properties: {
-      skillName: { type: "string", enum: [skill.name] },
-      toolName: { type: "string", enum: skill.tools.map((tool) => tool.name) },
-      args: { type: "object" },
-      userMessage: { type: "string", maxLength: 2000 },
-      requiresConfirmation: { type: "boolean" },
-      confidence: { type: "number", minimum: 0, maximum: 1 },
-      isFinal: { type: "boolean" },
-    },
-  } as unknown as JsonObject;
+    requestId: typeof value?.requestId === "string" ? value.requestId : undefined,
+    details: Object.keys(details).length ? details : undefined,
+  };
 }
 
 const importReceiptSummaryOutputSchema = z.object({

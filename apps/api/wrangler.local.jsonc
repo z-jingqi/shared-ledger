@@ -3,19 +3,13 @@
   "name": "shared-ledger-local",
   "main": "src/index.ts",
   "compatibility_date": "2026-06-21",
-  "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "vars": {
     "APP_ENV": "local",
     "WEB_ORIGIN": "http://localhost:5175",
-    "API_PUBLIC_ORIGIN": "http://127.0.0.1:8789",
-    "ALEPH_AI_ENV": "preview",
-    "ALEPH_TOOLS_WEBHOOK_SECRET": "aleph-tools-local-webhook-secret",
+    "AI_PROVIDER": "openrouter",
   },
-  "services": [
-    { "binding": "AI_ORCHESTRATOR", "service": "aleph-ai-orchestrator-preview", "remote": true },
-    { "binding": "ALEPH_TOOLS", "service": "aleph-tools-gateway-preview", "remote": true },
-  ],
+  "limits": { "cpu_ms": 300000 },
   "d1_databases": [
     {
       "binding": "DB",
@@ -25,4 +19,22 @@
     },
   ],
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "shared-ledger-local-files" }],
+  "queues": {
+    "producers": [
+      {
+        "binding": "IMPORT_PIPELINE_QUEUE",
+        "queue": "shared-ledger-import-pipeline-local",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "shared-ledger-import-pipeline-local",
+        "max_batch_size": 1,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+        "dead_letter_queue": "shared-ledger-import-pipeline-local-dlq",
+        "max_concurrency": 1,
+      },
+    ],
+  },
 }

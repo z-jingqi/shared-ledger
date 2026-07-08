@@ -9,6 +9,7 @@ export type SubscriptionPlan = (typeof subscriptionPlans)[number];
 export const invitationStatuses = ["pending", "accepted", "declined", "expired", "revoked"] as const;
 export const importStatuses = [
   "uploaded",
+  "converting",
   "ocr_processing",
   "cancel_requested",
   "ai_processing",
@@ -28,6 +29,7 @@ export const supportedFileTypes = [
   "image/heif",
   "image/heic-sequence",
   "image/heif-sequence",
+  "image/avif",
   "image/tiff",
   "image/x-tiff",
   "image/bmp",
@@ -47,6 +49,7 @@ export const supportedFileExtensions = [
   ".webp",
   ".heic",
   ".heif",
+  ".avif",
   ".tif",
   ".tiff",
   ".bmp",

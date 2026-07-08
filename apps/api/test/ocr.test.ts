@@ -1,129 +1,208 @@
-import { describe, expect, it, vi } from "vitest";
-import { verifyAlephWebhookSignature } from "../src/routes/imports";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+const convertUnsupportedImageToJpegMock = vi.hoisted(() =>
+  vi.fn(async () => new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00]).buffer),
+);
+
+vi.mock("../src/services/image-codecs", () => ({
+  convertUnsupportedImageToJpeg: convertUnsupportedImageToJpegMock,
+}));
+
 import {
   assertImageImportFile,
   assertImageOcrQuota,
   maximumImageImportFileBytes,
 } from "../src/services/import-validation";
-import { AlephToolsClient, AlephToolsError, ocrConfidence } from "../src/services/ocr";
+import {
+  GoogleVisionOcrClient,
+  GoogleVisionOcrError,
+  googleVisionSupportsImageType,
+  ocrConfidence,
+  type GoogleVisionOcrResult,
+} from "../src/services/ocr";
+import { prepareImageForGoogleVision } from "../src/services/image-conversion";
 import type { D1LedgerRepository } from "../src/repository";
-import type { WorkerServiceBinding } from "../src/types";
 
-describe("Aleph Tools client", () => {
-  it("calls Aleph Tools through service binding and sends a client source reference", async () => {
+beforeEach(() => {
+  convertUnsupportedImageToJpegMock.mockClear();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("Google Vision OCR client", () => {
+  it("calls Google Vision annotate with document text detection", async () => {
     const requests: Request[] = [];
-    const service: WorkerServiceBinding = {
-      fetch: vi.fn(async (request: Request) => {
-        requests.push(request);
-        return Response.json({ success: true, data: { jobId: "ocr_1", status: "queued" } });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (request: RequestInfo | URL, init?: RequestInit) => {
+        const normalized = request instanceof Request ? request : new Request(request, init);
+        requests.push(normalized);
+        return Response.json({
+          responses: [
+            {
+              fullTextAnnotation: {
+                text: "合计 12.00",
+                pages: [{ confidence: 0.9 }],
+              },
+            },
+          ],
+        });
       }),
-    };
-
-    const job = await new AlephToolsClient(service, "secret").createOcrJob(
-      {
-        type: "client_source",
-        sourceId: "import_1",
-        accessToken: "source_token",
-        filename: "receipt.png",
-        mimeType: "image/png",
-        sizeBytes: 123,
-      },
-      {
-        callbackUrl: "https://api.example.com/imports/aleph-webhook",
-        metadata: { importJobId: "import_1", phase: "ocr" },
-        idempotencyKey: "ocr:import_1:0",
-      },
     );
 
-    expect(job).toEqual({ jobId: "ocr_1", status: "queued" });
-    expect(requests[0]?.url).toBe("https://aleph-tools.internal/v1/tools/ocr");
-    expect(requests[0]?.method).toBe("POST");
-    expect(requests[0]?.headers.get("Authorization")).toBe("Bearer secret");
-    expect(requests[0]?.headers.get("Idempotency-Key")).toBe("ocr:import_1:0");
-    expect(requests[0]?.headers.get("Content-Type")).toBe("application/json");
-    const body = await requests[0]!.json();
-    expect(body).toEqual({
-      source: {
-        type: "client_source",
-        sourceId: "import_1",
-        accessToken: "source_token",
-        filename: "receipt.png",
-        mimeType: "image/png",
-        sizeBytes: 123,
-      },
-      callbackUrl: "https://api.example.com/imports/aleph-webhook",
-      metadata: { importJobId: "import_1", phase: "ocr" },
+    const result = await new GoogleVisionOcrClient("secret").recognizeImage({
+      bytes: new TextEncoder().encode("image").buffer,
+      sourceMimeType: "image/png",
+      processedMimeType: "image/png",
+      converted: false,
     });
-  });
 
-  it("requests Aleph Tools job cancellation through service binding", async () => {
-    const requests: Request[] = [];
-    const service: WorkerServiceBinding = {
-      fetch: vi.fn(async (request: Request) => {
-        requests.push(request);
-        return Response.json({ success: true, data: { jobId: "ocr_1", status: "cancel_requested" } });
-      }),
+    expect(result.plainText).toBe("合计 12.00");
+    expect(result.metadata).toMatchObject({
+      engine: "google-vision",
+      input: { converted: false, sourceMimeType: "image/png", processedMimeType: "image/png" },
+    });
+    expect(requests[0]?.url).toContain("https://vision.googleapis.com/v1/images:annotate");
+    expect(requests[0]?.url).toContain("key=secret");
+    const body = (await requests[0]!.json()) as {
+      requests: Array<{ features: unknown; image: { content?: string } }>;
     };
-
-    const job = await new AlephToolsClient(service, "secret").cancelJob("ocr_1");
-
-    expect(job).toEqual({ jobId: "ocr_1", status: "cancel_requested" });
-    expect(requests[0]?.url).toBe("https://aleph-tools.internal/v1/jobs/ocr_1/cancel");
-    expect(requests[0]?.method).toBe("POST");
-    expect(requests[0]?.headers.get("Authorization")).toBe("Bearer secret");
+    expect(body.requests[0].features).toEqual([{ type: "DOCUMENT_TEXT_DETECTION" }]);
+    expect(body.requests[0].image.content).toBeTruthy();
   });
 
-  it("surfaces Aleph Tools API errors", async () => {
-    const service: WorkerServiceBinding = {
-      fetch: vi.fn(async () => Response.json({ success: false, error: "Unauthorized" }, { status: 401 })),
-    };
-
-    await expect(new AlephToolsClient(service, "bad").getJob("ocr_1")).rejects.toThrow("Unauthorized");
-  });
-
-  it("preserves structured Aleph Tools error fields", async () => {
-    const service: WorkerServiceBinding = {
-      fetch: vi.fn(async () =>
-        Response.json(
-          {
-            success: false,
-            error: {
-              code: "RATE_LIMITED",
-              message: "Too many active jobs",
-              httpStatus: 429,
-              requestId: "req_1",
-              stage: "ocr",
-              retryable: true,
-              terminal: false,
+  it("adds coordinate-derived receipt rows when Google Vision returns layout blocks", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          responses: [
+            {
+              fullTextAnnotation: {
+                text: "1234567890123 测试商品\n9.90\n2\n19.80\n应收 19.80",
+                pages: [
+                  {
+                    confidence: 0.9,
+                    blocks: [
+                      visionBlock("1234567890123 测试商品", 900, 100, 500, 40),
+                      visionBlock("9.90", 900, 150, 80, 30),
+                      visionBlock("2", 1300, 150, 40, 30),
+                      visionBlock("19.80", 1600, 150, 90, 30),
+                      visionBlock("应收 19.80", 100, 250, 220, 30),
+                    ],
+                  },
+                ],
+              },
             },
-            requestId: "req_1",
-          },
+          ],
+        }),
+      ),
+    );
+
+    const result = await new GoogleVisionOcrClient("secret").recognizeImage({
+      bytes: new TextEncoder().encode("image").buffer,
+      sourceMimeType: "image/png",
+      processedMimeType: "image/png",
+      converted: false,
+    });
+
+    expect(result.markdown).toContain("OCR layout rows derived from Google Vision bounding boxes");
+    expect(result.markdown).toContain("| 测试商品 | 9.90 | 2 | 19.80 |");
+  });
+
+  it("preserves structured Google Vision error fields", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json(
+          { error: { code: 429, message: "Quota exceeded", status: "RESOURCE_EXHAUSTED" } },
           { status: 429 },
         ),
       ),
-    };
+    );
 
-    await expect(new AlephToolsClient(service, "bad").getJob("ocr_1")).rejects.toMatchObject({
-      name: "AlephToolsError",
-      code: "RATE_LIMITED",
-      requestId: "req_1",
+    await expect(
+      new GoogleVisionOcrClient("bad").recognizeImage({
+        bytes: new ArrayBuffer(0),
+        sourceMimeType: "image/png",
+        processedMimeType: "image/png",
+        converted: false,
+      }),
+    ).rejects.toMatchObject({
+      name: "GoogleVisionOcrError",
+      code: "GOOGLE_VISION_HTTP_ERROR",
       retryable: true,
       terminal: false,
-    } satisfies Partial<AlephToolsError>);
+    } satisfies Partial<GoogleVisionOcrError>);
+  });
+
+  it("detects Google Vision supported and conversion-required image types", () => {
+    expect(googleVisionSupportsImageType("image/png")).toBe(true);
+    expect(googleVisionSupportsImageType("image/jpeg")).toBe(true);
+    expect(googleVisionSupportsImageType("image/heic")).toBe(false);
+    expect(googleVisionSupportsImageType("image/tiff")).toBe(true);
+  });
+
+  it("keeps directly supported images without conversion", async () => {
+    const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]).buffer;
+    const result = await prepareImageForGoogleVision(importJob({ fileType: "image/jpeg" }), bytes);
+
+    expect(result.fileType).toBe("image/jpeg");
+    expect(result.converted).toBe(false);
+    expect(result.bytes).toBe(bytes);
+    expect(convertUnsupportedImageToJpegMock).not.toHaveBeenCalled();
+  });
+
+  it("converts OCR-unsupported HEIF container images locally before Google Vision", async () => {
+    const source = new Uint8Array([1, 2, 3]).buffer;
+    const result = await prepareImageForGoogleVision(importJob({ fileType: "image/heic" }), source);
+
+    expect(result.fileType).toBe("image/jpeg");
+    expect(result.converted).toBe(true);
+    expect(new Uint8Array(result.bytes).slice(0, 3)).toEqual(new Uint8Array([0xff, 0xd8, 0xff]));
+    expect(convertUnsupportedImageToJpegMock).toHaveBeenCalledWith(source, {
+      maxPixels: 28_000_000,
+      quality: 88,
+    });
+  });
+
+  it("converts AVIF images through the same Worker codec path", async () => {
+    const source = new Uint8Array([4, 5, 6]).buffer;
+    const result = await prepareImageForGoogleVision(importJob({ fileType: "image/avif" }), source);
+
+    expect(result.fileType).toBe("image/jpeg");
+    expect(result.converted).toBe(true);
+    expect(convertUnsupportedImageToJpegMock).toHaveBeenCalledWith(source, {
+      maxPixels: 28_000_000,
+      quality: 88,
+    });
+  });
+
+  it("rejects unsupported image formats instead of using Cloudflare image transforms", async () => {
+    await expect(
+      prepareImageForGoogleVision(
+        importJob({ fileType: "image/svg+xml" }),
+        new TextEncoder().encode("<svg />").buffer,
+      ),
+    ).rejects.toMatchObject({
+      code: "UNSUPPORTED_IMAGE_FORMAT",
+      terminal: true,
+    });
   });
 
   it("averages page confidence and defaults to high confidence when absent", () => {
     expect(
-      ocrConfidence({
-        plainText: "text",
-        markdown: "text",
-        pages: [
-          { text: "a", confidence: 0.7 },
-          { text: "b", confidence: 0.9 },
-        ],
-      }),
+      ocrConfidence(
+        ocrResult({
+          pages: [
+            { text: "a", confidence: 0.7 },
+            { text: "b", confidence: 0.9 },
+          ],
+        }),
+      ),
     ).toBeCloseTo(0.8);
-    expect(ocrConfidence({ plainText: "text", markdown: "text", pages: [{ text: "a" }] })).toBe(1);
+    expect(ocrConfidence(ocrResult({ pages: [{ text: "a" }] }))).toBe(1);
   });
 
   it("rejects oversized image imports before creating OCR jobs", () => {
@@ -152,42 +231,57 @@ describe("Aleph Tools client", () => {
       message: "今日图片识别额度已用完",
     });
   });
-
-  it("verifies Aleph Tools webhook HMAC signatures", async () => {
-    const timestamp = new Date().toISOString();
-    const body = JSON.stringify({
-      event: "ocr.job.ready",
-      jobId: "ocr_1",
-      metadata: { importJobId: "import_1" },
-    });
-    const signature = `sha256=${await hmacSha256Hex("webhook-secret", `${timestamp}.${body}`)}`;
-
-    await expect(verifyAlephWebhookSignature("webhook-secret", timestamp, signature, body)).resolves.toBe(
-      true,
-    );
-    await expect(verifyAlephWebhookSignature("webhook-secret", timestamp, "sha256=bad", body)).resolves.toBe(
-      false,
-    );
-    await expect(
-      verifyAlephWebhookSignature(
-        "webhook-secret",
-        new Date(Date.now() - 10 * 60_000).toISOString(),
-        signature,
-        body,
-      ),
-    ).resolves.toBe(false);
-  });
 });
 
-async function hmacSha256Hex(secret: string, value: string) {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(value));
-  return [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+function ocrResult(input: Partial<GoogleVisionOcrResult> = {}): GoogleVisionOcrResult {
+  return {
+    plainText: "text",
+    markdown: "text",
+    pages: [{ text: "text" }],
+    raw: {},
+    metadata: {
+      input: {
+        converted: false,
+        sourceMimeType: "image/png",
+        processedMimeType: "image/png",
+      },
+      engine: "google-vision",
+      engineVersion: "v1",
+    },
+    ...input,
+  };
+}
+
+function visionBlock(text: string, x: number, y: number, width: number, height: number) {
+  return {
+    boundingBox: {
+      vertices: [
+        { x, y },
+        { x: x + width, y },
+        { x: x + width, y: y + height },
+        { x, y: y + height },
+      ],
+    },
+    paragraphs: [
+      {
+        words: text.split(" ").map((word) => ({
+          symbols: Array.from(word).map((symbol) => ({ text: symbol, confidence: 0.99 })),
+        })),
+      },
+    ],
+  };
+}
+
+function importJob(input: { fileType: string }) {
+  return {
+    id: "import_test",
+    bookId: "book_test",
+    userId: "user_test",
+    fileName: "receipt",
+    fileType: input.fileType,
+    r2Key: "imports/test/receipt",
+    status: "uploaded",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
 }

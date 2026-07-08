@@ -44,7 +44,9 @@ export type ImportJob = {
   retryable?: boolean;
   retryCount?: number;
   ocrJobId?: string;
-  alephTool?: string;
+  ocrProvider?: string;
+  ocrInputR2Key?: string;
+  ocrInputFileType?: string;
   ocrSubmittedAt?: string;
   ocrProgress?: number;
   ocrStage?: string;
@@ -64,6 +66,19 @@ export type ImportedRecord = {
   status: "pending" | "confirmed" | "ignored" | "duplicated";
   confidence: number;
   warnings: string[];
+};
+export type ImportOcrResult = {
+  id: string;
+  importJobId: string;
+  provider: string;
+  engineVersion?: string;
+  rawText: string;
+  rawJson: Record<string, unknown>;
+  converted: boolean;
+  sourceMimeType?: string;
+  processedMimeType?: string;
+  createdAt: string;
+  updatedAt: string;
 };
 export type SimpleEntity = {
   id: string;

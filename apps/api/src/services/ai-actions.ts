@@ -23,7 +23,7 @@ import type { MemoryLedgerStore, SimpleEntity } from "../store";
 import type { LedgerUser, Transaction } from "../types";
 import type { Env } from "../types";
 import { updateUserAvatar, updateUserProfile } from "./auth";
-import { markFailed, submitAlephOcrJob } from "./imports";
+import { markFailed, submitOcrJob } from "./imports";
 import {
   assertImageImportFile,
   assertImageOcrQuota,
@@ -31,9 +31,9 @@ import {
   maximumImageImportBatchFiles,
 } from "./import-validation";
 
-export type AiToolRepository = D1LedgerRepository | MemoryLedgerStore;
+export type AiActionRepository = D1LedgerRepository | MemoryLedgerStore;
 
-type AiToolDefinition = {
+type AiActionDefinition = {
   name: AiActionName;
   skillName: LedgerSkillName;
   description: string;
@@ -41,9 +41,9 @@ type AiToolDefinition = {
   argsSchemaDescription: string;
 };
 
-type AiToolRuntime = {
+type AiActionRuntime = {
   env: Env;
-  repository: AiToolRepository;
+  repository: AiActionRepository;
   store?: MemoryLedgerStore;
   user: LedgerUser;
   sessionId: string;
@@ -55,7 +55,7 @@ type AiToolRuntime = {
   attachments: File[];
 };
 
-type ToolExecutionResult = {
+type AiActionExecutionResult = {
   parts: Array<Record<string, unknown>>;
   result?: Record<string, unknown>;
   changed?: string[];
@@ -64,7 +64,7 @@ type ToolExecutionResult = {
 const now = () => new Date().toISOString();
 const id = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 
-const runtimeToolDefinitions: AiToolDefinition[] = listLedgerSkills().flatMap((skill) =>
+const runtimeActionDefinitions: AiActionDefinition[] = listLedgerSkills().flatMap((skill) =>
   skill.tools.map((toolDefinition) => ({
     name: toolDefinition.name,
     skillName: skill.name,
@@ -146,13 +146,13 @@ const memberArgsSchema = z.object({
   self: z.boolean().optional(),
 });
 
-export async function executeAiTool(
-  runtime: AiToolRuntime,
+export async function executeAiAction(
+  runtime: AiActionRuntime,
   plan: LedgerToolStep,
   options: { confirmed?: boolean; toolCallId?: string } = {},
-): Promise<ToolExecutionResult> {
+): Promise<AiActionExecutionResult> {
   const registryTool = getLedgerTool(plan.toolName, plan.skillName);
-  const definition = runtimeToolDefinitions.find(
+  const definition = runtimeActionDefinitions.find(
     (tool) => tool.name === plan.toolName && tool.skillName === plan.skillName,
   );
   if (!registryTool) return textResult(`暂不支持 Skill 工具：${plan.skillName}.${plan.toolName}`);
@@ -240,7 +240,7 @@ export async function executeAiTool(
   }
 }
 
-export async function confirmAiTool(runtime: AiToolRuntime, confirmationId: string) {
+export async function confirmAiAction(runtime: AiActionRuntime, confirmationId: string) {
   const confirmation = await getConfirmation(runtime.repository, runtime.user.id, confirmationId);
   if (!confirmation) return { status: 404, body: { error: "确认项不存在" } };
   if (confirmation.status !== "pending") return { status: 409, body: { confirmation } };
@@ -263,7 +263,7 @@ export async function confirmAiTool(runtime: AiToolRuntime, confirmationId: stri
   const skillName =
     payload.skillName ?? (getLedgerTool(payload.toolName)?.skillName as LedgerSkillName | undefined);
   if (!skillName) return { status: 400, body: { error: "确认项缺少 Skill 信息" } };
-  const result = await executeAiTool(
+  const result = await executeAiAction(
     {
       ...runtime,
       sessionId: payload.sessionId ?? runtime.sessionId,
@@ -287,8 +287,8 @@ export async function confirmAiTool(runtime: AiToolRuntime, confirmationId: stri
   return { status: 200, body: { confirmation: updated, parts: result.parts, result: result.result } };
 }
 
-export async function cancelAiToolConfirmation(
-  repository: AiToolRepository,
+export async function cancelAiActionConfirmation(
+  repository: AiActionRepository,
   userId: string,
   confirmationId: string,
 ) {
@@ -304,11 +304,11 @@ export async function cancelAiToolConfirmation(
 }
 
 async function executeConfirmedTool(
-  runtime: AiToolRuntime,
+  runtime: AiActionRuntime,
   toolName: AiActionName,
   args: Record<string, unknown>,
   bookId?: string,
-): Promise<ToolExecutionResult> {
+): Promise<AiActionExecutionResult> {
   switch (toolName) {
     case "search-records":
       return searchRecords(runtime, bookId!, args);
@@ -364,7 +364,7 @@ async function executeConfirmedTool(
   }
 }
 
-async function searchRecords(runtime: AiToolRuntime, bookId: string, rawArgs: Record<string, unknown>) {
+async function searchRecords(runtime: AiActionRuntime, bookId: string, rawArgs: Record<string, unknown>) {
   const args = searchArgsSchema.parse(rawArgs);
   const transactions = await searchTransactions(runtime.repository, bookId, args);
   const limited = transactions.slice(0, args.limit);
@@ -399,7 +399,7 @@ async function searchRecords(runtime: AiToolRuntime, bookId: string, rawArgs: Re
   };
 }
 
-async function analyzeRecords(runtime: AiToolRuntime, bookId: string, rawArgs: Record<string, unknown>) {
+async function analyzeRecords(runtime: AiActionRuntime, bookId: string, rawArgs: Record<string, unknown>) {
   const args = searchArgsSchema.parse(rawArgs);
   const transactions = await searchTransactions(runtime.repository, bookId, args);
   const expenseItems = transactions.filter((item) => item.type === "expense");
@@ -430,7 +430,7 @@ async function analyzeRecords(runtime: AiToolRuntime, bookId: string, rawArgs: R
   };
 }
 
-async function createRecord(runtime: AiToolRuntime, bookId: string, rawArgs: Record<string, unknown>) {
+async function createRecord(runtime: AiActionRuntime, bookId: string, rawArgs: Record<string, unknown>) {
   const args = createRecordsArgsSchema.parse(rawArgs);
   const records = "records" in args ? args.records : [args];
   const transactions = [];
@@ -463,7 +463,7 @@ async function createRecord(runtime: AiToolRuntime, bookId: string, rawArgs: Rec
   };
 }
 
-async function updateRecord(runtime: AiToolRuntime, bookId: string, rawArgs: Record<string, unknown>) {
+async function updateRecord(runtime: AiActionRuntime, bookId: string, rawArgs: Record<string, unknown>) {
   const args = updateRecordArgsSchema.parse(rawArgs);
   const transaction = await resolveTransaction(runtime.repository, runtime.user.id, bookId, args);
   if (!transaction) return textResult("我没有找到要修改的那笔记录。");
@@ -494,7 +494,7 @@ async function updateRecord(runtime: AiToolRuntime, bookId: string, rawArgs: Rec
   };
 }
 
-async function deleteRecord(runtime: AiToolRuntime, bookId: string, rawArgs: Record<string, unknown>) {
+async function deleteRecord(runtime: AiActionRuntime, bookId: string, rawArgs: Record<string, unknown>) {
   const args = targetRecordArgsSchema.parse(rawArgs);
   const transactions = await resolveTransactionsForDelete(runtime.repository, runtime.user.id, bookId, args);
   if (!transactions.length) return textResult("我没有找到要删除的记录。");
@@ -524,7 +524,7 @@ async function deleteRecord(runtime: AiToolRuntime, bookId: string, rawArgs: Rec
   };
 }
 
-async function createCategory(runtime: AiToolRuntime, _bookId: string, rawArgs: Record<string, unknown>) {
+async function createCategory(runtime: AiActionRuntime, _bookId: string, rawArgs: Record<string, unknown>) {
   const args = categoryArgsSchema.parse(rawArgs);
   const parsed = categorySchema.parse({
     name: args.name,
@@ -547,7 +547,7 @@ async function createCategory(runtime: AiToolRuntime, _bookId: string, rawArgs: 
   };
 }
 
-async function updateCategory(runtime: AiToolRuntime, _bookId: string, rawArgs: Record<string, unknown>) {
+async function updateCategory(runtime: AiActionRuntime, _bookId: string, rawArgs: Record<string, unknown>) {
   const args = categoryArgsSchema.parse(rawArgs);
   const category = await resolveCategory(runtime.repository, runtime.user.id, args.id, args.name, args.type);
   if (!category) return textResult("我没有找到这个分类。");
@@ -565,7 +565,7 @@ async function updateCategory(runtime: AiToolRuntime, _bookId: string, rawArgs: 
   };
 }
 
-async function deleteCategory(runtime: AiToolRuntime, _bookId: string, rawArgs: Record<string, unknown>) {
+async function deleteCategory(runtime: AiActionRuntime, _bookId: string, rawArgs: Record<string, unknown>) {
   const args = categoryArgsSchema.parse(rawArgs);
   const category = await resolveCategory(runtime.repository, runtime.user.id, args.id, args.name, args.type);
   if (!category) return textResult("我没有找到这个分类。");
@@ -577,7 +577,7 @@ async function deleteCategory(runtime: AiToolRuntime, _bookId: string, rawArgs: 
   };
 }
 
-async function createBook(runtime: AiToolRuntime, rawArgs: Record<string, unknown>) {
+async function createBook(runtime: AiActionRuntime, rawArgs: Record<string, unknown>) {
   const parsed = createBookSchema.parse({ ...rawArgs, currency: String(rawArgs.currency ?? "CNY") });
   const book =
     runtime.repository instanceof D1LedgerRepository
@@ -593,7 +593,7 @@ async function createBook(runtime: AiToolRuntime, rawArgs: Record<string, unknow
   };
 }
 
-async function updateBook(runtime: AiToolRuntime, bookId: string, rawArgs: Record<string, unknown>) {
+async function updateBook(runtime: AiActionRuntime, bookId: string, rawArgs: Record<string, unknown>) {
   const input = z
     .object({
       id: z.string().optional(),
@@ -615,7 +615,7 @@ async function updateBook(runtime: AiToolRuntime, bookId: string, rawArgs: Recor
   };
 }
 
-async function deleteBook(runtime: AiToolRuntime, bookId: string, rawArgs: Record<string, unknown>) {
+async function deleteBook(runtime: AiActionRuntime, bookId: string, rawArgs: Record<string, unknown>) {
   const targetBookId = String(rawArgs.id ?? bookId);
   const userRole = await bookRoleFor(runtime.repository, targetBookId, runtime.user.id);
   if (!canDeleteBook(userRole ?? "member")) return textResult("只有账本创建者可以删除账本。");
@@ -629,7 +629,7 @@ async function deleteBook(runtime: AiToolRuntime, bookId: string, rawArgs: Recor
   };
 }
 
-async function updateProfile(runtime: AiToolRuntime, rawArgs: Record<string, unknown>) {
+async function updateProfile(runtime: AiActionRuntime, rawArgs: Record<string, unknown>) {
   const parsed = updateProfileSchema
     .partial()
     .extend({ avatarFromAttachment: z.boolean().optional() })
@@ -677,7 +677,7 @@ async function updateProfile(runtime: AiToolRuntime, rawArgs: Record<string, unk
   };
 }
 
-async function updateMember(runtime: AiToolRuntime, bookId: string, rawArgs: Record<string, unknown>) {
+async function updateMember(runtime: AiActionRuntime, bookId: string, rawArgs: Record<string, unknown>) {
   const args = memberArgsSchema.parse(rawArgs);
   if (!args.role) return textResult("请告诉我要把成员设置为管理员还是普通成员。");
   if (!(await canManageBook(runtime.repository, bookId, runtime.user.id)))
@@ -695,7 +695,7 @@ async function updateMember(runtime: AiToolRuntime, bookId: string, rawArgs: Rec
   };
 }
 
-async function removeMember(runtime: AiToolRuntime, bookId: string, rawArgs: Record<string, unknown>) {
+async function removeMember(runtime: AiActionRuntime, bookId: string, rawArgs: Record<string, unknown>) {
   const args = memberArgsSchema.parse(rawArgs);
   const self = args.self || args.userId === runtime.user.id;
   if (!self && !(await canManageBook(runtime.repository, bookId, runtime.user.id)))
@@ -716,7 +716,7 @@ async function removeMember(runtime: AiToolRuntime, bookId: string, rawArgs: Rec
   };
 }
 
-async function inviteMember(runtime: AiToolRuntime, bookId: string, rawArgs: Record<string, unknown>) {
+async function inviteMember(runtime: AiActionRuntime, bookId: string, rawArgs: Record<string, unknown>) {
   const args = z
     .object({
       target: z.string().optional(),
@@ -774,7 +774,7 @@ async function inviteMember(runtime: AiToolRuntime, bookId: string, rawArgs: Rec
   };
 }
 
-async function saveAttachments(runtime: AiToolRuntime, bookId: string, rawArgs: Record<string, unknown>) {
+async function saveAttachments(runtime: AiActionRuntime, bookId: string, rawArgs: Record<string, unknown>) {
   if (!runtime.attachments.length) return textResult("请先上传图片。");
   if (!(runtime.repository instanceof D1LedgerRepository) || !runtime.env.FILES)
     return textResult("导入功能需要 D1 与 R2 绑定。");
@@ -809,7 +809,7 @@ async function saveAttachments(runtime: AiToolRuntime, bookId: string, rawArgs: 
 }
 
 async function transactionInput(
-  repository: AiToolRepository,
+  repository: AiActionRepository,
   userId: string,
   args: z.infer<typeof recordArgsSchema> | (Partial<z.infer<typeof recordArgsSchema>> & Transaction),
   today: string,
@@ -841,7 +841,7 @@ async function transactionInput(
 }
 
 async function searchTransactions(
-  repository: AiToolRepository,
+  repository: AiActionRepository,
   bookId: string,
   args: z.infer<typeof searchArgsSchema>,
 ) {
@@ -881,7 +881,7 @@ async function searchTransactions(
 }
 
 async function resolveTransaction(
-  repository: AiToolRepository,
+  repository: AiActionRepository,
   userId: string,
   bookId: string,
   args: { transactionId?: string; relative?: string; amount?: number; note?: string },
@@ -907,7 +907,7 @@ async function resolveTransaction(
 }
 
 async function resolveTransactionsForDelete(
-  repository: AiToolRepository,
+  repository: AiActionRepository,
   userId: string,
   bookId: string,
   args: z.infer<typeof targetRecordArgsSchema>,
@@ -938,14 +938,14 @@ async function resolveTransactionsForDelete(
   return transaction ? [transaction] : [];
 }
 
-async function resolveBookId(repository: AiToolRepository, userId: string, bookId?: string) {
+async function resolveBookId(repository: AiActionRepository, userId: string, bookId?: string) {
   if (bookId) return bookId;
   if (repository instanceof D1LedgerRepository) return (await repository.listBooks(userId))[0]?.id;
   return repository.books.find((book) => repository.role(book.id, userId))?.id;
 }
 
 async function bookRoleFor(
-  repository: AiToolRepository,
+  repository: AiActionRepository,
   bookId: string,
   userId: string,
 ): Promise<Role | undefined> {
@@ -954,11 +954,11 @@ async function bookRoleFor(
     : repository.role(bookId, userId);
 }
 
-async function canManageBook(repository: AiToolRepository, bookId: string, userId: string) {
+async function canManageBook(repository: AiActionRepository, bookId: string, userId: string) {
   return canManageMembers((await bookRoleFor(repository, bookId, userId)) ?? "member");
 }
 
-async function categoryName(repository: AiToolRepository, categoryId?: string) {
+async function categoryName(repository: AiActionRepository, categoryId?: string) {
   if (!categoryId) return undefined;
   const category =
     repository instanceof D1LedgerRepository
@@ -967,7 +967,7 @@ async function categoryName(repository: AiToolRepository, categoryId?: string) {
   return category?.name;
 }
 
-async function findCategory(repository: AiToolRepository, userId: string, name?: string, type?: string) {
+async function findCategory(repository: AiActionRepository, userId: string, name?: string, type?: string) {
   if (!name) return undefined;
   const values =
     repository instanceof D1LedgerRepository
@@ -977,7 +977,7 @@ async function findCategory(repository: AiToolRepository, userId: string, name?:
 }
 
 async function resolveCategory(
-  repository: AiToolRepository,
+  repository: AiActionRepository,
   userId: string,
   idValue?: string,
   name?: string,
@@ -994,7 +994,7 @@ async function resolveCategory(
 }
 
 async function createCategoryEntity(
-  repository: AiToolRepository,
+  repository: AiActionRepository,
   userId: string,
   data: Omit<SimpleEntity, "id" | "userId">,
   actorId: string,
@@ -1005,7 +1005,7 @@ async function createCategoryEntity(
 }
 
 async function updateCategoryEntity(
-  repository: AiToolRepository,
+  repository: AiActionRepository,
   entityId: string,
   data: Omit<SimpleEntity, "id" | "userId">,
   actorId: string,
@@ -1015,7 +1015,7 @@ async function updateCategoryEntity(
   return entity ? Object.assign(entity, data) : undefined;
 }
 
-async function deleteCategoryEntity(repository: AiToolRepository, entityId: string, actorId: string) {
+async function deleteCategoryEntity(repository: AiActionRepository, entityId: string, actorId: string) {
   if (repository instanceof D1LedgerRepository) return repository.deleteCategory(entityId, actorId);
   repository.transactions.forEach((transaction) => {
     if (transaction.categoryId === entityId) delete transaction.categoryId;
@@ -1026,7 +1026,7 @@ async function deleteCategoryEntity(repository: AiToolRepository, entityId: stri
   repository.categories = repository.categories.filter((item) => item.id !== entityId);
 }
 
-async function memberByUser(repository: AiToolRepository, bookId: string, userId: string) {
+async function memberByUser(repository: AiActionRepository, bookId: string, userId: string) {
   if (repository instanceof D1LedgerRepository) {
     const members = await repository.listMembers(bookId);
     return members.find((member) => member.userId === userId);
@@ -1035,7 +1035,7 @@ async function memberByUser(repository: AiToolRepository, bookId: string, userId
 }
 
 async function resolveInviteTarget(
-  repository: AiToolRepository,
+  repository: AiActionRepository,
   args: { target?: string; email?: string; phone?: string; userId?: string },
   actorUserId: string,
 ) {
@@ -1075,7 +1075,7 @@ function memoryInviteBlocked(store: MemoryLedgerStore, blockerUserId: string, bl
 }
 
 async function resolveMember(
-  repository: AiToolRepository,
+  repository: AiActionRepository,
   bookId: string,
   args: z.infer<typeof memberArgsSchema>,
 ) {
@@ -1126,7 +1126,7 @@ function createMemoryInvitation(
 }
 
 async function createImportJobFromFile(
-  runtime: AiToolRuntime,
+  runtime: AiActionRuntime,
   bookId: string,
   file: File,
   autoConfirm: boolean,
@@ -1152,9 +1152,7 @@ async function createImportJobFromFile(
       httpMetadata: { contentType: resolvedFileType },
       customMetadata: { importJobId: job.id, bookId, uploadedBy: runtime.user.id },
     });
-    return await submitAlephOcrJob(runtime.env, runtime.repository, job, {
-      requestOrigin: runtime.origin,
-    });
+    return await submitOcrJob(runtime.env, runtime.repository, job);
   } catch (error) {
     await markFailed(runtime.repository, job.id, error, "ocr");
     throw error;
@@ -1216,7 +1214,7 @@ function recordCard(transaction: Transaction, category?: string): AiChatPart {
   };
 }
 
-function textResult(text: string): ToolExecutionResult {
+function textResult(text: string): AiActionExecutionResult {
   return { parts: [{ type: "text", text }] };
 }
 
@@ -1257,7 +1255,7 @@ function confirmationPart(
 }
 
 async function createConfirmation(
-  repository: AiToolRepository,
+  repository: AiActionRepository,
   input: { userId: string; bookId?: string; action: AiActionName; payload: Record<string, unknown> },
 ) {
   if (repository instanceof D1LedgerRepository) return repository.createAiConfirmation(input);
@@ -1277,7 +1275,7 @@ async function createConfirmation(
   return confirmation;
 }
 
-async function getConfirmation(repository: AiToolRepository, userId: string, confirmationId: string) {
+async function getConfirmation(repository: AiActionRepository, userId: string, confirmationId: string) {
   if (repository instanceof D1LedgerRepository) return repository.getAiConfirmation(userId, confirmationId);
   return (
     repository.aiConfirmations.find(
@@ -1287,7 +1285,7 @@ async function getConfirmation(repository: AiToolRepository, userId: string, con
 }
 
 async function updateConfirmation(
-  repository: AiToolRepository,
+  repository: AiActionRepository,
   confirmation: Awaited<ReturnType<typeof getConfirmation>> extends infer T ? NonNullable<T> : never,
   fields: {
     status: "pending" | "confirmed" | "cancelled";

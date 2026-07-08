@@ -1,5 +1,12 @@
 import type { Book, LedgerUser, Member, Transaction } from "./types";
-import type { AiConfirmation, ImportedRecord, ImportJob, Invitation, SimpleEntity } from "./store";
+import type {
+  AiConfirmation,
+  ImportedRecord,
+  ImportJob,
+  ImportOcrResult,
+  Invitation,
+  SimpleEntity,
+} from "./store";
 
 type Row = Record<string, any>;
 const now = () => new Date().toISOString();
@@ -135,7 +142,9 @@ const mapImportJob = (row: Row): ImportJob => ({
   retryable: Boolean(row.retryable),
   retryCount: row.retryCount ?? 0,
   ...(row.ocrJobId ? { ocrJobId: row.ocrJobId } : {}),
-  ...(row.alephTool ? { alephTool: row.alephTool } : {}),
+  ...(row.ocrProvider ? { ocrProvider: row.ocrProvider } : {}),
+  ...(row.ocrInputR2Key ? { ocrInputR2Key: row.ocrInputR2Key } : {}),
+  ...(row.ocrInputFileType ? { ocrInputFileType: row.ocrInputFileType } : {}),
   ...(row.ocrSubmittedAt ? { ocrSubmittedAt: row.ocrSubmittedAt } : {}),
   ocrProgress: row.ocrProgress ?? 0,
   ...(row.ocrStage ? { ocrStage: row.ocrStage } : {}),
@@ -153,10 +162,24 @@ const mapImportJob = (row: Row): ImportJob => ({
   ...(row.deletedByUserId ? { deletedByUserId: row.deletedByUserId } : {}),
 });
 
+const mapImportOcrResult = (row: Row): ImportOcrResult => ({
+  id: row.id,
+  importJobId: row.importJobId,
+  provider: row.provider,
+  ...(row.engineVersion ? { engineVersion: row.engineVersion } : {}),
+  rawText: row.rawText,
+  rawJson: parseJson(row.rawJson) ?? {},
+  converted: Boolean(row.converted),
+  ...(row.sourceMimeType ? { sourceMimeType: row.sourceMimeType } : {}),
+  ...(row.processedMimeType ? { processedMimeType: row.processedMimeType } : {}),
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
+});
+
 const importJobColumns =
-  "id,book_id AS bookId,user_id AS userId,file_name AS fileName,file_type AS fileType,r2_key AS r2Key,status,auto_confirm AS autoConfirm,error_message AS errorMessage,error_code AS errorCode,error_stage AS errorStage,error_request_id AS errorRequestId,error_retryable AS errorRetryable,error_terminal AS errorTerminal,failed_external_job_id AS failedExternalJobId,cancelable,retryable,retry_count AS retryCount,ocr_job_id AS ocrJobId,aleph_tool AS alephTool,ocr_submitted_at AS ocrSubmittedAt,ocr_progress AS ocrProgress,ocr_stage AS ocrStage,ocr_current_page AS ocrCurrentPage,ocr_total_pages AS ocrTotalPages,ocr_completed_at AS ocrCompletedAt,ocr_event_sequence AS ocrEventSequence,created_at AS createdAt,updated_at AS updatedAt,deleted_at AS deletedAt,deleted_by_user_id AS deletedByUserId";
-const importSourceAccessColumns =
-  "id,book_id AS bookId,user_id AS userId,file_name AS fileName,file_type AS fileType,r2_key AS r2Key,status,ocr_job_id AS ocrJobId,source_access_token_hash AS sourceAccessTokenHash,source_access_token_expires_at AS sourceAccessTokenExpiresAt,source_access_token_revoked_at AS sourceAccessTokenRevokedAt,created_at AS createdAt,deleted_at AS deletedAt";
+  "id,book_id AS bookId,user_id AS userId,file_name AS fileName,file_type AS fileType,r2_key AS r2Key,status,auto_confirm AS autoConfirm,error_message AS errorMessage,error_code AS errorCode,error_stage AS errorStage,error_request_id AS errorRequestId,error_retryable AS errorRetryable,error_terminal AS errorTerminal,failed_external_job_id AS failedExternalJobId,cancelable,retryable,retry_count AS retryCount,ocr_job_id AS ocrJobId,ocr_provider AS ocrProvider,ocr_input_r2_key AS ocrInputR2Key,ocr_input_file_type AS ocrInputFileType,ocr_submitted_at AS ocrSubmittedAt,ocr_progress AS ocrProgress,ocr_stage AS ocrStage,ocr_current_page AS ocrCurrentPage,ocr_total_pages AS ocrTotalPages,ocr_completed_at AS ocrCompletedAt,ocr_event_sequence AS ocrEventSequence,created_at AS createdAt,updated_at AS updatedAt,deleted_at AS deletedAt,deleted_by_user_id AS deletedByUserId";
+const importOcrResultColumns =
+  "id,import_job_id AS importJobId,provider,engine_version AS engineVersion,raw_text AS rawText,raw_json AS rawJson,converted,source_mime_type AS sourceMimeType,processed_mime_type AS processedMimeType,created_at AS createdAt,updated_at AS updatedAt";
 const aiConfirmationColumns =
   "id,user_id AS userId,book_id AS bookId,action,status,payload,result,expires_at AS expiresAt,confirmed_at AS confirmedAt,cancelled_at AS cancelledAt,created_at AS createdAt,updated_at AS updatedAt";
 const aiSessionColumns =
@@ -1029,7 +1052,7 @@ export class D1LedgerRepository {
       ...input,
       id: id("import"),
       status: "uploaded",
-      cancelable: false,
+      cancelable: true,
       retryable: false,
       retryCount: 0,
       ocrProgress: 0,
@@ -1101,69 +1124,51 @@ export class D1LedgerRepository {
       .first<Row>();
     return row ? mapImportJob(row) : null;
   }
-  async getImportSourceAccessJob(jobId: string) {
-    const row = await this.db
-      .prepare(`SELECT ${importSourceAccessColumns} FROM import_jobs WHERE id=? AND deleted_at IS NULL`)
-      .bind(jobId)
-      .first<Row>();
-    return row
-      ? {
-          id: String(row.id),
-          bookId: String(row.bookId),
-          userId: String(row.userId),
-          fileName: String(row.fileName),
-          fileType: String(row.fileType),
-          r2Key: String(row.r2Key),
-          status: String(row.status),
-          ocrJobId: row.ocrJobId ? String(row.ocrJobId) : undefined,
-          sourceAccessTokenHash: row.sourceAccessTokenHash ? String(row.sourceAccessTokenHash) : undefined,
-          sourceAccessTokenExpiresAt: row.sourceAccessTokenExpiresAt
-            ? String(row.sourceAccessTokenExpiresAt)
-            : undefined,
-          sourceAccessTokenRevokedAt: row.sourceAccessTokenRevokedAt
-            ? String(row.sourceAccessTokenRevokedAt)
-            : undefined,
-          createdAt: String(row.createdAt),
-          deletedAt: row.deletedAt ? String(row.deletedAt) : undefined,
-        }
-      : null;
-  }
-  async storeImportSourceAccess(jobId: string, tokenHash: string, expiresAt: string) {
-    const timestamp = now();
-    await this.db
-      .prepare(
-        "UPDATE import_jobs SET source_access_token_hash=?,source_access_token_expires_at=?,source_access_token_revoked_at=NULL,updated_at=?,updated_by_user_id=? WHERE id=?",
-      )
-      .bind(tokenHash, expiresAt, timestamp, systemActorId, jobId)
-      .run();
-  }
-  async revokeImportSourceAccess(jobId: string, actorId = systemActorId) {
-    const timestamp = now();
-    await this.db
-      .prepare(
-        "UPDATE import_jobs SET source_access_token_revoked_at=COALESCE(source_access_token_revoked_at,?),updated_at=?,updated_by_user_id=? WHERE id=?",
-      )
-      .bind(timestamp, timestamp, actorId, jobId)
-      .run();
-  }
   async updateImportJob(jobId: string, status: string, errorMessage?: string) {
     const terminal = ["completed", "pending_confirmation", "failed", "cancelled"].includes(status) ? 1 : 0;
     const timestamp = now();
     await this.db
       .prepare(
-        "UPDATE import_jobs SET status=?,error_message=?,cancelable=CASE WHEN ? THEN 0 ELSE cancelable END,retryable=CASE WHEN ? THEN 0 ELSE retryable END,source_access_token_revoked_at=CASE WHEN ? THEN COALESCE(source_access_token_revoked_at,?) ELSE source_access_token_revoked_at END,updated_at=?,updated_by_user_id=? WHERE id=?",
+        "UPDATE import_jobs SET status=?,error_message=?,cancelable=CASE WHEN ? THEN 0 ELSE cancelable END,retryable=CASE WHEN ? THEN 0 ELSE retryable END,updated_at=?,updated_by_user_id=? WHERE id=?",
+      )
+      .bind(status, errorMessage ?? null, terminal, terminal, timestamp, systemActorId, jobId)
+      .run();
+    return this.getImportJob(jobId);
+  }
+  async markImportJobConverting(jobId: string) {
+    const timestamp = now();
+    await this.db
+      .prepare(
+        "UPDATE import_jobs SET status='converting',ocr_progress=10,ocr_stage='conversion_starting',error_message=NULL,error_code=NULL,error_stage=NULL,error_request_id=NULL,error_retryable=0,error_terminal=0,failed_external_job_id=NULL,cancelable=1,retryable=0,updated_at=?,updated_by_user_id=? WHERE id=?",
+      )
+      .bind(timestamp, systemActorId, jobId)
+      .run();
+    return this.getImportJob(jobId);
+  }
+  async setImportJobOcrInput(jobId: string, input: { r2Key: string; fileType: string; converted: boolean }) {
+    const timestamp = now();
+    await this.db
+      .prepare(
+        "UPDATE import_jobs SET ocr_input_r2_key=?,ocr_input_file_type=?,ocr_progress=?,ocr_stage=?,updated_at=?,updated_by_user_id=? WHERE id=?",
       )
       .bind(
-        status,
-        errorMessage ?? null,
-        terminal,
-        terminal,
-        terminal,
-        timestamp,
+        input.r2Key,
+        input.fileType,
+        input.converted ? 35 : 30,
+        input.converted ? "conversion_converted" : "conversion_skipped",
         timestamp,
         systemActorId,
         jobId,
       )
+      .run();
+    return this.getImportJob(jobId);
+  }
+  async markImportJobOcrProcessing(jobId: string, ocrJobId: string, provider = "google-vision") {
+    await this.db
+      .prepare(
+        "UPDATE import_jobs SET status='ocr_processing',ocr_job_id=?,ocr_provider=?,ocr_submitted_at=?,ocr_progress=45,ocr_stage='ocr_processing',ocr_event_sequence=0,error_message=NULL,error_code=NULL,error_stage=NULL,error_request_id=NULL,error_retryable=0,error_terminal=0,failed_external_job_id=NULL,cancelable=1,retryable=0,updated_at=? WHERE id=?",
+      )
+      .bind(ocrJobId, provider, now(), now(), jobId)
       .run();
     return this.getImportJob(jobId);
   }
@@ -1177,22 +1182,56 @@ export class D1LedgerRepository {
       .run();
     return this.getImportJob(jobId);
   }
+  async saveImportOcrResult(input: {
+    importJobId: string;
+    provider: string;
+    engineVersion?: string;
+    rawText: string;
+    rawJson: Record<string, unknown>;
+    converted: boolean;
+    sourceMimeType?: string;
+    processedMimeType?: string;
+    actorId?: string;
+  }) {
+    const timestamp = now();
+    await this.db
+      .prepare(
+        "INSERT INTO import_ocr_results (id,import_job_id,provider,engine_version,raw_text,raw_json,converted,source_mime_type,processed_mime_type,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(import_job_id) DO UPDATE SET provider=excluded.provider,engine_version=excluded.engine_version,raw_text=excluded.raw_text,raw_json=excluded.raw_json,converted=excluded.converted,source_mime_type=excluded.source_mime_type,processed_mime_type=excluded.processed_mime_type,updated_by_user_id=excluded.updated_by_user_id,updated_at=excluded.updated_at,deleted_at=NULL",
+      )
+      .bind(
+        id("import_ocr_result"),
+        input.importJobId,
+        input.provider,
+        input.engineVersion ?? null,
+        input.rawText,
+        JSON.stringify(input.rawJson),
+        input.converted ? 1 : 0,
+        input.sourceMimeType ?? null,
+        input.processedMimeType ?? null,
+        input.actorId ?? systemActorId,
+        input.actorId ?? systemActorId,
+        timestamp,
+        timestamp,
+      )
+      .run();
+    return this.getImportOcrResult(input.importJobId);
+  }
+  async getImportOcrResult(importJobId: string) {
+    const row = await this.db
+      .prepare(
+        `SELECT ${importOcrResultColumns} FROM import_ocr_results WHERE import_job_id=? AND deleted_at IS NULL`,
+      )
+      .bind(importJobId)
+      .first<Row>();
+    return row ? mapImportOcrResult(row) : null;
+  }
   async markImportJobCancelRequested(jobId: string, actorId = systemActorId) {
     const timestamp = now();
     await this.db
       .prepare(
-        "UPDATE import_jobs SET status='cancel_requested',ocr_stage='cancel_requested',cancelable=0,retryable=0,source_access_token_revoked_at=COALESCE(source_access_token_revoked_at,?),updated_at=?,updated_by_user_id=? WHERE id=?",
+        "UPDATE import_jobs SET status='cancel_requested',ocr_stage='cancel_requested',cancelable=0,retryable=0,updated_at=?,updated_by_user_id=? WHERE id=?",
       )
-      .bind(timestamp, timestamp, actorId, jobId)
-      .run();
-    return this.getImportJob(jobId);
-  }
-  async attachOcrJob(jobId: string, ocrJobId: string, alephTool = "ocr") {
-    await this.db
-      .prepare(
-        "UPDATE import_jobs SET status=?,ocr_job_id=?,aleph_tool=?,ocr_submitted_at=?,ocr_progress=0,ocr_stage=?,ocr_event_sequence=0,error_message=NULL,error_code=NULL,error_stage=NULL,error_request_id=NULL,error_retryable=0,error_terminal=0,failed_external_job_id=NULL,cancelable=1,retryable=1,updated_at=? WHERE id=?",
-      )
-      .bind("ocr_processing", ocrJobId, alephTool, now(), "queued", now(), jobId)
+      .bind(timestamp, actorId, jobId)
       .run();
     return this.getImportJob(jobId);
   }
@@ -1240,60 +1279,6 @@ export class D1LedgerRepository {
       .run();
     return this.getImportJob(jobId);
   }
-  async updateAlephState(
-    jobId: string,
-    input: {
-      progress?: number;
-      stage?: string;
-      currentPage?: number | null;
-      totalPages?: number | null;
-      completedAt?: string | null;
-      eventSequence?: number;
-      cancelable?: boolean;
-      retryable?: boolean;
-    },
-  ) {
-    const timestamp = now();
-    const updates = ["updated_at=?"];
-    const values: unknown[] = [timestamp];
-    if (input.progress !== undefined) {
-      updates.unshift("ocr_progress=?");
-      values.unshift(input.progress);
-    }
-    if (input.stage !== undefined) {
-      updates.unshift("ocr_stage=?");
-      values.unshift(input.stage);
-    }
-    if (input.currentPage !== undefined) {
-      updates.unshift("ocr_current_page=?");
-      values.unshift(input.currentPage);
-    }
-    if (input.totalPages !== undefined) {
-      updates.unshift("ocr_total_pages=?");
-      values.unshift(input.totalPages);
-    }
-    if (input.completedAt !== undefined) {
-      updates.unshift("ocr_completed_at=?");
-      values.unshift(input.completedAt);
-    }
-    if (input.cancelable !== undefined) {
-      updates.unshift("cancelable=?");
-      values.unshift(input.cancelable ? 1 : 0);
-    }
-    if (input.retryable !== undefined) {
-      updates.unshift("retryable=?");
-      values.unshift(input.retryable ? 1 : 0);
-    }
-    if (input.eventSequence !== undefined) {
-      updates.unshift("ocr_event_sequence=MAX(ocr_event_sequence, ?)");
-      values.unshift(input.eventSequence);
-    }
-    await this.db
-      .prepare(`UPDATE import_jobs SET ${updates.join(",")} WHERE id=?`)
-      .bind(...values, jobId)
-      .run();
-    return this.getImportJob(jobId);
-  }
   async markImportJobFailed(
     jobId: string,
     input: {
@@ -1308,7 +1293,7 @@ export class D1LedgerRepository {
   ) {
     await this.db
       .prepare(
-        "UPDATE import_jobs SET status='failed',error_message=?,error_code=?,error_stage=?,error_request_id=?,error_retryable=?,error_terminal=?,failed_external_job_id=?,cancelable=0,retryable=?,source_access_token_revoked_at=COALESCE(source_access_token_revoked_at,?),updated_at=? WHERE id=?",
+        "UPDATE import_jobs SET status='failed',error_message=?,error_code=?,error_stage=?,error_request_id=?,error_retryable=?,error_terminal=?,failed_external_job_id=?,cancelable=0,retryable=?,updated_at=? WHERE id=?",
       )
       .bind(
         input.message,
@@ -1320,7 +1305,6 @@ export class D1LedgerRepository {
         input.externalJobId ?? null,
         input.retryable ? 1 : 0,
         now(),
-        now(),
         jobId,
       )
       .run();
@@ -1329,7 +1313,7 @@ export class D1LedgerRepository {
   async prepareImportJobRetry(jobId: string) {
     await this.db
       .prepare(
-        "UPDATE import_jobs SET retry_count=retry_count+1,status='uploaded',ocr_job_id=NULL,aleph_tool=NULL,source_access_token_hash=NULL,source_access_token_expires_at=NULL,source_access_token_revoked_at=NULL,ocr_submitted_at=NULL,ocr_progress=0,ocr_stage=NULL,ocr_current_page=NULL,ocr_total_pages=NULL,ocr_completed_at=NULL,ocr_event_sequence=0,error_message=NULL,error_code=NULL,error_stage=NULL,error_request_id=NULL,error_retryable=0,error_terminal=0,failed_external_job_id=NULL,cancelable=0,retryable=0,updated_at=? WHERE id=?",
+        "UPDATE import_jobs SET retry_count=retry_count+1,status='uploaded',ocr_job_id=NULL,ocr_provider=NULL,ocr_input_r2_key=NULL,ocr_input_file_type=NULL,ocr_submitted_at=NULL,ocr_progress=0,ocr_stage=NULL,ocr_current_page=NULL,ocr_total_pages=NULL,ocr_completed_at=NULL,ocr_event_sequence=0,error_message=NULL,error_code=NULL,error_stage=NULL,error_request_id=NULL,error_retryable=0,error_terminal=0,failed_external_job_id=NULL,cancelable=1,retryable=0,updated_at=? WHERE id=?",
       )
       .bind(now(), jobId)
       .run();
@@ -1450,9 +1434,9 @@ export class D1LedgerRepository {
     const timestamp = now();
     await this.db
       .prepare(
-        "UPDATE import_jobs SET deleted_at=?,deleted_by_user_id=?,source_access_token_revoked_at=COALESCE(source_access_token_revoked_at,?),updated_at=?,updated_by_user_id=? WHERE id=? AND deleted_at IS NULL",
+        "UPDATE import_jobs SET deleted_at=?,deleted_by_user_id=?,updated_at=?,updated_by_user_id=? WHERE id=? AND deleted_at IS NULL",
       )
-      .bind(timestamp, actorId, timestamp, timestamp, actorId, jobId)
+      .bind(timestamp, actorId, timestamp, actorId, jobId)
       .run();
   }
   async getImportedRecord(recordId: string) {

@@ -1029,12 +1029,6 @@
   font-weight: 800;
 }
 
-.ios-import-job button.diagnostic {
-  border-color: #dbe6ff;
-  background: #f3f7ff;
-  color: var(--ios-blue);
-}
-
 .ios-pending-card {
   padding: 14px;
 }

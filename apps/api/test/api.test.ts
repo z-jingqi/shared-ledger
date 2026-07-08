@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AlephAIError, type AlephAIClient, type InvokeRequest } from "@shared-ledger/ai";
+import { LedgerAIError, type LedgerAiTestClient } from "@shared-ledger/ai";
 import { structureForConfirmation } from "@shared-ledger/import";
 import worker, { createApp } from "../src/index";
 import { runtimeAiProvider } from "../src/services/ai";
@@ -25,69 +25,38 @@ const readStreamChunk = (reader: ReadableStreamDefaultReader<Uint8Array>, timeou
     );
   });
 
-function recordingAlephClient(options?: {
-  invokeOutput?: unknown | ((request: any) => unknown);
-  invokeError?: Error;
+type TestObjectRequest = Parameters<LedgerAiTestClient["generateObject"]>[0];
+
+function recordingAiClient(options?: {
+  objectOutput?: unknown | ((request: TestObjectRequest) => unknown);
+  objectError?: Error;
   streamText?: string;
   streamError?: Error;
-  usage?: Awaited<ReturnType<AlephAIClient["getUserUsage"]>>;
 }) {
-  const requests: any[] = [];
-  const client: AlephAIClient = {
-    async invoke<TOutput = unknown>(request: InvokeRequest) {
+  const requests: TestObjectRequest[] = [];
+  const client: LedgerAiTestClient = {
+    async generateObject<TOutput = unknown>(request: TestObjectRequest) {
       requests.push(request);
-      if (options?.invokeError) throw options.invokeError;
+      if (options?.objectError) throw options.objectError;
       const output =
-        typeof options?.invokeOutput === "function"
-          ? options.invokeOutput(request)
-          : (options?.invokeOutput ?? defaultAiInvokeOutput(request));
-      return {
-        requestId: "test-invoke",
-        status: "ok",
-        route: "test-route",
-        provider: "test",
-        model: "test-model",
-        usage: { inputTokens: 1, outputTokens: 1, creditsCharged: 1 },
-        output: output as TOutput,
-      };
+        typeof options?.objectOutput === "function"
+          ? options.objectOutput(request)
+          : (options?.objectOutput ?? defaultAiObjectOutput(request));
+      return output as TOutput;
     },
-    async *stream(request: InvokeRequest) {
-      requests.push(request);
+    async *streamText() {
       if (options?.streamError) throw options.streamError;
-      yield {
-        type: "route",
-        requestId: "test-stream",
-        route: { id: "test-route", name: "test-route", provider: "test", model: "test-model" },
-      };
-      for (const char of options?.streamText ?? "Aleph says hi")
-        yield { type: "delta", requestId: "test-stream", delta: char };
-      yield {
-        type: "usage",
-        requestId: "test-stream",
-        usage: { inputTokens: 1, outputTokens: 1, creditsCharged: 1 },
-      };
-      yield { type: "done", requestId: "test-stream" };
+      for (const char of options?.streamText ?? "AI says hi") yield char;
     },
-    async getUserUsage(params: { project: string; userId: string; plan?: string; env?: string }) {
-      return (
-        options?.usage ?? {
-          project: params.project,
-          userId: params.userId,
-          plan: params.plan ?? "free",
-          periodStart: "2026-06-01T00:00:00.000Z",
-          periodEnd: "2026-07-01T00:00:00.000Z",
-          credits: { used: 3, limit: 100, remaining: 97 },
-          requests: { used: 2, limit: 30, remaining: 28 },
-        }
-      );
+    async generateText() {
+      return options?.streamText ?? "AI says hi";
     },
   };
   return { client, requests };
 }
 
-function defaultAiInvokeOutput(request: InvokeRequest) {
-  const name = responseFormatName(request);
-  if (name === "import_receipt_summary")
+function defaultAiObjectOutput(request: TestObjectRequest) {
+  if (request.schemaName === "import_receipt_summary")
     return {
       type: "expense",
       amount: 1,
@@ -95,9 +64,9 @@ function defaultAiInvokeOutput(request: InvokeRequest) {
       confidence: 0.9,
       warnings: [],
     };
-  if (name === "import_items_chunk") return { items: [], confidence: 0.9, warnings: [] };
-  if (name === "ledger_skill_selection") return { skillName: "general.chat", confidence: 1 };
-  if (name === "ledger_skill_step")
+  if (request.schemaName === "import_items_chunk") return { items: [], confidence: 0.9, warnings: [] };
+  if (request.schemaName === "ledger_skill_selection") return { skillName: "general.chat", confidence: 1 };
+  if (request.schemaName === "ledger_skill_step")
     return {
       skillName: "general.chat",
       toolName: "chat",
@@ -109,14 +78,12 @@ function defaultAiInvokeOutput(request: InvokeRequest) {
   return { records: [] };
 }
 
-function responseFormatName(request: InvokeRequest) {
-  return (request.input.response_format as { json_schema?: { name?: string } } | undefined)?.json_schema
-    ?.name;
+function responseFormatName(request: TestObjectRequest | undefined) {
+  return request?.schemaName;
 }
 
-function responseFormatSchema(request: InvokeRequest) {
-  return (request.input.response_format as { json_schema?: { schema?: unknown } } | undefined)?.json_schema
-    ?.schema as any;
+function requestPayload(request: TestObjectRequest) {
+  return JSON.parse(request.prompt) as Record<string, unknown>;
 }
 
 async function createAiSession(app: ReturnType<typeof createApp>, bookId = "book_home") {
@@ -532,16 +499,13 @@ describe("Hono REST API", () => {
     }
   });
 
-  it("routes chat streams through Aleph ledger.chat after skill selection", async () => {
+  it("routes chat streams through the configured AI client after skill selection", async () => {
     const store = new MemoryLedgerStore();
     const app = createApp(store);
-    const { client, requests } = recordingAlephClient({ streamText: "来自 Aleph" });
+    const { client, requests } = recordingAiClient({ streamText: "来自 AI" });
     const env = {
       APP_ENV: "test",
-      ALEPH_AI_TEST_CLIENT: client,
-      AI_PROVIDER_KEYS: '{"openrouter":"legacy"}',
-      AI_MODEL: "legacy-model",
-      OPENROUTER_API_KEY: "legacy-key",
+      AI_TEST_CLIENT: client,
     } as any;
     const sessionResponse = await app.request(
       "/ai/sessions",
@@ -559,28 +523,14 @@ describe("Hono REST API", () => {
       env,
     );
     const output = await readSse(response);
-    const objectRequest = requests.find((item) => item.task === "ledger.skill_select");
-    const streamRequest = requests.find((item) => item.task === "ledger.chat");
+    const objectRequest = requests.find((item) => item.schemaName === "ledger_skill_selection");
 
     expect(response.status).toBe(200);
     expect(output).toContain("event: message_delta");
     expect(output).toContain("来自");
-    expect(objectRequest).toMatchObject({
-      project: "shared-ledger",
-      env: "test",
-      task: "ledger.skill_select",
-      mode: "object",
-    });
-    expect(streamRequest).toMatchObject({
-      project: "shared-ledger",
-      env: "test",
-      task: "ledger.chat",
-      mode: "stream",
-    });
+    expect(objectRequest?.schemaName).toBe("ledger_skill_selection");
     expect(JSON.stringify(requests)).not.toContain("legacy-model");
     expect(JSON.stringify(requests)).not.toContain("openrouter");
-    expect(objectRequest.input.model).toBeUndefined();
-    expect(streamRequest.input.model).toBeUndefined();
   });
 
   it("streams tool results once without replaying tool text as message deltas", async () => {
@@ -598,8 +548,8 @@ describe("Hono REST API", () => {
       items: [],
     });
     const app = createApp(store);
-    const { client } = recordingAlephClient({
-      invokeOutput: (request: InvokeRequest) =>
+    const { client } = recordingAiClient({
+      objectOutput: (request: TestObjectRequest) =>
         responseFormatName(request) === "ledger_skill_selection"
           ? { skillName: "ledger.analysis", confidence: 1 }
           : {
@@ -611,7 +561,7 @@ describe("Hono REST API", () => {
               isFinal: false,
             },
     });
-    const env = { APP_ENV: "test", ALEPH_AI_TEST_CLIENT: client };
+    const env = { APP_ENV: "test", AI_TEST_CLIENT: client };
     const sessionResponse = await app.request(
       "/ai/sessions",
       { method: "POST", body: JSON.stringify({ bookId: "book_home", title: "新会话" }), headers: aiHeaders },
@@ -651,8 +601,8 @@ describe("Hono REST API", () => {
       items: [],
     });
     const app = createApp(store);
-    const { client, requests } = recordingAlephClient({
-      invokeOutput: (request: InvokeRequest) =>
+    const { client, requests } = recordingAiClient({
+      objectOutput: (request: TestObjectRequest) =>
         responseFormatName(request) === "ledger_skill_selection"
           ? { skillName: "ledger.search", confidence: 1 }
           : {
@@ -665,36 +615,26 @@ describe("Hono REST API", () => {
     });
     const response = await searchWithAgent(app, "金额小于30的数据", {
       APP_ENV: "test",
-      ALEPH_AI_TEST_CLIENT: client,
+      AI_TEST_CLIENT: client,
     });
-    const selectRequest = requests.find((item) => item.task === "ledger.skill_select");
-    const stepRequest = requests.find((item) => item.task === "ledger.skill_step");
+    const selectRequest = requests.find((item) => item.schemaName === "ledger_skill_selection");
+    const stepRequest = requests.find((item) => item.schemaName === "ledger_skill_step");
     const body = await response.json<any>();
     const filterPart = body.parts.find((part: any) => part.type === "filter-result");
 
     expect(response.status).toBe(200);
     expect(filterPart.filters).toMatchObject({ maxAmount: 30, maxStrict: true, sort: "date_desc" });
-    expect(selectRequest).toMatchObject({
-      project: "shared-ledger",
-      task: "ledger.skill_select",
-      mode: "object",
-    });
-    expect(stepRequest).toMatchObject({
-      project: "shared-ledger",
-      task: "ledger.skill_step",
-      mode: "object",
-    });
+    expect(selectRequest?.schemaName).toBe("ledger_skill_selection");
+    expect(stepRequest?.schemaName).toBe("ledger_skill_step");
     expect(responseFormatName(stepRequest)).toBe("ledger_skill_step");
-    expect(stepRequest.input.model).toBeUndefined();
-    expect(stepRequest.input.metadata).toBeUndefined();
     expect((store as any).aiSessions ?? []).toHaveLength(0);
     expect((store as any).aiMessages ?? []).toHaveLength(0);
   });
 
   it("does not run record search for casual one-shot AI search text even if skill selection is wrong", async () => {
     const app = createApp(new MemoryLedgerStore());
-    const { client, requests } = recordingAlephClient({
-      invokeOutput: (request: InvokeRequest) =>
+    const { client, requests } = recordingAiClient({
+      objectOutput: (request: TestObjectRequest) =>
         responseFormatName(request) === "ledger_skill_selection"
           ? { skillName: "ledger.search", confidence: 1 }
           : {
@@ -707,50 +647,41 @@ describe("Hono REST API", () => {
     });
     const response = await searchWithAgent(app, "hi", {
       APP_ENV: "test",
-      ALEPH_AI_TEST_CLIENT: client,
+      AI_TEST_CLIENT: client,
     });
     const body = await response.json<any>();
 
     expect(response.status).toBe(200);
     expect(body.noSearch).toBe(true);
     expect(body.parts[0].text).toContain("不是流水搜索条件");
-    expect(requests.filter((item) => item.task === "ledger.skill_select")).toHaveLength(1);
-    expect(requests.some((item) => item.task === "ledger.skill_step")).toBe(false);
+    expect(requests.filter((item) => item.schemaName === "ledger_skill_selection")).toHaveLength(1);
+    expect(requests.some((item) => item.schemaName === "ledger_skill_step")).toBe(false);
   });
 
-  it("returns Aleph usage from the current user usage endpoint", async () => {
+  it("returns the current configured AI capability from the usage endpoint", async () => {
     const app = createApp(new MemoryLedgerStore());
-    const { client } = recordingAlephClient({
-      usage: {
-        project: "shared-ledger",
-        userId: "user_demo",
-        plan: "free",
-        periodStart: "2026-06-01T00:00:00.000Z",
-        periodEnd: "2026-07-01T00:00:00.000Z",
-        credits: { used: 8, limit: 100, remaining: 92 },
-        requests: { used: 4, limit: 30, remaining: 26 },
-      },
-    });
+    const { client } = recordingAiClient();
     const response = await app.request(
       "/me/ai-usage",
       { headers: aiHeaders },
-      { APP_ENV: "test", ALEPH_AI_TEST_CLIENT: client },
+      { APP_ENV: "test", AI_TEST_CLIENT: client },
     );
     const body = await response.json<any>();
 
     expect(response.status).toBe(200);
     expect(body).toMatchObject({
-      project: "shared-ledger",
-      userId: "user_demo",
-      credits: { used: 8, remaining: 92 },
+      provider: "test",
+      model: "test-model",
+      quota: null,
+      usage: null,
     });
   });
 
-  it("propagates Aleph quota_exceeded for JSON and SSE AI endpoints", async () => {
+  it("propagates quota_exceeded for JSON and SSE AI endpoints", async () => {
     const app = createApp(new MemoryLedgerStore());
-    const quotaError = new AlephAIError("quota_exceeded", "额度已用完", { requestId: "aleph_quota_1" });
-    const { client } = recordingAlephClient({ invokeError: quotaError });
-    const env = { APP_ENV: "test", ALEPH_AI_TEST_CLIENT: client };
+    const quotaError = new LedgerAIError("quota_exceeded", "额度已用完", { requestId: "ai_quota_1" });
+    const { client } = recordingAiClient({ objectError: quotaError });
+    const env = { APP_ENV: "test", AI_TEST_CLIENT: client };
     const session = await createAiSession(app);
     const json = await app.request(
       `/ai/sessions/${session.id}/messages`,
@@ -777,16 +708,16 @@ describe("Hono REST API", () => {
     expect(jsonBody).toMatchObject({
       error: "额度已用完",
       code: "quota_exceeded",
-      requestId: "aleph_quota_1",
+      requestId: "ai_quota_1",
     });
     expect(output).toContain("event: error");
     expect(output).toContain("quota_exceeded");
-    expect(output).toContain("aleph_quota_1");
+    expect(output).toContain("ai_quota_1");
   });
 
-  it("routes import structuring through Aleph object planning", async () => {
-    const { client, requests } = recordingAlephClient({
-      invokeOutput: (request: InvokeRequest) =>
+  it("routes import structuring through the configured object planner", async () => {
+    const { client, requests } = recordingAiClient({
+      objectOutput: (request: TestObjectRequest) =>
         responseFormatName(request) === "import_receipt_summary"
           ? {
               type: "expense",
@@ -804,7 +735,7 @@ describe("Hono REST API", () => {
             },
     });
     const ai = runtimeAiProvider(
-      { APP_ENV: "test", ALEPH_AI_TEST_CLIENT: client },
+      { APP_ENV: "test", AI_TEST_CLIENT: client },
       { id: "user_demo", plan: "pro" },
     );
     const records = await structureForConfirmation({
@@ -822,24 +753,70 @@ describe("Hono REST API", () => {
       items: [{ name: "豆浆", amount: 12, categoryName: "餐饮" }],
       warnings: ["OCR 置信度较低"],
     });
-    expect(summaryRequest).toMatchObject({
-      project: "shared-ledger",
-      task: "ledger.skill_step",
-      mode: "object",
-      user: { id: "user_demo", plan: "pro" },
-    });
     expect(responseFormatName(summaryRequest)).toBe("import_receipt_summary");
     expect(responseFormatName(itemsRequest)).toBe("import_items_chunk");
-    expect(responseFormatSchema(itemsRequest).properties.items.items.required).toContain("amount");
-    expect(summaryRequest.input.max_tokens).toBe(900);
-    expect(itemsRequest.input.max_tokens).toBe(1800);
-    expect(requests.some((request) => request.input.max_tokens === 5000)).toBe(false);
-    expect(summaryRequest.input.model).toBeUndefined();
+    expect(summaryRequest?.maxOutputTokens).toBe(900);
+    expect(itemsRequest?.maxOutputTokens).toBe(1800);
+    expect(requests.some((request) => request.maxOutputTokens === 5000)).toBe(false);
+  });
+
+  it("uses OCR layout rows when AI summary output fails but receipt totals are clear", async () => {
+    const { client, requests } = recordingAiClient({
+      objectOutput: () => {
+        throw new LedgerAIError("provider_error", "No object generated");
+      },
+    });
+    const ai = runtimeAiProvider(
+      { APP_ENV: "test", AI_TEST_CLIENT: client },
+      { id: "user_demo", plan: "pro" },
+    );
+    const records = await structureForConfirmation({
+      bookId: "book_home",
+      userId: "user_demo",
+      normalized: {
+        rawText: [
+          "OCR markdown:",
+          "OCR layout rows derived from Google Vision bounding boxes.",
+          "| name | unitPrice | quantity | lineAmount |",
+          "| --- | --- | --- | --- |",
+          "| 马铃薯 | 3.77 | 0.904 | 3.41 |",
+          "| 乐而雅卫生巾 | 7.50 | 2 | 15.00 |",
+          "",
+          "OCR plain text:",
+          "永辉欢迎您",
+          "交易时间 2026-06-24 19:36:01",
+          "应收 18.41",
+          "实收 18.41",
+        ].join("\n"),
+        warnings: [],
+      },
+      categories: [
+        { name: "购物", type: "expense" },
+        { name: "日用品", type: "expense" },
+      ],
+      ai,
+    });
+
+    expect(records[0]).toMatchObject({
+      type: "expense",
+      amount: 18.41,
+      occurredAt: "2026-06-24T19:36:01",
+      note: "永辉",
+      categoryName: "购物",
+      items: [
+        { name: "马铃薯", amount: 3.41, categoryName: "购物" },
+        { name: "乐而雅卫生巾", amount: 15, categoryName: "日用品" },
+      ],
+    });
+    expect(records[0]?.warnings).toContain("AI 摘要解析失败，已使用 OCR 规则兜底");
+    expect(requests.filter((request) => responseFormatName(request) === "import_items_chunk")).toHaveLength(
+      0,
+    );
   });
 
   it("splits long OCR imports into item chunks and deduplicates overlap", async () => {
-    const { client, requests } = recordingAlephClient({
-      invokeOutput: (request: InvokeRequest) => {
+    const { client, requests } = recordingAiClient({
+      objectOutput: (request: TestObjectRequest) => {
         const name = responseFormatName(request);
         if (name === "import_receipt_summary") {
           return {
@@ -851,8 +828,7 @@ describe("Hono REST API", () => {
             warnings: [],
           };
         }
-        const content = String(request.input.messages.at(-1)?.content ?? "");
-        const chunkIndex = Number(JSON.parse(content).chunkIndex);
+        const chunkIndex = Number(requestPayload(request).chunkIndex);
         return {
           items:
             chunkIndex === 1
@@ -867,7 +843,7 @@ describe("Hono REST API", () => {
       },
     });
     const ai = runtimeAiProvider(
-      { APP_ENV: "test", ALEPH_AI_TEST_CLIENT: client },
+      { APP_ENV: "test", AI_TEST_CLIENT: client },
       { id: "user_demo", plan: "pro" },
     );
     const rawText = Array.from({ length: 120 }, (_, index) => `商品 ${index + 1} 1.00`).join("\n");
@@ -885,13 +861,13 @@ describe("Hono REST API", () => {
     expect(requests.filter((request) => responseFormatName(request) === "import_items_chunk")).toHaveLength(
       2,
     );
-    expect(requests.every((request) => request.input.max_tokens !== 5000)).toBe(true);
+    expect(requests.every((request) => request.maxOutputTokens !== 5000)).toBe(true);
   });
 
-  it("bisects an import item chunk once when Aleph reports oversized input", async () => {
+  it("bisects an import item chunk once when the model reports oversized input", async () => {
     let itemAttempts = 0;
-    const { client, requests } = recordingAlephClient({
-      invokeOutput: (request: InvokeRequest) => {
+    const { client, requests } = recordingAiClient({
+      objectOutput: (request: TestObjectRequest) => {
         const name = responseFormatName(request);
         if (name === "import_receipt_summary") {
           return {
@@ -903,7 +879,7 @@ describe("Hono REST API", () => {
           };
         }
         itemAttempts += 1;
-        if (itemAttempts === 1) throw new AlephAIError("input_too_large", "too large");
+        if (itemAttempts === 1) throw new LedgerAIError("input_too_large", "too large");
         return {
           items: [{ name: `商品${itemAttempts}`, amount: 5 }],
           confidence: 0.8,
@@ -912,7 +888,7 @@ describe("Hono REST API", () => {
       },
     });
     const ai = runtimeAiProvider(
-      { APP_ENV: "test", ALEPH_AI_TEST_CLIENT: client },
+      { APP_ENV: "test", AI_TEST_CLIENT: client },
       { id: "user_demo", plan: "pro" },
     );
     const records = await structureForConfirmation({

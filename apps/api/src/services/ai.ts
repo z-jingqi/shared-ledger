@@ -1,74 +1,128 @@
 import {
-  AlephAIError,
-  createAlephAIClient,
-  createAlephAiProvider,
+  createLedgerAiProvider,
+  createLedgerLanguageModel,
+  LedgerAIError,
   type AiProvider,
-  type AlephAIClient,
   type ErrorCode,
-  type InvokeRequest,
-  type UserUsageResponse,
+  type JsonObject,
+  type LedgerAiTestClient,
+  type LedgerLanguageModelConfig,
 } from "@shared-ledger/ai";
 import type { Env, LedgerUser } from "../types";
 
 type RuntimeAiUser = Pick<LedgerUser, "id" | "plan">;
 
-const project = "shared-ledger";
-
-export function runtimeAlephEnv(env: Env) {
-  return env.ALEPH_AI_ENV ?? env.APP_ENV ?? "prod";
-}
-
-export function runtimeAlephClient(env: Env): AlephAIClient {
-  if (env.ALEPH_AI_TEST_CLIENT) return env.ALEPH_AI_TEST_CLIENT;
-  if (env.APP_ENV === "test" && !env.AI_ORCHESTRATOR) return createTestAlephClient();
-  if (!env.AI_ORCHESTRATOR || !env.ALEPH_AI_SERVICE_TOKEN) {
-    throw new AlephAIError(
-      "validation_failed",
-      "Aleph AI 未配置：需要 AI_ORCHESTRATOR service binding 与 ALEPH_AI_SERVICE_TOKEN",
-    );
-  }
-  return createAlephAIClient({ service: env.AI_ORCHESTRATOR, serviceToken: env.ALEPH_AI_SERVICE_TOKEN });
-}
-
-export function runtimeAiProvider(env: Env, user: RuntimeAiUser): AiProvider {
-  return createAlephAiProvider({
-    client: runtimeAlephClient(env),
-    env: runtimeAlephEnv(env),
-    importTimeoutMs: runtimeImportTimeoutMs(env),
-    importSummaryMaxTokens: runtimePositiveNumber(env.ALEPH_AI_IMPORT_SUMMARY_MAX_TOKENS),
-    importItemsMaxTokens: runtimePositiveNumber(env.ALEPH_AI_IMPORT_ITEMS_MAX_TOKENS),
-    project,
-    user,
-  });
-}
-
-function runtimeImportTimeoutMs(env: Env) {
-  return runtimePositiveNumber(env.ALEPH_AI_IMPORT_TIMEOUT_MS);
-}
-
-function runtimePositiveNumber(value: string | undefined) {
-  const configured = Number(value);
-  return Number.isFinite(configured) && configured > 0 ? configured : undefined;
-}
-
-export async function getRuntimeAiUsage(env: Env, user: RuntimeAiUser): Promise<UserUsageResponse> {
-  return runtimeAlephClient(env).getUserUsage({
-    project,
-    userId: user.id,
-    plan: user.plan,
-    env: runtimeAlephEnv(env),
-  });
-}
-
 export type AiErrorBody = {
   error: string;
   code?: ErrorCode;
   requestId?: string;
-  details?: Record<string, unknown>;
+  details?: JsonObject;
 };
 
+export type RuntimeAiUsage = {
+  provider: string;
+  model: string;
+  quota: null;
+  usage: null;
+};
+
+export function runtimeAiProvider(env: Env, user: RuntimeAiUser): AiProvider {
+  const testClient = env.AI_TEST_CLIENT ?? (env.APP_ENV === "test" ? createTestAiClient() : undefined);
+  if (testClient) {
+    return createLedgerAiProvider({
+      provider: "test",
+      modelId: "test-model",
+      user,
+      testClient,
+      importTimeoutMs: runtimeImportTimeoutMs(env),
+      importSummaryMaxTokens: runtimePositiveNumber(env.AI_IMPORT_SUMMARY_MAX_TOKENS),
+      importItemsMaxTokens: runtimePositiveNumber(env.AI_IMPORT_ITEMS_MAX_TOKENS),
+    });
+  }
+  const config = runtimeLanguageModelConfig(env);
+  return createLedgerAiProvider({
+    provider: config.provider,
+    modelId: config.model,
+    user,
+    model: createLedgerLanguageModel(config),
+    importTimeoutMs: runtimeImportTimeoutMs(env),
+    importSummaryMaxTokens: runtimePositiveNumber(env.AI_IMPORT_SUMMARY_MAX_TOKENS),
+    importItemsMaxTokens: runtimePositiveNumber(env.AI_IMPORT_ITEMS_MAX_TOKENS),
+  });
+}
+
+export function runtimeLanguageModelConfig(env: Env): LedgerLanguageModelConfig {
+  const provider = (env.AI_PROVIDER ?? inferProvider(env)).trim().toLowerCase();
+  if (provider === "openrouter") {
+    const model = env.OPENROUTER_MODEL?.trim();
+    const apiKey = env.OPENROUTER_API_KEY?.trim();
+    if (!model || !apiKey) {
+      throw new LedgerAIError(
+        "validation_failed",
+        "OpenRouter AI 未配置：需要 OPENROUTER_API_KEY 与 OPENROUTER_MODEL",
+      );
+    }
+    return {
+      provider: "openrouter",
+      model,
+      apiKey,
+      baseURL: env.OPENROUTER_BASE_URL?.trim() || undefined,
+      appName: "shared-ledger",
+      appUrl: env.WEB_ORIGIN,
+    };
+  }
+  if (provider === "openai") {
+    const model = env.OPENAI_MODEL?.trim();
+    const apiKey = env.OPENAI_API_KEY?.trim();
+    if (!model || !apiKey) {
+      throw new LedgerAIError("validation_failed", "OpenAI 未配置：需要 OPENAI_API_KEY 与 OPENAI_MODEL");
+    }
+    return {
+      provider: "openai",
+      model,
+      apiKey,
+      baseURL: env.OPENAI_BASE_URL?.trim() || undefined,
+    };
+  }
+  if (provider === "workers-ai") {
+    const model = env.WORKERS_AI_MODEL?.trim();
+    const baseURL = env.WORKERS_AI_BASE_URL?.trim();
+    if (!model || !baseURL) {
+      throw new LedgerAIError(
+        "validation_failed",
+        "Workers AI OpenAI-compatible endpoint 未配置：需要 WORKERS_AI_BASE_URL 与 WORKERS_AI_MODEL",
+      );
+    }
+    return {
+      provider: "workers-ai",
+      model,
+      baseURL,
+      apiKey: env.WORKERS_AI_API_TOKEN?.trim() || undefined,
+    };
+  }
+  throw new LedgerAIError("validation_failed", `不支持的 AI_PROVIDER：${provider}`);
+}
+
+export function getRuntimeAiUsage(env: Env, _user: RuntimeAiUser): RuntimeAiUsage {
+  if (env.AI_TEST_CLIENT || env.APP_ENV === "test") {
+    return {
+      provider: "test",
+      model: "test-model",
+      quota: null,
+      usage: null,
+    };
+  }
+  const config = runtimeLanguageModelConfig(env);
+  return {
+    provider: config.provider,
+    model: config.model,
+    quota: null,
+    usage: null,
+  };
+}
+
 export function aiErrorStatus(error: unknown) {
-  if (!(error instanceof AlephAIError)) return 503;
+  if (!(error instanceof LedgerAIError)) return 503;
   switch (error.code) {
     case "quota_exceeded":
       return 429;
@@ -89,7 +143,7 @@ export function aiErrorStatus(error: unknown) {
 }
 
 export function aiErrorBody(error: unknown, fallback = "AI 服务不可用"): AiErrorBody {
-  if (error instanceof AlephAIError) {
+  if (error instanceof LedgerAIError) {
     return {
       error: error.message,
       code: error.code,
@@ -100,19 +154,12 @@ export function aiErrorBody(error: unknown, fallback = "AI 服务不可用"): Ai
   return { error: error instanceof Error ? error.message : fallback };
 }
 
-function createTestAlephClient(): AlephAIClient {
+export function createTestAiClient(): LedgerAiTestClient {
   return {
-    async invoke<TOutput = unknown>(request: InvokeRequest) {
-      const payload = latestUserPayload(request.input.messages);
-      const format = responseFormatName(request.input.response_format);
-      return {
-        requestId: `test_request_${crypto.randomUUID()}`,
-        status: "ok",
-        route: "test.route",
-        provider: "test",
-        model: "test-model",
-        usage: { inputTokens: 1, outputTokens: 1, creditsCharged: 1 },
-        output: (format === "import_receipt_summary"
+    async generateObject<TOutput>(request: Parameters<LedgerAiTestClient["generateObject"]>[0]) {
+      const payload = latestUserPayload(request.prompt);
+      return (
+        request.schemaName === "import_receipt_summary"
           ? {
               type: "expense",
               amount: 1,
@@ -120,46 +167,40 @@ function createTestAlephClient(): AlephAIClient {
               confidence: 0.9,
               warnings: [],
             }
-          : format === "import_items_chunk"
+          : request.schemaName === "import_items_chunk"
             ? { items: [], confidence: 0.9, warnings: [] }
-            : format === "ledger_skill_selection"
+            : request.schemaName === "ledger_skill_selection"
               ? testSkillSelection(payload)
-              : testSkillStep(payload)) as TOutput,
-      };
+              : testSkillStep(payload)
+      ) as TOutput;
     },
-    async *stream(request: InvokeRequest) {
-      const prompt = latestMessageText(request.input.messages);
-      const text = testChatText(prompt);
-      const requestId = `test_request_${crypto.randomUUID()}`;
-      yield {
-        type: "route",
-        requestId,
-        route: { id: "test-route", name: "test.route", provider: "test", model: "test-model" },
-      };
-      for (const char of text) yield { type: "delta", requestId, delta: char };
-      yield {
-        type: "usage",
-        requestId,
-        usage: { inputTokens: 1, outputTokens: text.length, creditsCharged: 1 },
-      };
-      yield { type: "done", requestId };
+    async *streamText(request) {
+      const prompt = latestMessageText(request.messages);
+      for (const char of testChatText(prompt)) yield char;
     },
-    async getUserUsage(params: { project: string; userId: string; plan?: string; env?: string }) {
-      return {
-        project: params.project,
-        userId: params.userId,
-        plan: params.plan ?? "free",
-        periodStart: "2026-06-01T00:00:00.000Z",
-        periodEnd: "2026-07-01T00:00:00.000Z",
-        credits: { used: 0, limit: 100, remaining: 100 },
-        requests: { used: 0, limit: 30, remaining: 30 },
-      };
+    async generateText(request) {
+      return testChatText(request.prompt);
     },
   };
 }
 
-function latestUserPayload(messages: Array<{ role: string; content?: unknown }>) {
-  const content = latestMessageText(messages);
+function inferProvider(env: Env) {
+  if (env.OPENROUTER_API_KEY) return "openrouter";
+  if (env.OPENAI_API_KEY) return "openai";
+  if (env.WORKERS_AI_BASE_URL) return "workers-ai";
+  return "openrouter";
+}
+
+function runtimeImportTimeoutMs(env: Env) {
+  return runtimePositiveNumber(env.AI_IMPORT_TIMEOUT_MS);
+}
+
+function runtimePositiveNumber(value: string | undefined) {
+  const configured = Number(value);
+  return Number.isFinite(configured) && configured > 0 ? configured : undefined;
+}
+
+function latestUserPayload(content: string) {
   try {
     const parsed = JSON.parse(content);
     return typeof parsed === "object" && parsed ? (parsed as Record<string, unknown>) : { text: content };
@@ -172,13 +213,6 @@ function latestMessageText(messages: Array<{ role: string; content?: unknown }>)
   const message =
     [...messages].reverse().find((item) => item.role === "user") ?? messages[messages.length - 1];
   return typeof message?.content === "string" ? message.content : "";
-}
-
-function responseFormatName(format: unknown) {
-  if (!format || typeof format !== "object") return undefined;
-  const jsonSchema = (format as { json_schema?: unknown }).json_schema;
-  if (!jsonSchema || typeof jsonSchema !== "object") return undefined;
-  return (jsonSchema as { name?: unknown }).name;
 }
 
 function testSkillSelection(payload: Record<string, unknown>) {
@@ -239,6 +273,16 @@ function testSkillStep(payload: Record<string, unknown>) {
       requiresConfirmation: false,
     };
   }
+  if (text.includes("邀请")) {
+    const email = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0];
+    return {
+      skillName: "ledger.members",
+      toolName: "invite-member",
+      args: { ...(email ? { email } : {}), role: "member" },
+      confidence: 1,
+      requiresConfirmation: true,
+    };
+  }
   if (text.includes("删除") && text.includes("分类")) {
     return {
       skillName: "ledger.categories",
@@ -248,7 +292,7 @@ function testSkillStep(payload: Record<string, unknown>) {
       requiresConfirmation: true,
     };
   }
-  if (text.includes("创建") && text.includes("分类")) {
+  if (text.includes("分类")) {
     return {
       skillName: "ledger.categories",
       toolName: "create-category",
@@ -257,81 +301,17 @@ function testSkillStep(payload: Record<string, unknown>) {
       requiresConfirmation: false,
     };
   }
-  if (text.includes("大于100") || text.includes("所有的支出") || text.includes("支出")) {
-    return {
-      skillName: "ledger.search",
-      toolName: "search-records",
-      args: {
-        type: "expense",
-        minAmount: text.includes("大于100") ? 100 : undefined,
-        minStrict: text.includes("大于100"),
-        sort: "date_desc",
-      },
-      confidence: 1,
-      requiresConfirmation: false,
-    };
-  }
-  if (text.includes("收入")) {
-    return {
-      skillName: "ledger.search",
-      toolName: "search-records",
-      args: { type: "income", sort: "date_desc" },
-      confidence: 1,
-      requiresConfirmation: false,
-    };
-  }
   if (text.includes("用户名")) {
+    const name = text.match(/改成\s*([A-Za-z0-9_\-\u4e00-\u9fa5]+)/)?.[1] ?? "SoundOnly2";
     return {
       skillName: "ledger.profile",
       toolName: "update-profile",
-      args: { name: "SoundOnly2" },
+      args: { name },
       confidence: 1,
       requiresConfirmation: false,
     };
   }
-  if (text.includes("头像") && hasAttachments) {
-    return {
-      skillName: "ledger.profile",
-      toolName: "update-profile",
-      args: { avatarFromAttachment: true },
-      confidence: 1,
-      requiresConfirmation: false,
-    };
-  }
-  const inviteEmail = emailLikeToken(text);
-  if (text.includes("邀请") && inviteEmail) {
-    return {
-      skillName: "ledger.members",
-      toolName: "invite-member",
-      args: { email: inviteEmail, role: "member" },
-      confidence: 1,
-      requiresConfirmation: true,
-    };
-  }
-  if (text.includes("mock") && text.includes("创建")) {
-    return {
-      skillName: "ledger.records",
-      toolName: "create-record",
-      args: {
-        records: [
-          { type: "expense", amount: 12, note: "mock 早餐", occurredAt: "2026-06-27" },
-          { type: "income", amount: 88, note: "mock 收入", occurredAt: "2026-06-27" },
-        ],
-      },
-      confidence: 1,
-      requiresConfirmation: false,
-    };
-  }
-  if (text.includes("mock") && text.includes("删除")) {
-    return {
-      skillName: "ledger.records",
-      toolName: "delete-record",
-      args: { q: "mock" },
-      confidence: 1,
-      requiresConfirmation: true,
-    };
-  }
-  if (hasAttachments && (text.includes("导入") || text.includes("保存") || text.includes("入账"))) {
+  if (hasAttachments && skill === "ledger.imports") {
     return {
       skillName: "ledger.imports",
       toolName: "save-attachments",
@@ -340,33 +320,29 @@ function testSkillStep(payload: Record<string, unknown>) {
       requiresConfirmation: false,
     };
   }
+  if (skill === "general.chat") {
+    return {
+      skillName: "general.chat",
+      toolName: "chat",
+      args: { userMessage: testChatText(text) },
+      userMessage: testChatText(text),
+      confidence: 1,
+      requiresConfirmation: false,
+      isFinal: true,
+    };
+  }
   return {
     skillName: skill,
     toolName: "chat",
-    args: {},
-    userMessage: testChatText(text),
-    confidence: 1,
+    args: { userMessage: "我先帮你看一下。" },
+    userMessage: "我先帮你看一下。",
+    confidence: 0.8,
     requiresConfirmation: false,
+    isFinal: true,
   };
 }
 
-function testChatText(text: string) {
-  if (text.includes("笑话")) return "当然：有个账本说自己很透明，因为它从来不藏余额。";
-  if (text.trim()) return `收到：${text}`;
-  return "你好，我可以正常聊天，也可以在你需要时操作账本。";
-}
-
-function emailLikeToken(text: string) {
-  const at = text.indexOf("@");
-  if (at <= 0) return undefined;
-  let start = at;
-  while (start > 0 && !isBoundary(text[start - 1])) start -= 1;
-  let end = at + 1;
-  while (end < text.length && !isBoundary(text[end])) end += 1;
-  const value = text.slice(start, end).trim();
-  return value.includes(".") ? value : undefined;
-}
-
-function isBoundary(char: string | undefined) {
-  return !char || [" ", "，", "。", "、", "；", ";", ",", "\n", "\t"].includes(char);
+function testChatText(prompt: string) {
+  if (/你好|hello|hi/i.test(prompt)) return "你好，我在。";
+  return "这是测试 AI 回复。";
 }

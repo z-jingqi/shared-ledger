@@ -229,7 +229,14 @@ function isSameDay(value: string, now: Date) {
 }
 
 function isProcessingJob(job: ImportJob) {
-  return ["uploaded", "parsing", "ocr_processing", "cancel_requested", "ai_processing"].includes(job.status);
+  return [
+    "uploaded",
+    "converting",
+    "parsing",
+    "ocr_processing",
+    "cancel_requested",
+    "ai_processing",
+  ].includes(job.status);
 }
 
 function formatHomeImportProgress(jobs: ImportJob[]) {

@@ -1740,6 +1740,7 @@ function categoryColor(category: { name?: string }, type: "income" | "expense") 
 function isActiveImport(job: ImportJobStatus) {
   return [
     "uploaded",
+    "converting",
     "parsing",
     "ocr_processing",
     "cancel_requested",

@@ -1,6 +1,6 @@
 import { createApp } from "../../src";
 import { D1LedgerRepository } from "../../src/repository";
-import type { Env, LedgerUser } from "../../src/types";
+import type { Env, ImportPipelineMessage, LedgerUser } from "../../src/types";
 import { createHash } from "node:crypto";
 
 type Row = Record<string, any>;
@@ -14,6 +14,7 @@ type TableName =
   | "categories"
   | "invitations"
   | "import_jobs"
+  | "import_ocr_results"
   | "imported_records"
   | "image_ocr_usage"
   | "ai_sessions"
@@ -36,6 +37,7 @@ const tableNames: TableName[] = [
   "categories",
   "invitations",
   "import_jobs",
+  "import_ocr_results",
   "imported_records",
   "image_ocr_usage",
   "ai_sessions",
@@ -95,6 +97,18 @@ export class TestD1Database {
   }
 }
 
+class FakeQueue {
+  messages: ImportPipelineMessage[] = [];
+
+  async send(message: ImportPipelineMessage) {
+    this.messages.push(message);
+  }
+
+  async sendBatch(messages: Array<{ body: ImportPipelineMessage }>) {
+    for (const message of messages) this.messages.push(message.body);
+  }
+}
+
 class TestD1Statement {
   private values: unknown[] = [];
 
@@ -151,6 +165,17 @@ function insertRow(db: TestD1Database, sql: string, values: unknown[]) {
   columns.forEach((column, index) => {
     row[column] = values[index] ?? null;
   });
+  if (table === "import_jobs") {
+    Object.assign(row, {
+      cancelable: row.cancelable ?? 1,
+      retryable: row.retryable ?? 0,
+      retry_count: row.retry_count ?? 0,
+      ocr_progress: row.ocr_progress ?? 0,
+      ocr_event_sequence: row.ocr_event_sequence ?? 0,
+      error_retryable: row.error_retryable ?? 0,
+      error_terminal: row.error_terminal ?? 0,
+    });
+  }
   if (/or ignore/i.test(sql)) {
     if (
       table === "book_members" &&
@@ -164,6 +189,24 @@ function insertRow(db: TestD1Database, sql: string, values: unknown[]) {
       db.rows.image_ocr_usage.some((item) => item.import_job_id === row.import_job_id)
     )
       return;
+  }
+  if (table === "import_ocr_results" && /on conflict\(import_job_id\)/i.test(sql)) {
+    const existing = db.rows.import_ocr_results.find((item) => item.import_job_id === row.import_job_id);
+    if (existing) {
+      Object.assign(existing, {
+        provider: row.provider,
+        engine_version: row.engine_version,
+        raw_text: row.raw_text,
+        raw_json: row.raw_json,
+        converted: row.converted,
+        source_mime_type: row.source_mime_type,
+        processed_mime_type: row.process_mime_type ?? row.processed_mime_type,
+        updated_by_user_id: row.updated_by_user_id,
+        updated_at: row.updated_at,
+        deleted_at: null,
+      });
+      return;
+    }
   }
   db.rows[table].push(row);
 }
@@ -486,41 +529,62 @@ function updateImportJobRows(rows: Row[], sql: string, values: unknown[]) {
         Object.assign(row, {
           deleted_at: values[0],
           deleted_by_user_id: values[1],
-          source_access_token_revoked_at: sql.includes("source_access_token_revoked_at")
-            ? (row.source_access_token_revoked_at ?? values[2])
-            : row.source_access_token_revoked_at,
-          updated_at: values[sql.includes("source_access_token_revoked_at") ? 3 : 2],
-          updated_by_user_id: values[sql.includes("source_access_token_revoked_at") ? 4 : 3],
+          updated_at: values[2],
+          updated_by_user_id: values[3],
         }),
       );
     return;
   }
   if (sql.includes("SET status=?,error_message=?")) {
-    const jobId = values[sql.includes("source_access_token_revoked_at") ? 8 : 6];
-    const existing = rows.find((row) => row.id === jobId);
+    const jobId = values[6];
     patch(jobId, {
       status: values[0],
       error_message: values[1],
-      source_access_token_revoked_at:
-        sql.includes("source_access_token_revoked_at") && values[4]
-          ? (existing?.source_access_token_revoked_at ?? values[5])
-          : existing?.source_access_token_revoked_at,
-      updated_at: values[sql.includes("source_access_token_revoked_at") ? 6 : 4],
-      updated_by_user_id: values[sql.includes("source_access_token_revoked_at") ? 7 : 5],
+      updated_at: values[4],
+      updated_by_user_id: values[5],
       cancelable: values[2] ? 0 : undefined,
       retryable: values[3] ? 0 : undefined,
     });
     return;
   }
   if (sql.includes("status='cancel_requested'")) {
-    patch(values[3], {
+    patch(values[2], {
       status: "cancel_requested",
       ocr_stage: "cancel_requested",
       cancelable: 0,
       retryable: 0,
-      source_access_token_revoked_at: values[0],
-      updated_at: values[1],
-      updated_by_user_id: values[2],
+      updated_at: values[0],
+      updated_by_user_id: values[1],
+    });
+    return;
+  }
+  if (sql.includes("status='converting'")) {
+    patch(values[2], {
+      status: "converting",
+      ocr_progress: 10,
+      ocr_stage: "conversion_starting",
+      error_message: null,
+      error_code: null,
+      error_stage: null,
+      error_request_id: null,
+      error_retryable: 0,
+      error_terminal: 0,
+      failed_external_job_id: null,
+      cancelable: 1,
+      retryable: 0,
+      updated_at: values[0],
+      updated_by_user_id: values[1],
+    });
+    return;
+  }
+  if (sql.includes("ocr_input_r2_key=?")) {
+    patch(values[6], {
+      ocr_input_r2_key: values[0],
+      ocr_input_file_type: values[1],
+      ocr_progress: values[2],
+      ocr_stage: values[3],
+      updated_at: values[4],
+      updated_by_user_id: values[5],
     });
     return;
   }
@@ -536,33 +600,14 @@ function updateImportJobRows(rows: Row[], sql: string, values: unknown[]) {
     });
     return;
   }
-  if (sql.includes("source_access_token_hash=?")) {
+  if (sql.includes("status='ocr_processing'") && sql.includes("ocr_job_id=?")) {
     patch(values[4], {
-      source_access_token_hash: values[0],
-      source_access_token_expires_at: values[1],
-      source_access_token_revoked_at: null,
-      updated_at: values[2],
-      updated_by_user_id: values[3],
-    });
-    return;
-  }
-  if (sql.includes("SET source_access_token_revoked_at=COALESCE")) {
-    patch(values[3], {
-      source_access_token_revoked_at:
-        rows.find((row) => row.id === values[3])?.source_access_token_revoked_at ?? values[0],
-      updated_at: values[1],
-      updated_by_user_id: values[2],
-    });
-    return;
-  }
-  if (sql.includes("ocr_job_id=?")) {
-    patch(values[6], {
-      status: values[0],
-      ocr_job_id: values[1],
-      aleph_tool: values[2],
-      ocr_submitted_at: values[3],
-      ocr_progress: 0,
-      ocr_stage: values[4],
+      status: "ocr_processing",
+      ocr_job_id: values[0],
+      ocr_provider: values[1],
+      ocr_submitted_at: values[2],
+      ocr_progress: 45,
+      ocr_stage: "ocr_processing",
       ocr_event_sequence: 0,
       error_message: null,
       error_code: null,
@@ -572,13 +617,13 @@ function updateImportJobRows(rows: Row[], sql: string, values: unknown[]) {
       error_terminal: 0,
       failed_external_job_id: null,
       cancelable: 1,
-      retryable: 1,
-      updated_at: values[5],
+      retryable: 0,
+      updated_at: values[3],
     });
     return;
   }
   if (sql.includes("status='failed'")) {
-    patch(values[10], {
+    patch(values[9], {
       status: "failed",
       error_message: values[0],
       error_code: values[1],
@@ -589,9 +634,7 @@ function updateImportJobRows(rows: Row[], sql: string, values: unknown[]) {
       failed_external_job_id: values[6],
       cancelable: 0,
       retryable: values[7],
-      source_access_token_revoked_at:
-        rows.find((row) => row.id === values[10])?.source_access_token_revoked_at ?? values[8],
-      updated_at: values[9],
+      updated_at: values[8],
     });
     return;
   }
@@ -605,15 +648,9 @@ function updateImportJobRows(rows: Row[], sql: string, values: unknown[]) {
           ocr_stage: sql.includes("ocr_stage='ai_text_ready'") ? "ai_text_ready" : row.ocr_stage,
           ocr_progress: sql.includes("ocr_progress=100") ? 100 : row.ocr_progress,
           ocr_job_id: sql.includes("ocr_job_id=NULL") ? null : row.ocr_job_id,
-          source_access_token_hash: sql.includes("source_access_token_hash=NULL")
-            ? null
-            : row.source_access_token_hash,
-          source_access_token_expires_at: sql.includes("source_access_token_expires_at=NULL")
-            ? null
-            : row.source_access_token_expires_at,
-          source_access_token_revoked_at: sql.includes("source_access_token_revoked_at=NULL")
-            ? null
-            : row.source_access_token_revoked_at,
+          ocr_provider: sql.includes("ocr_provider=NULL") ? null : row.ocr_provider,
+          ocr_input_r2_key: sql.includes("ocr_input_r2_key=NULL") ? null : row.ocr_input_r2_key,
+          ocr_input_file_type: sql.includes("ocr_input_file_type=NULL") ? null : row.ocr_input_file_type,
           updated_at: values[0],
           cancelable: sql.includes("cancelable=1") ? 1 : row.cancelable,
           retryable: sql.includes("retryable=0") ? 0 : row.retryable,
@@ -694,6 +731,7 @@ function executeSelect(db: TestD1Database, sql: string, values: unknown[]) {
   if (lower.includes("from auth_sessions session")) return selectSessionUsers(db, values);
   if (lower.includes("from refresh_tokens")) return selectRefreshTokens(db, values);
   if (lower.includes("from import_jobs")) return selectImportJobs(db, lower, values);
+  if (lower.includes("from import_ocr_results")) return selectImportOcrResults(db, values);
   if (lower.includes("from imported_records")) return selectImportedRecords(db, lower, values);
   if (lower.includes("from image_ocr_usage"))
     return [
@@ -910,24 +948,25 @@ function selectImportJobs(db: TestD1Database, lower: string, values: unknown[]) 
   if (lower.includes("where id=?")) rows = rows.filter((row) => row.id === values[0]);
   else if (lower.includes("where user_id=?")) rows = rows.filter((row) => row.user_id === values[0]);
   else if (lower.includes("where book_id=?")) rows = rows.filter((row) => row.book_id === values[0]);
-  if (lower.includes("source_access_token_hash")) {
-    return rows.map((row) => ({
-      id: row.id,
-      bookId: row.book_id,
-      userId: row.user_id,
-      fileName: row.file_name,
-      fileType: row.file_type,
-      r2Key: row.r2_key,
-      status: row.status,
-      ocrJobId: row.ocr_job_id,
-      sourceAccessTokenHash: row.source_access_token_hash,
-      sourceAccessTokenExpiresAt: row.source_access_token_expires_at,
-      sourceAccessTokenRevokedAt: row.source_access_token_revoked_at,
-      createdAt: row.created_at,
-      deletedAt: row.deleted_at,
-    }));
-  }
   return rows.map(importJobRow);
+}
+
+function selectImportOcrResults(db: TestD1Database, values: unknown[]) {
+  return db.rows.import_ocr_results
+    .filter((row) => row.import_job_id === values[0] && !row.deleted_at)
+    .map((row) => ({
+      id: row.id,
+      importJobId: row.import_job_id,
+      provider: row.provider,
+      engineVersion: row.engine_version,
+      rawText: row.raw_text,
+      rawJson: row.raw_json,
+      converted: row.converted,
+      sourceMimeType: row.source_mime_type,
+      processedMimeType: row.processed_mime_type,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
 }
 
 function selectImportedRecords(db: TestD1Database, lower: string, values: unknown[]) {
@@ -1048,7 +1087,9 @@ function importJobRow(row: Row) {
     retryable: row.retryable,
     retryCount: row.retry_count,
     ocrJobId: row.ocr_job_id,
-    alephTool: row.aleph_tool,
+    ocrProvider: row.ocr_provider,
+    ocrInputR2Key: row.ocr_input_r2_key,
+    ocrInputFileType: row.ocr_input_file_type,
     ocrSubmittedAt: row.ocr_submitted_at,
     ocrProgress: row.ocr_progress,
     ocrStage: row.ocr_stage,
@@ -1112,18 +1153,23 @@ export type D1TestContext = ReturnType<typeof createD1TestApp>;
 export function createD1TestApp() {
   const db = new TestD1Database();
   const files = new FakeR2Bucket();
-  const alephTools = new FakeAlephToolsBinding();
+  const importQueue = new FakeQueue();
   const app = createApp();
   const env: Env = {
     APP_ENV: "test",
     DB: db as unknown as D1Database,
     FILES: files as unknown as R2Bucket,
-    ALEPH_TOOLS: alephTools,
-    ALEPH_TOOLS_API_KEY: "test-tools-key",
-    ALEPH_TOOLS_WEBHOOK_SECRET: "test-webhook-secret",
-    API_PUBLIC_ORIGIN: "https://api.test",
+    IMPORT_PIPELINE_QUEUE: importQueue as unknown as Queue<ImportPipelineMessage>,
+    GOOGLE_VISION_API_KEY: "test-google-vision-key",
   };
-  return { app, db, files, alephTools, env, repository: new D1LedgerRepository(db as unknown as D1Database) };
+  return {
+    app,
+    db,
+    files,
+    importQueue,
+    env,
+    repository: new D1LedgerRepository(db as unknown as D1Database),
+  };
 }
 
 export function authHeaders(
@@ -1294,75 +1340,4 @@ function arrayBufferFromView(view: ArrayBufferView) {
   const copy = new Uint8Array(view.byteLength);
   copy.set(new Uint8Array(view.buffer, view.byteOffset, view.byteLength));
   return copy.buffer;
-}
-
-class FakeAlephToolsBinding {
-  requests: Request[] = [];
-  nextJobId = "ocr_test_job";
-  jobStatus: Record<string, any> = {};
-  result: Record<string, any> = {};
-  platformOk = true;
-
-  async fetch(request: Request) {
-    this.requests.push(request);
-    const url = new URL(request.url);
-    if (url.pathname === "/v1/platform/check") {
-      const jobId = url.searchParams.get("jobId");
-      const job = jobId ? this.jobStatus[jobId] : undefined;
-      return Response.json({
-        success: true,
-        data: {
-          ok: this.platformOk,
-          checks: {
-            auth: { ok: true, clientId: "shared-ledger-preview" },
-            storage: { ok: true, d1: { ok: true }, r2: { ok: true } },
-            processing: { ok: true, workflow: true, queue: true },
-            googleVision: { ok: true, mode: "service_account" },
-            imageConversion: { ok: true, requiredFor: ["heic", "heif"] },
-          },
-          ...(jobId
-            ? {
-                job: {
-                  found: Boolean(job),
-                  ...(job
-                    ? {
-                        snapshot: job,
-                        storage: {
-                          sourceAvailable: true,
-                          resultObjectAvailable: job.status === "ready",
-                        },
-                      }
-                    : {}),
-                },
-              }
-            : {}),
-        },
-        requestId: "diag_test",
-      });
-    }
-    if (url.pathname === "/v1/tools/ocr") {
-      const jobId = `${this.nextJobId}_${this.requests.length}`;
-      this.jobStatus[jobId] = { jobId, status: "queued", progress: 0, resultAvailable: false };
-      return Response.json({ success: true, data: this.jobStatus[jobId] });
-    }
-    const jobId = url.pathname.split("/")[3];
-    if (url.pathname.endsWith("/result")) {
-      return Response.json({
-        success: true,
-        data: this.result[jobId] ?? {
-          plainText: "早餐 12 元",
-          markdown: "早餐 12 元",
-          pages: [{ text: "早餐 12 元", confidence: 0.95 }],
-        },
-      });
-    }
-    if (url.pathname.endsWith("/cancel")) {
-      this.jobStatus[jobId] = { ...(this.jobStatus[jobId] ?? { jobId }), status: "cancel_requested" };
-      return Response.json({ success: true, data: this.jobStatus[jobId] });
-    }
-    return Response.json({
-      success: true,
-      data: this.jobStatus[jobId] ?? { jobId, status: "ready", resultAvailable: true },
-    });
-  }
 }

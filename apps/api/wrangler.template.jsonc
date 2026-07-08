@@ -3,24 +3,13 @@
   "name": "shared-ledger-api-__ENV__",
   "main": "src/index.ts",
   "compatibility_date": "2026-06-21",
-  "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "vars": {
     "APP_ENV": "__ENV__",
     "WEB_ORIGIN": "__WEB_ORIGIN__",
-    "API_PUBLIC_ORIGIN": "__API_PUBLIC_ORIGIN__",
-    "ALEPH_AI_ENV": "__ALEPH_AI_ENV__",
+    "AI_PROVIDER": "__AI_PROVIDER__",
   },
-  "services": [
-    {
-      "binding": "AI_ORCHESTRATOR",
-      "service": "__ALEPH_AI_SERVICE__",
-    },
-    {
-      "binding": "ALEPH_TOOLS",
-      "service": "__ALEPH_TOOLS_SERVICE__",
-    },
-  ],
+  "limits": { "cpu_ms": 300000 },
   "d1_databases": [
     {
       "binding": "DB",
@@ -30,5 +19,23 @@
     },
   ],
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "__R2_BUCKET__" }],
+  "queues": {
+    "producers": [
+      {
+        "binding": "IMPORT_PIPELINE_QUEUE",
+        "queue": "__IMPORT_PIPELINE_QUEUE__",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "__IMPORT_PIPELINE_QUEUE__",
+        "max_batch_size": 1,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+        "dead_letter_queue": "__IMPORT_PIPELINE_DLQ__",
+        "max_concurrency": 1,
+      },
+    ],
+  },
   "routes": [{ "pattern": "__WEB_DOMAIN__/api/*", "zone_name": "__ZONE_NAME__" }],
 }

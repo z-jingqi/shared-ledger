@@ -7,11 +7,11 @@ import { D1LedgerRepository } from "../repository";
 import { requireMember, requireUser } from "../services/access";
 import { aiErrorBody, aiErrorStatus, runtimeAiProvider } from "../services/ai";
 import {
-  cancelAiToolConfirmation,
-  confirmAiTool,
-  executeAiTool,
-  type AiToolRepository,
-} from "../services/ai-tools";
+  cancelAiActionConfirmation,
+  confirmAiAction,
+  executeAiAction,
+  type AiActionRepository,
+} from "../services/ai-actions";
 import type { MemoryLedgerStore } from "../store";
 import type { Env, LedgerUser } from "../types";
 
@@ -47,7 +47,7 @@ function testMemoryEnabled(context: any, store?: MemoryLedgerStore) {
   );
 }
 
-function aiRepository(context: any, store?: MemoryLedgerStore): AiToolRepository | undefined {
+function aiRepository(context: any, store?: MemoryLedgerStore): AiActionRepository | undefined {
   if (context.env.DB) return new D1LedgerRepository(context.env.DB);
   return testMemoryEnabled(context, store) ? store : undefined;
 }
@@ -220,7 +220,7 @@ export function registerAiRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryLed
       origin: new URL(context.req.url).origin,
       attachments: [],
     };
-    const result = await confirmAiTool(runtime, context.req.param("id"));
+    const result = await confirmAiAction(runtime, context.req.param("id"));
     return "error" in result.body
       ? jsonError(context, result.body.error ?? "确认失败", result.status)
       : context.json(result.body, result.status as 200);
@@ -231,7 +231,7 @@ export function registerAiRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryLed
     if (user instanceof Response) return user;
     const repository = requireAiRepository(context, store);
     if (repository instanceof Response) return repository;
-    const result = await cancelAiToolConfirmation(repository, user.id, context.req.param("id"));
+    const result = await cancelAiActionConfirmation(repository, user.id, context.req.param("id"));
     return "error" in result.body
       ? jsonError(context, result.body.error ?? "取消确认失败", result.status)
       : context.json(result.body, result.status as 200);
@@ -241,7 +241,7 @@ export function registerAiRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryLed
 async function runOneShotRecordSearch(
   context: any,
   store: MemoryLedgerStore | undefined,
-  repository: AiToolRepository,
+  repository: AiActionRepository,
   user: LedgerUser,
   body: z.infer<typeof recordSearchSchema>,
 ) {
@@ -321,7 +321,7 @@ async function runOneShotRecordSearch(
     origin: new URL(context.req.url).origin,
     attachments: [],
   };
-  const result = await executeAiTool(runtime, {
+  const result = await executeAiAction(runtime, {
     ...step,
     skillName: "ledger.search",
     toolName: "search-records",
@@ -361,7 +361,7 @@ function normalizeOneShotSearchSkill(
 async function runAiMessage(
   context: any,
   store: MemoryLedgerStore | undefined,
-  repository: AiToolRepository,
+  repository: AiActionRepository,
   user: LedgerUser,
   sessionId: string,
   body: AiRequestBody,
@@ -515,7 +515,7 @@ async function runAiMessage(
           actorId: user.id,
         });
       }
-      const result = await executeAiTool(runtime, step);
+      const result = await executeAiAction(runtime, step);
       parts.push(...result.parts);
       const observation = {
         stepIndex,
@@ -660,7 +660,7 @@ async function readAiRequest(context: any): Promise<AiRequestBody> {
   };
 }
 
-async function buildModelContext(repository: AiToolRepository, user: LedgerUser, bookId?: string) {
+async function buildModelContext(repository: AiActionRepository, user: LedgerUser, bookId?: string) {
   const books =
     repository instanceof D1LedgerRepository
       ? await repository.listBooks(user.id)
@@ -695,7 +695,7 @@ async function buildModelContext(repository: AiToolRepository, user: LedgerUser,
 }
 
 async function appendMessage(
-  repository: AiToolRepository,
+  repository: AiActionRepository,
   sessionId: string,
   actorId: string,
   role: "user" | "assistant" | "system" | "tool",

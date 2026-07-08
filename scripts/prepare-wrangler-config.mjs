@@ -24,17 +24,15 @@ const values = {
   __ENV__: environment,
   __WEB_DOMAIN__: webDomain,
   __WEB_ORIGIN__: webOrigin,
-  __API_PUBLIC_ORIGIN__: `${webOrigin}/api`,
   __ZONE_NAME__: "aleph-cat.com",
-  __ALEPH_AI_ENV__: envValue(`ALEPH_AI_ENV_${suffix}`) ?? (isProd ? "prod" : "preview"),
-  __ALEPH_AI_SERVICE__:
-    envValue(`ALEPH_AI_SERVICE_${suffix}`) ??
-    (isProd ? "aleph-ai-orchestrator" : "aleph-ai-orchestrator-preview"),
-  __ALEPH_TOOLS_SERVICE__:
-    envValue(`ALEPH_TOOLS_SERVICE_${suffix}`) ??
-    (isProd ? "aleph-tools-gateway-prod" : "aleph-tools-gateway-preview"),
+  __AI_PROVIDER__: envValue(`AI_PROVIDER_${suffix}`) ?? "openrouter",
   __D1_DATABASE_ID__: target === "api" ? await resolveD1DatabaseId() : "__D1_DATABASE_ID__",
   __R2_BUCKET__: envValue(`CLOUDFLARE_R2_BUCKET_${suffix}`) ?? `shared-ledger-files-${environment}`,
+  __IMPORT_PIPELINE_QUEUE__:
+    envValue(`CLOUDFLARE_IMPORT_PIPELINE_QUEUE_${suffix}`) ?? `shared-ledger-import-pipeline-${environment}`,
+  __IMPORT_PIPELINE_DLQ__:
+    envValue(`CLOUDFLARE_IMPORT_PIPELINE_DLQ_${suffix}`) ??
+    `shared-ledger-import-pipeline-${environment}-dlq`,
 };
 const appDir = resolve(repoRoot, "apps", target);
 const template = "wrangler.template.jsonc";

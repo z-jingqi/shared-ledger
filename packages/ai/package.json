@@ -9,8 +9,12 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^4.0.8",
+    "@ai-sdk/openai-compatible": "^3.0.5",
+    "@openrouter/ai-sdk-provider": "^3.0.0",
     "@shared-ledger/ledger-skills": "workspace:*",
     "@shared-ledger/shared": "workspace:*",
+    "ai": "^7.0.16",
     "zod": "^3.24.3"
   },
   "devDependencies": {

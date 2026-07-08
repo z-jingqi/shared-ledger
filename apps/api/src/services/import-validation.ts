@@ -39,6 +39,7 @@ export function imageImportFileType(file: File) {
   if (name.endsWith(".webp")) return "image/webp";
   if (name.endsWith(".heic")) return "image/heic";
   if (name.endsWith(".heif")) return "image/heif";
+  if (name.endsWith(".avif")) return "image/avif";
   if (name.endsWith(".tif") || name.endsWith(".tiff")) return "image/tiff";
   if (name.endsWith(".bmp")) return "image/bmp";
   if (name.endsWith(".raw")) return "image/x-raw";

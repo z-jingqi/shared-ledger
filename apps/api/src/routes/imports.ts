@@ -3,17 +3,7 @@ import type { Context, Hono } from "hono";
 import { jsonError } from "../lib/http";
 import { D1LedgerRepository, importJobRetentionDays, type ImportJobStatusFilter } from "../repository";
 import { requireMember, requireUser } from "../services/access";
-import {
-  cancelAlephOcrJob,
-  cancelImportJob,
-  failAlephOcrJob,
-  finalizeAlephOcrJob,
-  markFailed,
-  requestAlephOcrCancellation,
-  retryImportJob,
-  submitAlephOcrJob,
-  updateAlephSnapshot,
-} from "../services/imports";
+import { cancelImportJob, markFailed, retryImportJob, submitOcrJob } from "../services/imports";
 import {
   assertImageImportFile,
   assertImageOcrQuota,
@@ -24,9 +14,6 @@ import {
   shanghaiDateRange,
   shanghaiUsageDate,
 } from "../services/import-validation";
-import { bearerToken, constantTimeEqual, hashImportSourceAccessToken } from "../services/import-source";
-import type { AlephErrorPayload, AlephOcrJob } from "../services/ocr";
-import { runtimeOcrClient } from "../services/ocr";
 import type { ImportJob, MemoryLedgerStore } from "../store";
 import type { Env } from "../types";
 
@@ -66,9 +53,7 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
         httpMetadata: { contentType: resolvedFileType },
         customMetadata: { importJobId: job.id, bookId: input.bookId, uploadedBy: input.userId },
       });
-      const submitted = await submitAlephOcrJob(context.env, input.repository, job, {
-        requestOrigin: new URL(context.req.url).origin,
-      });
+      const submitted = await submitOcrJob(context.env, input.repository, job);
       if (!submitted) throw new Error("导入任务创建失败");
       return submitted;
     } catch (error) {
@@ -76,13 +61,6 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
       throw error;
     }
   };
-
-  app.get("/internal/aleph-tools/import-sources/:importJobId", (context) =>
-    serveInternalImportSource(context),
-  );
-  app.on("HEAD", "/internal/aleph-tools/import-sources/:importJobId", (context) =>
-    serveInternalImportSource(context),
-  );
 
   app.get("/me/import-usage", async (context) => {
     const user = await requireUser(context, store);
@@ -186,66 +164,6 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     });
   });
 
-  app.post("/imports/aleph-webhook", async (context) => {
-    if (!context.env.DB) return jsonError(context, "D1 运行时不可用", 503);
-    const secret = context.env.ALEPH_TOOLS_WEBHOOK_SECRET;
-    if (!secret) return jsonError(context, "ALEPH_TOOLS_WEBHOOK_SECRET 未配置", 503);
-
-    const rawBody = await context.req.text();
-    const timestamp = context.req.header("X-Aleph-Tools-Timestamp");
-    const signature = context.req.header("X-Aleph-Tools-Signature");
-    if (!(await verifyAlephWebhookSignature(secret, timestamp, signature, rawBody))) {
-      return jsonError(context, "Aleph Tools webhook 签名无效", 401);
-    }
-
-    const payload = safeJson(rawBody) as AlephWebhookPayload | null;
-    const importJobId = payload?.metadata?.importJobId;
-    if (!payload?.jobId || !importJobId) return jsonError(context, "Aleph Tools webhook metadata 缺失", 400);
-
-    const repository = new D1LedgerRepository(context.env.DB);
-    const job = await repository.getImportJob(importJobId);
-    if (!job) return jsonError(context, "导入任务不存在", 404);
-    const phase = resolveAlephPhase(job, payload);
-    if (!phase) return jsonError(context, "Aleph Tools jobId 与导入任务不匹配", 400);
-
-    const sequence = sequenceFromEventId(payload.eventId);
-    if (payload.job) await updateAlephSnapshot(repository, job.id, payload.job, sequence);
-    if (payload.event?.endsWith(".cancel_requested") || payload.job?.status === "cancel_requested") {
-      await requestAlephOcrCancellation(repository, job.id, sequence);
-      return context.json({ ok: true });
-    }
-    if (payload.event?.endsWith(".cancelled") || payload.job?.status === "cancelled") {
-      await cancelAlephOcrJob(repository, job.id, sequence);
-      return context.json({ ok: true });
-    }
-    if (payload.event?.endsWith(".failed") || payload.job?.status === "failed") {
-      await failAlephOcrJob(
-        repository,
-        job.id,
-        payload.error ?? payload.job?.error ?? "Aleph Tools 处理失败",
-        sequence,
-        phase,
-      );
-      return context.json({ ok: true });
-    }
-    if (!payload.event?.endsWith(".ready") && payload.job?.status !== "ready") {
-      return context.json({ ok: true });
-    }
-
-    const finalize = finalizeAlephOcrJob(context.env, repository, job.id).catch(async (error) => {
-      await repository.markImportJobFailed(job.id, {
-        message: error instanceof Error ? error.message : "导入处理失败",
-        code: "INTERNAL_ERROR",
-        stage: phase,
-        retryable: true,
-        terminal: false,
-      });
-    });
-    context.executionCtx?.waitUntil(finalize);
-    if (!context.executionCtx) await finalize;
-    return context.json({ ok: true });
-  });
-
   app.get("/imports/status-stream", async (context) => {
     const user = await requireUser(context, store);
     if (user instanceof Response) return user;
@@ -293,65 +211,16 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
         const run = async () => {
           try {
             jobs.forEach((job) => job && sendJob(job));
-            const sendOcrRawResult = shouldExposeOcrRawDebugData(context.env)
-              ? (payload: unknown) => sendEvent("ocr-result", payload)
-              : undefined;
-            const activeAlephJobs = jobs.filter((job): job is ImportJob => {
-              if (!job) return false;
-              return (
-                Boolean(job.ocrJobId) &&
-                (job.status === "ocr_processing" || job.status === "cancel_requested") &&
-                !terminalImportStatuses.has(job.status)
-              );
-            });
-            const activeLocalJobs = jobs.filter(
-              (job): job is ImportJob => job !== null && job.status === "ai_processing",
+            const activeJobs = jobs.filter(
+              (job): job is ImportJob => job !== null && !terminalImportStatuses.has(job.status),
             );
-            if (!activeAlephJobs.length) {
-              if (activeLocalJobs.length) {
-                const hasActiveLocalJobs = await watchLocalImportJobs(
-                  context.env,
-                  repository,
-                  activeLocalJobs,
-                  async (nextJob) => {
-                    if (stopped) return;
-                    sendJob(nextJob);
-                  },
-                );
-                if (!stopped)
-                  sendEvent("stream-idle", {
-                    reason: "local_processing",
-                    retryAfterMs: hasActiveLocalJobs ? localImportReconnectDelayMs(context.env) : 0,
-                  });
-              }
-              close();
-              return;
-            }
-            const localWatchers = activeLocalJobs.length
-              ? [
-                  watchLocalImportJobs(context.env, repository, activeLocalJobs, async (nextJob) => {
-                    if (stopped) return;
-                    sendJob(nextJob);
-                  }),
-                ]
-              : [];
-            const localWatchResults = await Promise.all([
-              ...activeAlephJobs.map((job) =>
-                proxyAlephEvents(
-                  context.env,
-                  repository,
-                  job,
-                  async (nextJob) => {
-                    if (stopped) return;
-                    sendJob(nextJob);
-                  },
-                  sendOcrRawResult,
-                ),
-              ),
-              ...localWatchers,
-            ]);
-            const hasActiveLocalJobs = localWatchResults.some((result) => result === true);
-            if (hasActiveLocalJobs && !stopped) {
+            const hasActiveJobs = activeJobs.length
+              ? await watchLocalImportJobs(context.env, repository, activeJobs, async (nextJob) => {
+                  if (stopped) return;
+                  sendJob(nextJob);
+                })
+              : false;
+            if (hasActiveJobs && !stopped) {
               sendEvent("stream-idle", {
                 reason: "local_processing",
                 retryAfterMs: localImportReconnectDelayMs(context.env),
@@ -445,7 +314,12 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     }
     await repository.softDeleteImportedRecordsForJob(job.id, user.id);
     await repository.softDeleteImportJob(job.id, user.id);
-    await context.env.FILES?.delete(job.r2Key).catch(() => undefined);
+    await Promise.all([
+      context.env.FILES?.delete(job.r2Key).catch(() => undefined),
+      job.ocrInputR2Key && job.ocrInputR2Key !== job.r2Key
+        ? context.env.FILES?.delete(job.ocrInputR2Key).catch(() => undefined)
+        : Promise.resolve(),
+    ]);
     return new Response(null, { status: 204 });
   });
 
@@ -461,7 +335,7 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     if (job.status !== "failed" || !job.errorRetryable)
       return jsonError(context, "该导入任务当前不可重试", 409);
     try {
-      const result = await retryImportJob(context.env, repository, job, new URL(context.req.url).origin);
+      const result = await retryImportJob(context.env, repository, job);
       const nextJob = Array.isArray(result) ? await repository.getImportJob(job.id) : result;
       const responseJob = nextJob ?? (await repository.getImportJob(job.id));
       return context.json({ job: responseJob ? importJobStatusPayload(responseJob) : null });
@@ -619,164 +493,6 @@ async function completeImportJobIfNoPending(repository: D1LedgerRepository, job:
   return (await repository.getImportJob(job.id)) ?? job;
 }
 
-type AlephWebhookPayload = {
-  event?: string;
-  eventId?: string;
-  jobId?: string;
-  job?: Partial<AlephOcrJob>;
-  resultUrl?: string;
-  outputUrl?: string;
-  error?: string | AlephErrorPayload;
-  metadata?: { importJobId?: string; phase?: "ocr" };
-  createdAt?: string;
-};
-
-type AlephSseMessage = {
-  id?: string;
-  event?: string;
-  data?: string;
-};
-
-function resolveAlephPhase(job: ImportJob, payload: AlephWebhookPayload): "ocr" | undefined {
-  if (payload.metadata?.phase === "ocr" && job.ocrJobId === payload.jobId) return "ocr";
-  if (job.ocrJobId === payload.jobId) return "ocr";
-  return undefined;
-}
-
-export async function verifyAlephWebhookSignature(
-  secret: string,
-  timestamp: string | undefined,
-  signature: string | undefined,
-  rawBody: string,
-) {
-  if (!timestamp || !signature) return false;
-  const numericTimestamp = Number(timestamp);
-  const createdAt = Number.isFinite(numericTimestamp) ? numericTimestamp : Date.parse(timestamp);
-  if (!Number.isFinite(createdAt) || Math.abs(Date.now() - createdAt) > 5 * 60_000) return false;
-  const expected = await hmacSha256Hex(secret, `${timestamp}.${rawBody}`);
-  const provided = signature.startsWith("sha256=") ? signature.slice("sha256=".length) : "";
-  return timingSafeEqualHex(expected, provided);
-}
-
-async function proxyAlephEvents(
-  env: Env,
-  repository: D1LedgerRepository,
-  job: ImportJob,
-  onJob: (job: ImportJob) => Promise<void> | void,
-  onOcrRawResult?: (payload: unknown) => Promise<void> | void,
-) {
-  const externalJobId = job.ocrJobId;
-  if (!externalJobId) return;
-
-  if (await syncAlephJobSnapshot(env, repository, job, onJob, onOcrRawResult)) return;
-
-  const stream = await runtimeOcrClient(env).streamJobEvents(externalJobId, job.ocrEventSequence);
-  for await (const message of parseSseStream(stream)) {
-    if (message.event === "ping" || !message.data) continue;
-    const payload = safeJson(message.data) as (Partial<AlephOcrJob> & { job?: Partial<AlephOcrJob> }) | null;
-    if (!payload) continue;
-    const alephJob = payload.job ?? payload;
-    const sequence = sequenceFromEventId(message.id);
-    const isCancelRequested =
-      message.event === "job.cancel_requested" || alephJob.status === "cancel_requested";
-    const isCancelled = message.event === "job.cancelled" || alephJob.status === "cancelled";
-    const isFailed = message.event === "job.failed" || alephJob.status === "failed";
-    const isReady = message.event === "job.ready" || alephJob.status === "ready";
-
-    if (alephJob) {
-      const updated = await updateAlephSnapshot(repository, job.id, alephJob, sequence);
-      if (updated) await onJob(updated);
-    }
-    if (isCancelRequested) {
-      const requested = await requestAlephOcrCancellation(repository, job.id, sequence);
-      if (requested) await onJob(requested);
-      continue;
-    }
-    if (isCancelled) {
-      const cancelled = await cancelAlephOcrJob(repository, job.id, sequence);
-      if (cancelled) await onJob(cancelled);
-      return;
-    }
-    if (isFailed) {
-      const failed = await failAlephOcrJob(
-        repository,
-        job.id,
-        alephJob.error ?? "Aleph Tools 处理失败",
-        sequence,
-        "ocr",
-      );
-      if (failed) await onJob(failed);
-      return;
-    }
-    if (isReady) {
-      await finalizeReadyAlephJob(env, repository, job, onJob, onOcrRawResult);
-      return;
-    }
-  }
-
-  if (await syncAlephJobSnapshot(env, repository, job, onJob, onOcrRawResult)) return;
-  const latest = await repository.getImportJob(job.id);
-  if (!latest || terminalImportStatuses.has(latest.status)) return;
-  throw new Error("Aleph Tools 进度连接已断开，可刷新恢复");
-}
-
-async function syncAlephJobSnapshot(
-  env: Env,
-  repository: D1LedgerRepository,
-  job: ImportJob,
-  onJob: (job: ImportJob) => Promise<void> | void,
-  onOcrRawResult?: (payload: unknown) => Promise<void> | void,
-) {
-  if (!job.ocrJobId) return false;
-  const alephJob = await runtimeOcrClient(env).getJob(job.ocrJobId);
-  const updated = await updateAlephSnapshot(repository, job.id, alephJob);
-  if (updated) await onJob(updated);
-
-  if (alephJob.status === "cancel_requested") {
-    const requested = await requestAlephOcrCancellation(repository, job.id);
-    if (requested) await onJob(requested);
-    return false;
-  }
-  if (alephJob.status === "cancelled") {
-    const cancelled = await cancelAlephOcrJob(repository, job.id);
-    if (cancelled) await onJob(cancelled);
-    return true;
-  }
-  if (alephJob.status === "failed") {
-    const failed = await failAlephOcrJob(repository, job.id, alephJob.error ?? "Aleph Tools 处理失败");
-    if (failed) await onJob(failed);
-    return true;
-  }
-  if (alephJob.status === "ready") {
-    await finalizeReadyAlephJob(env, repository, job, onJob, onOcrRawResult);
-    return true;
-  }
-  return false;
-}
-
-async function finalizeReadyAlephJob(
-  env: Env,
-  repository: D1LedgerRepository,
-  job: ImportJob,
-  onJob: (job: ImportJob) => Promise<void> | void,
-  onOcrRawResult?: (payload: unknown) => Promise<void> | void,
-) {
-  const current = await repository.getImportJob(job.id);
-  if (current && (terminalImportStatuses.has(current.status) || current.status === "cancel_requested")) {
-    await onJob(current);
-    return;
-  }
-  const processing = await repository.markImportJobAiProcessing(job.id, "ai_text_ready");
-  if (processing) await onJob(processing);
-  try {
-    await finalizeAlephOcrJob(env, repository, job.id, { onOcrRawResult });
-  } catch (error) {
-    await markFailed(repository, job.id, error, "ocr");
-  }
-  const finished = await repository.getImportJob(job.id);
-  if (finished) await onJob(finished);
-}
-
 async function watchLocalImportJobs(
   env: Env,
   repository: D1LedgerRepository,
@@ -855,102 +571,15 @@ function isStaleAiProcessingJob(env: Env, job: ImportJob) {
 }
 
 function aiImportStaleMs(env: Env) {
-  const configured = Number(env.ALEPH_AI_IMPORT_STALE_MS);
+  const configured = Number(env.AI_IMPORT_STALE_MS);
   if (Number.isFinite(configured) && configured > 0) return Math.max(configured, 60_000);
-  const timeout = Number(env.ALEPH_AI_IMPORT_TIMEOUT_MS);
+  const timeout = Number(env.AI_IMPORT_TIMEOUT_MS);
   const base = Number.isFinite(timeout) && timeout > 0 ? timeout : 45_000;
   return Math.max(base + 15_000, 60_000);
 }
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function serveInternalImportSource(context: ImportRouteContext) {
-  if (!context.env.DB || !context.env.FILES) return jsonError(context, "导入源文件需要 D1 与 R2 绑定", 503);
-  const token = bearerToken(context.req.header("Authorization"));
-  if (!token) return jsonError(context, "缺少 source token", 401);
-
-  const repository = new D1LedgerRepository(context.env.DB);
-  await repository.cleanupExpiredImportJobs();
-  const importJobId = context.req.param("importJobId");
-  if (!importJobId) return jsonError(context, "导入任务不存在或已过期", 404);
-  const job = await repository.getImportSourceAccessJob(importJobId);
-  if (!job) return jsonError(context, "导入任务不存在或已过期", 404);
-  if (!job.sourceAccessTokenHash || !job.sourceAccessTokenExpiresAt) {
-    return jsonError(context, "导入源访问未授权", 401);
-  }
-  if (job.sourceAccessTokenRevokedAt) return jsonError(context, "导入源访问已撤销", 410);
-  if (new Date(job.sourceAccessTokenExpiresAt).getTime() <= Date.now()) {
-    await repository.revokeImportSourceAccess(job.id);
-    return jsonError(context, "导入源访问已过期", 410);
-  }
-  const tokenHash = await hashImportSourceAccessToken(token);
-  if (!constantTimeEqual(tokenHash, job.sourceAccessTokenHash)) {
-    return jsonError(context, "导入源访问未授权", 401);
-  }
-  if (job.ocrJobId) {
-    const alephJobId = context.req.header("X-Aleph-Job-Id")?.trim();
-    if (!alephJobId) return jsonError(context, "缺少 Aleph OCR 任务标识", 401);
-    if (alephJobId !== job.ocrJobId) return jsonError(context, "Aleph OCR 任务不匹配", 403);
-  }
-  if (job.status !== "uploaded" && job.status !== "ocr_processing") {
-    return jsonError(context, "导入源当前不可读取", 409);
-  }
-
-  const object = await context.env.FILES.get(job.r2Key);
-  if (!object?.body) return jsonError(context, "导入原文件不存在", 404);
-  const headers = new Headers({
-    "Content-Type": object.httpMetadata?.contentType ?? job.fileType,
-    "Content-Disposition": `inline; filename="${encodeURIComponent(job.fileName)}"`,
-    "Cache-Control": "private, no-store",
-    "X-Import-Job-Id": job.id,
-    "X-Source-Expires-At": job.sourceAccessTokenExpiresAt,
-  });
-  return new Response(context.req.raw.method === "HEAD" ? null : object.body, { headers });
-}
-
-async function* parseSseStream(stream: ReadableStream<Uint8Array>): AsyncGenerator<AlephSseMessage> {
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true }).replaceAll("\r\n", "\n");
-      let boundary = buffer.indexOf("\n\n");
-      while (boundary >= 0) {
-        const raw = buffer.slice(0, boundary);
-        buffer = buffer.slice(boundary + 2);
-        const parsed = parseSseMessage(raw);
-        if (parsed) yield parsed;
-        boundary = buffer.indexOf("\n\n");
-      }
-    }
-    buffer += decoder.decode();
-    const parsed = parseSseMessage(buffer);
-    if (parsed) yield parsed;
-  } finally {
-    reader.releaseLock();
-  }
-}
-
-function parseSseMessage(raw: string): AlephSseMessage | null {
-  if (!raw.trim()) return null;
-  const data: string[] = [];
-  const message: AlephSseMessage = {};
-  for (const line of raw.split("\n")) {
-    if (!line || line.startsWith(":")) continue;
-    const separator = line.indexOf(":");
-    const field = separator >= 0 ? line.slice(0, separator) : line;
-    const value = separator >= 0 ? line.slice(separator + 1).replace(/^ /, "") : "";
-    if (field === "id") message.id = value;
-    if (field === "event") message.event = value;
-    if (field === "data") data.push(value);
-  }
-  if (data.length) message.data = data.join("\n");
-  return message;
 }
 
 function importJobStatusPayload(job: ImportJob) {
@@ -978,6 +607,20 @@ function importJobStatusPayload(job: ImportJob) {
 }
 
 function importProgressText(job: ImportJob) {
+  if (job.status === "converting") {
+    switch (job.ocrStage) {
+      case "conversion_reading":
+        return "读取原图";
+      case "conversion_processing":
+        return "转换图片格式";
+      case "conversion_converted":
+        return "图片已转为可识别格式";
+      case "conversion_skipped":
+        return "图片格式可直接识别";
+      default:
+        return "准备图片识别";
+    }
+  }
   if (job.status !== "ai_processing") return "";
   switch (job.ocrStage) {
     case "ai_summary":
@@ -1004,45 +647,6 @@ function isImportJobCancelable(job: ImportJob) {
   return !terminalImportStatuses.has(job.status) && job.status !== "cancel_requested";
 }
 
-function shouldExposeOcrRawDebugData(env: Env) {
-  return env.APP_ENV !== "prod";
-}
-
 function parseImportStatusFilter(value: string | undefined): ImportJobStatusFilter {
   return value === "processing" || value === "success" || value === "failed" ? value : "all";
-}
-
-function safeJson(value: string) {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
-}
-
-function sequenceFromEventId(eventId: string | undefined) {
-  if (!eventId) return undefined;
-  const value = Number(eventId);
-  return Number.isFinite(value) ? value : undefined;
-}
-
-async function hmacSha256Hex(secret: string, value: string) {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(value));
-  return [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-function timingSafeEqualHex(left: string, right: string) {
-  if (!/^[a-f0-9]+$/i.test(left) || !/^[a-f0-9]+$/i.test(right) || left.length !== right.length) return false;
-  let diff = 0;
-  for (let index = 0; index < left.length; index += 1)
-    diff |= left.charCodeAt(index) ^ right.charCodeAt(index);
-  return diff === 0;
 }

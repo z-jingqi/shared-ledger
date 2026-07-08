@@ -151,10 +151,9 @@ export const importJobs = sqliteTable("import_jobs", {
   retryable: integer("retryable").notNull().default(0),
   retryCount: integer("retry_count").notNull().default(0),
   ocrJobId: text("ocr_job_id"),
-  alephTool: text("aleph_tool"),
-  sourceAccessTokenHash: text("source_access_token_hash"),
-  sourceAccessTokenExpiresAt: text("source_access_token_expires_at"),
-  sourceAccessTokenRevokedAt: text("source_access_token_revoked_at"),
+  ocrProvider: text("ocr_provider"),
+  ocrInputR2Key: text("ocr_input_r2_key"),
+  ocrInputFileType: text("ocr_input_file_type"),
   ocrSubmittedAt: text("ocr_submitted_at"),
   ocrProgress: integer("ocr_progress").notNull().default(0),
   ocrStage: text("ocr_stage"),
@@ -164,6 +163,22 @@ export const importJobs = sqliteTable("import_jobs", {
   ocrEventSequence: integer("ocr_event_sequence").notNull().default(0),
   ...fullAudit,
 });
+export const importOcrResults = sqliteTable(
+  "import_ocr_results",
+  {
+    id: text("id").primaryKey(),
+    importJobId: text("import_job_id").notNull(),
+    provider: text("provider").notNull(),
+    engineVersion: text("engine_version"),
+    rawText: text("raw_text").notNull(),
+    rawJson: text("raw_json").notNull(),
+    converted: integer("converted").notNull().default(0),
+    sourceMimeType: text("source_mime_type"),
+    processedMimeType: text("processed_mime_type"),
+    ...fullAudit,
+  },
+  (t) => [uniqueIndex("import_ocr_results_import_job").on(t.importJobId)],
+);
 export const importedRecords = sqliteTable("imported_records", {
   id: text("id").primaryKey(),
   importJobId: text("import_job_id").notNull(),
