@@ -180,8 +180,6 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     if (!context.env.DB) return jsonError(context, "D1 运行时不可用", 503);
     const repository = new D1LedgerRepository(context.env.DB);
     const jobs = await normalizeImportJobsForResponse(
-      context.env,
-      repository,
       await repository.listImportJobs(bookId, {
         status: parseImportStatusFilter(context.req.query("status")),
       }),
@@ -209,8 +207,6 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
 
     const repository = new D1LedgerRepository(context.env.DB);
     const jobs = await normalizeImportJobsForResponse(
-      context.env,
-      repository,
       await Promise.all(ids.map((id) => repository.getImportJob(id))),
     );
     if (jobs.some((job) => !job)) return jsonError(context, "导入任务不存在", 404);
@@ -534,7 +530,7 @@ async function watchLocalImportJobs(
   while (Date.now() < deadline) {
     let active = false;
     for (const id of ids) {
-      const job = await normalizeImportJobForResponse(env, repository, await repository.getImportJob(id));
+      const job = normalizeImportJobForResponse(await repository.getImportJob(id));
       if (!job) continue;
       const signature = importJobWatchSignature(job);
       if (lastSignatures.get(id) !== signature) {
@@ -571,39 +567,12 @@ function localImportReconnectDelayMs(env: Env) {
   return env.APP_ENV === "test" ? 40 : 10_000;
 }
 
-async function normalizeImportJobsForResponse(
-  env: Env,
-  repository: D1LedgerRepository,
-  jobs: Array<ImportJob | null>,
-) {
-  return Promise.all(jobs.map((job) => normalizeImportJobForResponse(env, repository, job)));
+async function normalizeImportJobsForResponse(jobs: Array<ImportJob | null>) {
+  return Promise.all(jobs.map((job) => normalizeImportJobForResponse(job)));
 }
 
-async function normalizeImportJobForResponse(
-  env: Env,
-  repository: D1LedgerRepository,
-  job: ImportJob | null,
-) {
-  if (!job || !isStaleAiProcessingJob(env, job)) return job;
-  return (
-    (await markFailed(repository, job.id, new Error("AI 分析中断，请重试"), "ai")) ??
-    (await repository.getImportJob(job.id)) ??
-    job
-  );
-}
-
-function isStaleAiProcessingJob(env: Env, job: ImportJob) {
-  if (job.status !== "ai_processing") return false;
-  const updatedAt = new Date(job.updatedAt).getTime();
-  return Number.isFinite(updatedAt) && Date.now() - updatedAt > aiImportStaleMs(env);
-}
-
-function aiImportStaleMs(env: Env) {
-  const configured = Number(env.AI_IMPORT_STALE_MS);
-  if (Number.isFinite(configured) && configured > 0) return Math.max(configured, 60_000);
-  const timeout = Number(env.AI_IMPORT_TIMEOUT_MS);
-  const base = Number.isFinite(timeout) && timeout > 0 ? timeout : 45_000;
-  return Math.max(base + 15_000, 60_000);
+function normalizeImportJobForResponse(job: ImportJob | null) {
+  return job;
 }
 
 function sleep(ms: number) {

@@ -786,15 +786,7 @@ function ImportJobCard({
 }
 
 function AiProgressText({ job }: { job: Job }) {
-  const messages = useMemo(() => aiProgressMessages(job), [job.progressText, job.stage]);
-  const [index, setIndex] = useState(0);
-  useEffect(() => {
-    setIndex(0);
-    if (messages.length <= 1) return undefined;
-    const timer = setInterval(() => setIndex((current) => (current + 1) % messages.length), 1600);
-    return () => clearInterval(timer);
-  }, [messages]);
-  return <small className="ios-import-ai-progress">{messages[index] ?? "AI 分析中"}</small>;
+  return <small className="ios-import-ai-progress">{job.progressText || formatJobStatus(job)}</small>;
 }
 
 function ImportJobPreview({
@@ -946,17 +938,6 @@ function formatJobStatus(job: Job) {
   if (job.status === "ai_processing") return job.progressText || "AI 分析中";
   if (job.status === "ocr_processing") return formatOcrProgress(job);
   return job.stage || "处理中…";
-}
-
-function aiProgressMessages(job: Job) {
-  const primary = job.progressText || formatJobStatus(job);
-  const byStage =
-    job.stage === "ai_text_ready"
-      ? ["整理识别文本", "准备分析明细", "匹配账本字段"]
-      : job.stage === "ai_saving"
-        ? ["生成待确认记录", "整理入账建议", "保存分析结果"]
-        : ["AI 分析明细", "匹配分类与金额", "生成入账建议"];
-  return [...new Set([primary, ...byStage])].filter(Boolean).slice(0, 3);
 }
 
 function formatOcrProgress(job: Job) {

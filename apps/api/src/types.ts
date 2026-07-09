@@ -13,7 +13,6 @@ export type Env = {
   IMPORT_PIPELINE_QUEUE?: Queue<ImportPipelineMessage>;
   AI_PROVIDER?: "openrouter" | "openai" | "workers-ai";
   AI_IMPORT_TIMEOUT_MS?: string;
-  AI_IMPORT_STALE_MS?: string;
   AI_IMPORT_SUMMARY_MAX_TOKENS?: string;
   AI_IMPORT_ITEMS_MAX_TOKENS?: string;
   AI_TEST_CLIENT?: LedgerAiTestClient;

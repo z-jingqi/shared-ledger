@@ -414,7 +414,7 @@ describe("D1 image import and OCR quota integrity", () => {
     expect(text).toContain("stream-idle");
   });
 
-  it("marks stale AI processing jobs as retryable failures in import lists", async () => {
+  it("keeps stale AI processing jobs active when reading import lists", async () => {
     const context = createD1TestApp();
     const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
     const book = seedBook(context.db, user, { id: "book_pro" });
@@ -438,10 +438,11 @@ describe("D1 image import and OCR quota integrity", () => {
     expect(response.status).toBe(200);
     expect(body.imports[0]).toMatchObject({
       id: job.id,
-      status: "failed",
-      errorStage: "ai",
-      retryable: true,
+      status: "ai_processing",
+      stage: "ai_items",
     });
+    expect(body.imports[0].errorStage).toBeUndefined();
+    expect((await context.repository.getImportJob(job.id))?.status).toBe("ai_processing");
   });
 
   it("does not let later OCR failures overwrite cancellation intent", async () => {
