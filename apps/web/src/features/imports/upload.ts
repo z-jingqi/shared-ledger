@@ -92,7 +92,6 @@ export async function uploadImportFiles(
   const body = new FormData();
   const requestSignal = options?.signal;
   const placeholderIds = (options?.placeholders ?? []).map((placeholder) => placeholder.id);
-  placeholderIds.forEach((placeholderId) => cancelledLocalUploadIds.delete(placeholderId));
   const preparedFiles: Array<PreparedImportFile & { sourceIndex: number; placeholderId?: string }> = [];
   try {
     for (const [index, file] of files.entries()) {
