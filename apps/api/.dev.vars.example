@@ -4,7 +4,7 @@ GOOGLE_VISION_API_KEY=
 # Default local AI provider. Browser clients still call only shared-ledger API.
 AI_PROVIDER=openrouter
 OPENROUTER_API_KEY=
-OPENROUTER_MODEL=
+OPENROUTER_MODEL=deepseek/deepseek-v4-flash
 
 # Optional alternatives:
 # AI_PROVIDER=openai

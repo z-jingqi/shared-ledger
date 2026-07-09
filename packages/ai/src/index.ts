@@ -136,6 +136,7 @@ const defaultToolStepMaxTokens = 1800;
 const importSummarySystemPrompt = [
   "You extract the receipt-level bookkeeping summary from OCR text.",
   "Return only JSON matching the supplied schema.",
+  "Do not include reasoning, explanations, Markdown, or text outside the JSON object.",
   "If OCR layout rows are present, use them as the primary evidence for receipt item rows and totals.",
   "Use the merchant/receipt purpose as note, the transaction date, the final paid/received total, transaction type, and a likely category.",
   "Prefer category names from the provided existing categories. If none fits and the text clearly implies a category, return a concise new categoryName.",
@@ -146,6 +147,7 @@ const importSummarySystemPrompt = [
 const importItemsSystemPrompt = [
   "You extract receipt line items from one OCR text chunk.",
   "Return only JSON matching the supplied schema.",
+  "Do not include reasoning, explanations, Markdown, or text outside the JSON object.",
   "If an OCR layout rows table is present, treat each row in that table as the primary item source.",
   "For table rows, use lineAmount as the item amount. Do not use unitPrice or quantity as amount when lineAmount is present.",
   "Only include explicit product/service lines that have a supported paid line amount in this chunk.",
@@ -206,7 +208,11 @@ export function createLedgerLanguageModel(config: LedgerLanguageModelConfig): La
       baseURL: config.baseURL,
       appName: config.appName ?? "shared-ledger",
       appUrl: config.appUrl,
-    }).chat(config.model, { structuredOutputs: { strict: false } });
+    }).chat(config.model, {
+      provider: { require_parameters: true },
+      reasoning: { enabled: false, exclude: true, effort: "none" },
+      structuredOutputs: { strict: true },
+    });
   }
   if (config.provider === "openai") {
     return createOpenAI({ apiKey: config.apiKey, baseURL: config.baseURL }).chat(config.model);
@@ -252,6 +258,7 @@ export function createLedgerAiProvider(runtime: LedgerAiRuntime): AiProvider {
           prompt,
           temperature: input.temperature,
           maxOutputTokens: input.maxOutputTokens,
+          reasoning: "none",
           maxRetries: 1,
         }),
         runtime.importTimeoutMs ?? 45_000,
@@ -272,6 +279,7 @@ export function createLedgerAiProvider(runtime: LedgerAiRuntime): AiProvider {
               prompt,
               temperature: input.temperature,
               maxOutputTokens: input.maxOutputTokens,
+              reasoning: "none",
               maxRetries: 1,
             }),
             runtime.importTimeoutMs ?? 45_000,
@@ -305,6 +313,7 @@ export function createLedgerAiProvider(runtime: LedgerAiRuntime): AiProvider {
           messages: messages.map(toModelMessage),
           temperature: 0.4,
           maxOutputTokens: defaultChatMaxTokens,
+          reasoning: "none",
           timeout: { totalMs: 60_000, chunkMs: 20_000 },
           maxRetries: 1,
         });
@@ -329,6 +338,7 @@ export function createLedgerAiProvider(runtime: LedgerAiRuntime): AiProvider {
           prompt: input.text,
           temperature: 0.4,
           maxOutputTokens: defaultChatMaxTokens,
+          reasoning: "none",
           timeout: { totalMs: 60_000 },
           maxRetries: 1,
         });

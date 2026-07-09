@@ -51,7 +51,7 @@ pnpm db:setup:local
 GOOGLE_VISION_API_KEY=<google-vision-api-key>
 AI_PROVIDER=openrouter
 OPENROUTER_API_KEY=<openrouter-api-key>
-OPENROUTER_MODEL=<openrouter-model>
+OPENROUTER_MODEL=deepseek/deepseek-v4-flash
 pnpm --filter @shared-ledger/api dev
 ```
 
@@ -111,9 +111,10 @@ shared-ledger 现在只支持图片导入：jpg/jpeg/png/gif/webp/tif/tiff/bmp/r
 生产环境需要为 API Worker 配置：
 
 - 普通变量：`AI_PROVIDER`，可选 `openrouter`、`openai`、`workers-ai`
+- OpenRouter 普通变量：`OPENROUTER_MODEL`，默认建议 `deepseek/deepseek-v4-flash`
 - Queue binding：`IMPORT_PIPELINE_QUEUE` 指向 `shared-ledger-import-pipeline-{preview|prod}`，consumer `max_batch_size=1`、`max_concurrency=1`、`max_retries=3`
 - Secret：`GOOGLE_VISION_API_KEY`
-- OpenRouter：`OPENROUTER_API_KEY`、`OPENROUTER_MODEL`
+- OpenRouter Secret：`OPENROUTER_API_KEY`
 - OpenAI：`OPENAI_API_KEY`、`OPENAI_MODEL`
 - Workers AI：`WORKERS_AI_BASE_URL`、`WORKERS_AI_API_TOKEN`、`WORKERS_AI_MODEL`
 

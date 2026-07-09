@@ -8,6 +8,7 @@
     "APP_ENV": "local",
     "WEB_ORIGIN": "http://localhost:5175",
     "AI_PROVIDER": "openrouter",
+    "OPENROUTER_MODEL": "deepseek/deepseek-v4-flash",
   },
   "d1_databases": [
     {
