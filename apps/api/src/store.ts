@@ -32,6 +32,9 @@ export type ImportJob = {
   fileType: string;
   r2Key: string;
   status: string;
+  fileHash?: string;
+  ocrTextHash?: string;
+  duplicateOfImportJobId?: string;
   autoConfirm?: boolean;
   errorMessage?: string;
   errorCode?: string;

@@ -26,6 +26,7 @@ import {
   replaceImportJobInCache,
   upsertImportJobsInCache,
 } from "../features/imports/cache";
+import { invalidateLedgerData } from "../features/data/invalidations";
 import { createPreviewThumbnail } from "../features/imports/preview-thumbnail";
 import { terminalImportStatuses, watchImportJobs, type ImportJobStatus } from "../features/imports/status";
 import {
@@ -170,12 +171,20 @@ export function PendingImportsSheet({ jobId, onClose }: { jobId?: string; onClos
   const [busy, setBusy] = useState("");
   const [editing, setEditing] = useState<PendingRecord | undefined>();
   const close = onClose;
+  const refreshAfterRecordChange = async (nextRecordsLength: number) => {
+    invalidateLedgerData({
+      bookId,
+      scopes: ["imports", "transactions", "categories"],
+    });
+    await reload();
+    if (nextRecordsLength <= 0) close();
+  };
   const confirm = async (recordId: string) => {
     setBusy(recordId);
     try {
       const result = await api<{ job?: Job }>(`/imported-records/${recordId}/confirm`, { method: "POST" });
       if (result.job) replaceImportJobInCache(bookId, userId, result.job);
-      await reload();
+      await refreshAfterRecordChange(records.filter((record) => record.id !== recordId).length);
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : "确认失败", { duration: 3000, closeButton: true });
     } finally {
@@ -187,7 +196,7 @@ export function PendingImportsSheet({ jobId, onClose }: { jobId?: string; onClos
     try {
       const result = await api<{ job?: Job }>(`/imported-records/${recordId}/ignore`, { method: "POST" });
       if (result.job) replaceImportJobInCache(bookId, userId, result.job);
-      await reload();
+      await refreshAfterRecordChange(records.filter((record) => record.id !== recordId).length);
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : "忽略失败", { duration: 3000, closeButton: true });
     } finally {
@@ -204,7 +213,7 @@ export function PendingImportsSheet({ jobId, onClose }: { jobId?: string; onClos
       results.forEach((result) => {
         if (result.job) replaceImportJobInCache(bookId, userId, result.job);
       });
-      await reload();
+      await refreshAfterRecordChange(0);
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : "全部确认失败", {
         duration: 3000,
@@ -238,6 +247,7 @@ export function PendingImportsSheet({ jobId, onClose }: { jobId?: string; onClos
         }),
       });
       setEditing(undefined);
+      invalidateLedgerData({ bookId, scopes: ["imports"] });
       await reload();
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : "保存失败", { duration: 3000, closeButton: true });
@@ -251,7 +261,7 @@ export function PendingImportsSheet({ jobId, onClose }: { jobId?: string; onClos
       <IosSheet
         title="待确认记录"
         onClose={close}
-        full
+        height="large"
         className="ios-pending-review-sheet"
         right={
           records.length > 1 ? (
@@ -299,6 +309,7 @@ export function PendingImportsSheet({ jobId, onClose }: { jobId?: string; onClos
         <PendingEditSheet
           record={editing}
           busy={busy === editing.id}
+          onBack={() => setEditing(undefined)}
           onClose={() => setEditing(undefined)}
           onSave={(draft) => void updateRecord(editing, draft)}
         />
@@ -548,6 +559,7 @@ function PendingRecordCard({
   const tx = record.suggestedTransaction;
   const type = tx.type ?? "expense";
   const warning = tx.warnings.length > 0 || tx.confidence < 0.75;
+  const warningText = tx.warnings.join("；");
   return (
     <IosCard className={`ios-pending-card${full ? " full" : ""}`}>
       <div className="ios-pending-fixed">
@@ -571,17 +583,14 @@ function PendingRecordCard({
             {yuan(tx.amount)}
           </strong>
         </div>
-        {tx.warnings.length > 0 && <p className="ios-pending-warning">{tx.warnings.join("；")}</p>}
+        {warningText ? <PendingWarning text={warningText} /> : null}
       </div>
       <div className="ios-pending-items-scroll" data-sheet-scroll="true">
         {tx.items?.length ? (
           <ul className="ios-pending-items">
             {tx.items.map((item, index) => (
               <li key={`${item.name}-${index}`}>
-                <span>
-                  {item.name}
-                  {item.categoryName ? <em>{item.categoryName}</em> : null}
-                </span>
+                <span>{item.name}</span>
                 <b>{yuan(item.amount)}</b>
               </li>
             ))}
@@ -603,14 +612,44 @@ function PendingRecordCard({
   );
 }
 
+function PendingWarning({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className={`ios-pending-warning-wrap${expanded ? " expanded" : ""}`}>
+      <button
+        className="ios-pending-warning"
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+      >
+        <span>{text}</span>
+        <em>{expanded ? "收起" : "展开"}</em>
+      </button>
+      {expanded ? (
+        <>
+          <button
+            className="ios-pending-warning-backdrop"
+            type="button"
+            aria-label="收起警告"
+            onClick={() => setExpanded(false)}
+          />
+          <div className="ios-pending-warning-popover">{text}</div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 function PendingEditSheet({
   record,
   busy,
+  onBack,
   onClose,
   onSave,
 }: {
   record: PendingRecord;
   busy: boolean;
+  onBack: () => void;
   onClose: () => void;
   onSave: (draft: PendingEditDraft) => void;
 }) {
@@ -646,6 +685,8 @@ function PendingEditSheet({
   return (
     <IosSheet
       title="编辑识别记录"
+      back
+      onBack={onBack}
       onClose={onClose}
       footer={
         <IosButton disabled={busy} onClick={() => onSave(draft)}>

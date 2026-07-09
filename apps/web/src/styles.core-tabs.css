@@ -46,24 +46,49 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  border: 0;
+  padding: 0;
+  background: transparent;
   font-size: 13px;
   font-weight: 700;
   color: rgba(255, 255, 255, 0.9);
 }
 
-.ios-balance-month-select span {
-  pointer-events: none;
-}
-
-.ios-balance-month-select select {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
-}
-
 .ios-balance-month-select svg {
   opacity: 0.9;
+}
+
+.ios-month-picker {
+  display: grid;
+  gap: 8px;
+}
+
+.ios-month-picker button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 48px;
+  border: 1px solid #e4e8ee;
+  border-radius: 14px;
+  padding: 0 14px;
+  background: #fff;
+  color: var(--ios-text);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 850;
+}
+
+.ios-month-picker button.selected {
+  border-color: rgba(255, 104, 28, 0.42);
+  background: #fff7f2;
+  color: var(--ios-accent);
+}
+
+.ios-month-picker em {
+  color: var(--ios-accent);
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 900;
 }
 
 .ios-balance-hero > strong {

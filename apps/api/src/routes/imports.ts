@@ -3,7 +3,7 @@ import type { Context, Hono } from "hono";
 import { jsonError } from "../lib/http";
 import { D1LedgerRepository, importJobRetentionDays, type ImportJobStatusFilter } from "../repository";
 import { requireMember, requireUser } from "../services/access";
-import { cancelImportJob, markFailed, retryImportJob, submitOcrJob } from "../services/imports";
+import { cancelImportJob, markFailed, retryImportJob, sha256Hex, submitOcrJob } from "../services/imports";
 import { prepareImageForGoogleVision } from "../services/image-conversion";
 import {
   assertImageImportFile,
@@ -27,8 +27,114 @@ type UploadFileMetadata = {
   originalType?: string;
   converted?: boolean;
 };
+type DuplicateImportPayload = {
+  index?: number;
+  error: string;
+  fileName: string;
+  duplicateOfJobId: string;
+  job: ReturnType<typeof importJobStatusPayload>;
+  message: string;
+};
+type PreparedImportUpload = {
+  index?: number;
+  displayFileName: string;
+  displayFileType: string;
+  fileHash: string;
+  ocrInput: Awaited<ReturnType<typeof prepareImageForGoogleVision>>;
+  duplicateJob: ImportJob | null;
+  autoConfirm?: boolean;
+};
+
+class DuplicateImportError extends Error {
+  constructor(
+    readonly duplicateJob: ImportJob,
+    readonly fileName: string,
+  ) {
+    super("这张小票已识别过");
+  }
+}
 
 export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryLedgerStore) {
+  const prepareImportUpload = async (
+    context: ImportRouteContext,
+    input: {
+      bookId: string;
+      userId: string;
+      file: File;
+      metadata?: UploadFileMetadata;
+      repository: D1LedgerRepository;
+      index?: number;
+      autoConfirm?: boolean;
+    },
+  ): Promise<PreparedImportUpload> => {
+    assertImageImportFile(input.file);
+    const uploadFileType = imageImportFileType(input.file);
+    const bytes = await input.file.arrayBuffer();
+    const ocrInput = await prepareImageForGoogleVision({ fileType: uploadFileType }, bytes);
+    const displayFileName = input.metadata?.originalName?.trim() || input.file.name;
+    const displayFileType = input.metadata?.originalType?.trim().toLowerCase() || uploadFileType;
+    const fileHash = await sha256Hex(ocrInput.bytes);
+    const duplicateJob = await input.repository.findDuplicateImportByFileHash({
+      bookId: input.bookId,
+      userId: input.userId,
+      fileHash,
+    });
+    return {
+      ...(typeof input.index === "number" ? { index: input.index } : {}),
+      displayFileName,
+      displayFileType,
+      fileHash,
+      ocrInput,
+      duplicateJob,
+      autoConfirm: input.autoConfirm,
+    };
+  };
+
+  const createPreparedJob = async (
+    context: ImportRouteContext,
+    input: {
+      bookId: string;
+      userId: string;
+      prepared: PreparedImportUpload;
+      repository: D1LedgerRepository;
+      autoConfirm?: boolean;
+      skipQuotaCheck?: boolean;
+    },
+  ) => {
+    const files = context.env.FILES;
+    if (!files) throw new Error("导入功能需要 R2 绑定");
+    if (input.prepared.duplicateJob)
+      throw new DuplicateImportError(input.prepared.duplicateJob, input.prepared.displayFileName);
+    if (!input.skipQuotaCheck) await assertImageOcrQuota(input.repository, input.userId);
+    const suffix = input.prepared.displayFileName.replaceAll(/[^a-zA-Z0-9._-]/g, "_");
+    const job = await input.repository.createImportJob({
+      bookId: input.bookId,
+      userId: input.userId,
+      fileName: input.prepared.displayFileName,
+      fileType: input.prepared.displayFileType,
+      r2Key: `imports/${input.bookId}/${crypto.randomUUID()}-${suffix}`,
+      fileHash: input.prepared.fileHash,
+      autoConfirm: input.autoConfirm ?? input.prepared.autoConfirm,
+    });
+    try {
+      await files.put(job.r2Key, input.prepared.ocrInput.bytes, {
+        httpMetadata: { contentType: input.prepared.ocrInput.fileType },
+        customMetadata: { importJobId: job.id, bookId: input.bookId, uploadedBy: input.userId },
+      });
+      await input.repository.setImportJobOcrInput(job.id, {
+        r2Key: job.r2Key,
+        fileType: input.prepared.ocrInput.fileType,
+        converted: input.prepared.displayFileType !== input.prepared.ocrInput.fileType,
+      });
+      const submitted = await submitOcrJob(context.env, input.repository, job);
+      if (!submitted) throw new Error("导入任务创建失败");
+      return submitted;
+    } catch (error) {
+      await markFailed(input.repository, job.id, error, "ocr");
+      throw error;
+    }
+  };
+
   const createJob = async (
     context: ImportRouteContext,
     input: {
@@ -41,41 +147,15 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
       skipQuotaCheck?: boolean;
     },
   ) => {
-    const files = context.env.FILES;
-    if (!files) throw new Error("导入功能需要 R2 绑定");
-    assertImageImportFile(input.file);
-    const uploadFileType = imageImportFileType(input.file);
-    const bytes = await input.file.arrayBuffer();
-    const ocrInput = await prepareImageForGoogleVision({ fileType: uploadFileType }, bytes);
-    const displayFileName = input.metadata?.originalName?.trim() || input.file.name;
-    const displayFileType = input.metadata?.originalType?.trim().toLowerCase() || uploadFileType;
-    if (!input.skipQuotaCheck) await assertImageOcrQuota(input.repository, input.userId);
-    const suffix = displayFileName.replaceAll(/[^a-zA-Z0-9._-]/g, "_");
-    const job = await input.repository.createImportJob({
+    const prepared = await prepareImportUpload(context, input);
+    return createPreparedJob(context, {
       bookId: input.bookId,
       userId: input.userId,
-      fileName: displayFileName,
-      fileType: displayFileType,
-      r2Key: `imports/${input.bookId}/${crypto.randomUUID()}-${suffix}`,
+      prepared,
+      repository: input.repository,
       autoConfirm: input.autoConfirm,
+      skipQuotaCheck: input.skipQuotaCheck,
     });
-    try {
-      await files.put(job.r2Key, ocrInput.bytes, {
-        httpMetadata: { contentType: ocrInput.fileType },
-        customMetadata: { importJobId: job.id, bookId: input.bookId, uploadedBy: input.userId },
-      });
-      await input.repository.setImportJobOcrInput(job.id, {
-        r2Key: job.r2Key,
-        fileType: ocrInput.fileType,
-        converted: Boolean(input.metadata?.converted) || displayFileType !== ocrInput.fileType,
-      });
-      const submitted = await submitOcrJob(context.env, input.repository, job);
-      if (!submitted) throw new Error("导入任务创建失败");
-      return submitted;
-    } catch (error) {
-      await markFailed(input.repository, job.id, error, "ocr");
-      throw error;
-    }
   };
 
   app.get("/me/import-usage", async (context) => {
@@ -125,6 +205,8 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
       return context.json({ job: importJobStatusPayload(job) }, 202);
     } catch (error) {
       if (error instanceof ImportUploadError) return jsonError(context, error.message, error.status);
+      if (error instanceof DuplicateImportError)
+        return context.json(duplicateImportPayload(error.duplicateJob, error.fileName), 409);
       if (error instanceof GoogleVisionOcrError) return jsonError(context, error.message, 400);
       return jsonError(context, error instanceof Error ? error.message : "文件上传或任务提交失败", 502);
     }
@@ -150,22 +232,83 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     try {
       const fileMetadata = parseBatchFileMetadata(form, files.length);
       for (const file of files) assertImageImportFile(file);
-      await assertImageOcrQuota(repository, user.id, files.length);
-      const jobs = [];
+      const preparedUploads: PreparedImportUpload[] = [];
+      const duplicates: DuplicateImportPayload[] = [];
+      const duplicatePreparedUploads: Array<{
+        prepared: PreparedImportUpload;
+        duplicateOfPrepared: PreparedImportUpload;
+      }> = [];
+      const firstPreparedByHash = new Map<string, PreparedImportUpload>();
       for (const [index, file] of files.entries()) {
-        jobs.push(
-          await createJob(context, {
+        try {
+          const prepared = await prepareImportUpload(context, {
             bookId,
             userId: user.id,
             file,
             metadata: fileMetadata[index],
             repository,
             autoConfirm,
-            skipQuotaCheck: true,
-          }),
-        );
+            index,
+          });
+          if (prepared.duplicateJob) {
+            duplicates.push(duplicateImportPayload(prepared.duplicateJob, prepared.displayFileName, index));
+          } else if (firstPreparedByHash.has(prepared.fileHash)) {
+            duplicatePreparedUploads.push({
+              prepared,
+              duplicateOfPrepared: firstPreparedByHash.get(prepared.fileHash)!,
+            });
+          } else {
+            firstPreparedByHash.set(prepared.fileHash, prepared);
+            preparedUploads.push(prepared);
+          }
+        } catch (error) {
+          if (error instanceof DuplicateImportError) {
+            duplicates.push(duplicateImportPayload(error.duplicateJob, error.fileName, index));
+            continue;
+          }
+          throw error;
+        }
       }
-      return context.json({ jobs: jobs.map(importJobStatusPayload) }, 202);
+      if (preparedUploads.length) await assertImageOcrQuota(repository, user.id, preparedUploads.length);
+      const jobs = [];
+      const createdJobByPrepared = new Map<PreparedImportUpload, ImportJob>();
+      for (const prepared of preparedUploads) {
+        const job = await createPreparedJob(context, {
+          bookId,
+          userId: user.id,
+          prepared,
+          repository,
+          autoConfirm,
+          skipQuotaCheck: true,
+        });
+        createdJobByPrepared.set(prepared, job);
+        jobs.push({
+          index: prepared.index,
+          job,
+        });
+      }
+      for (const duplicate of duplicatePreparedUploads) {
+        const duplicateJob = createdJobByPrepared.get(duplicate.duplicateOfPrepared);
+        if (duplicateJob) {
+          duplicates.push(
+            duplicateImportPayload(
+              duplicateJob,
+              duplicate.prepared.displayFileName,
+              duplicate.prepared.index,
+            ),
+          );
+        }
+      }
+      return context.json(
+        {
+          jobs: jobs.map((item) => ({
+            ...importJobStatusPayload(item.job),
+            ...(typeof item.index === "number" ? { index: item.index } : {}),
+          })),
+          duplicates,
+        },
+        202,
+      );
     } catch (error) {
       if (error instanceof ImportUploadError) return jsonError(context, error.message, error.status);
       if (error instanceof GoogleVisionOcrError) return jsonError(context, error.message, 400);
@@ -289,6 +432,32 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
         "Content-Type": object.httpMetadata?.contentType ?? job.fileType,
         "Cache-Control": "private, max-age=3600",
         "Content-Disposition": `inline; filename="${encodeURIComponent(job.fileName)}"`,
+      },
+    });
+  });
+
+  app.get("/imports/:id/ocr-result", async (context) => {
+    if (!isImportOcrDebugEnabled(context.env)) return jsonError(context, "导入任务不存在", 404);
+    const user = await requireUser(context, store);
+    if (user instanceof Response) return user;
+    if (!context.env.DB) return jsonError(context, "D1 运行时不可用", 503);
+    const repository = new D1LedgerRepository(context.env.DB);
+    const job = await repository.getImportJob(context.req.param("id"));
+    if (!job) return jsonError(context, "导入任务不存在", 404);
+    const denied = await requireMember(context, store, job.bookId, user);
+    if (denied) return denied;
+    const result = await repository.getImportOcrResult(job.id);
+    if (!result) return jsonError(context, "OCR 结果不存在", 404);
+    return context.json({
+      job: importJobStatusPayload(job),
+      ocr: {
+        provider: result.provider,
+        engineVersion: result.engineVersion,
+        rawText: result.rawText,
+        rawJson: result.rawJson,
+        converted: result.converted,
+        sourceMimeType: result.sourceMimeType,
+        processedMimeType: result.processedMimeType,
       },
     });
   });
@@ -600,7 +769,30 @@ function importJobStatusPayload(job: ImportJob) {
     ...(job.ocrStage ? { stage: job.ocrStage } : {}),
     ...(typeof job.ocrCurrentPage === "number" ? { currentPage: job.ocrCurrentPage } : {}),
     ...(typeof job.ocrTotalPages === "number" ? { totalPages: job.ocrTotalPages } : {}),
+    ...(job.duplicateOfImportJobId ? { duplicateOfJobId: job.duplicateOfImportJobId } : {}),
   };
+}
+
+function duplicateImportPayload(job: ImportJob, fileName: string, index?: number): DuplicateImportPayload {
+  return {
+    ...(typeof index === "number" ? { index } : {}),
+    error: "这张小票已识别过",
+    fileName,
+    duplicateOfJobId: job.id,
+    job: importJobStatusPayload(job),
+    message: "这张小票已识别过",
+  };
+}
+
+function isImportOcrDebugEnabled(env: Env) {
+  const appEnv = (env.APP_ENV ?? "").toLowerCase();
+  return (
+    appEnv === "local" ||
+    appEnv === "dev" ||
+    appEnv === "development" ||
+    appEnv === "preview" ||
+    appEnv === "test"
+  );
 }
 
 function importProgressText(job: ImportJob) {

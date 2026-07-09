@@ -10,6 +10,7 @@ import {
   ReceiptIcon,
   SparkleIcon,
   TrashIcon,
+  WarningCircleIcon,
   XIcon,
 } from "@phosphor-icons/react";
 import type { FormEvent } from "react";
@@ -98,6 +99,8 @@ type TransactionFormState = {
   error: string;
   items: LineItemValue[];
   lineRows: LineItemRow[];
+  lineItemsSubmitted: boolean;
+  lineItemsTouched: boolean;
   note: string;
   occurredAt: string;
   saving: boolean;
@@ -121,6 +124,7 @@ type TransactionFormAction =
   | { type: "update-attachment-job"; job: ImportJobStatus }
   | { type: "reset-after-save" }
   | { type: "prepare-line-items" }
+  | { type: "submit-line-items" }
   | { type: "update-line-row"; rowId: string; field: "name" | "amount"; value: string }
   | { type: "add-line-row" }
   | { type: "remove-line-row"; row: LineItemRow }
@@ -190,6 +194,8 @@ function createTransactionFormState(
     error: "",
     items: draft?.items ?? [],
     lineRows: getInitialLineItemRows(draft?.items),
+    lineItemsSubmitted: false,
+    lineItemsTouched: false,
     note: draft?.note ?? "",
     occurredAt: draft?.occurredAt?.slice(0, 10) ?? toDateInputValue(new Date()),
     saving: false,
@@ -269,26 +275,46 @@ function transactionFormReducer(
     case "reset-after-save":
       return { ...state, amount: "0", attachments: [], items: [], note: "" };
     case "prepare-line-items":
-      return { ...state, lineRows: getInitialLineItemRows(state.items), view: "lineItems" };
+      return {
+        ...state,
+        lineRows: getInitialLineItemRows(state.items),
+        lineItemsSubmitted: false,
+        lineItemsTouched: false,
+        view: "lineItems",
+      };
+    case "submit-line-items":
+      return { ...state, lineItemsSubmitted: true };
     case "update-line-row":
       return {
         ...state,
+        lineItemsTouched: true,
         lineRows: state.lineRows.map((item) =>
           item.id === action.rowId ? { ...item, [action.field]: action.value } : item,
         ),
       };
     case "add-line-row":
-      return { ...state, lineRows: [...state.lineRows, { id: crypto.randomUUID(), name: "", amount: "" }] };
+      return {
+        ...state,
+        lineItemsTouched: true,
+        lineRows: [...state.lineRows, { id: crypto.randomUUID(), name: "", amount: "" }],
+      };
     case "remove-line-row":
       return {
         ...state,
+        lineItemsTouched: true,
         lineRows:
           state.lineRows.length === 1
             ? [{ ...action.row, name: "", amount: "" }]
             : state.lineRows.filter((item) => item.id !== action.row.id),
       };
     case "save-line-rows":
-      return { ...state, items: normalizeLineItemRows(state.lineRows), view: "form" };
+      return {
+        ...state,
+        items: normalizeLineItemRows(state.lineRows),
+        lineItemsSubmitted: false,
+        lineItemsTouched: false,
+        view: "form",
+      };
   }
 }
 
@@ -334,6 +360,7 @@ function useRecordsPageController() {
     data,
     error: transactionsError,
     loading: transactionsLoading,
+    reload: reloadTransactions,
   } = useApi<{ transactions: LedgerTransaction[] }>(book ? `/books/${book.id}/transactions` : undefined);
   const { data: categories } = useApi<{ categories: CategoryOption[] }>("/me/categories");
   const { data: imports, reload: reloadImports } = useApi<{ imports: ImportJobStatus[] }>(
@@ -468,6 +495,7 @@ function useRecordsPageController() {
     openSheet,
     pendingCount,
     resetFilters,
+    retryTransactions: reloadTransactions,
     shouldShowResetBar,
     searchParams,
     searchText,
@@ -511,6 +539,7 @@ export function RecordsPage() {
     openSheet,
     pendingCount,
     resetFilters,
+    retryTransactions,
     searchText,
     setDraftFilters,
     setRecordTypeFilter,
@@ -650,7 +679,9 @@ export function RecordsPage() {
               <IosListSkeleton rows={5} />
             </IosCard>
           )}
-          {transactionsError && <p className="field-error">{transactionsError}</p>}
+          {transactionsError && !transactionsLoading && !aiSearching && (
+            <RecordErrorState onRetry={() => void retryTransactions()} />
+          )}
           {!transactionsLoading &&
             !aiSearching &&
             !transactionsError &&
@@ -847,16 +878,39 @@ function TransactionFormEditor({
 }) {
   const [state, dispatchForm] = useReducer(transactionFormReducer, initialState);
   const { user } = useAuth();
-  const { amount, attachments, categoryId, error, items, lineRows, note, occurredAt, saving, type, view } =
-    state;
+  const {
+    amount,
+    attachments,
+    categoryId,
+    error,
+    items,
+    lineItemsSubmitted,
+    lineItemsTouched,
+    lineRows,
+    note,
+    occurredAt,
+    saving,
+    type,
+    view,
+  } = state;
   const canUseImageRecognition = user?.plan === "pro";
   const fileInput = useRef<HTMLInputElement>(null);
   const stopWatchingRef = useRef<(() => void) | undefined>(undefined);
   const amountNumber = Number(amount || 0);
   const selectedCategory = categories.find((category) => category.id === categoryId);
-  const assignedLineAmount = lineRows.reduce((sumValue, item) => sumValue + Number(item.amount || 0), 0);
+  const amountCents = amountToCents(amountNumber);
+  const assignedLineAmountCents = lineRows.reduce((sumValue, item) => {
+    const cents = amountInputToCents(item.amount);
+    return sumValue + (Number.isFinite(cents) ? cents : 0);
+  }, 0);
+  const assignedLineAmount = assignedLineAmountCents / 100;
   const lineItemErrors = useMemo(() => getLineItemErrors(lineRows, amountNumber), [lineRows, amountNumber]);
-  const hasLineItemErrors = Object.values(lineItemErrors).some(Boolean);
+  const lineItemTotalError =
+    assignedLineAmountCents > amountCents
+      ? `明细合计不能超过总金额，超出 ${yuan((assignedLineAmountCents - amountCents) / 100)}`
+      : "";
+  const hasLineItemErrors = Object.values(lineItemErrors).some(Boolean) || Boolean(lineItemTotalError);
+  const showLineItemErrors = lineItemsSubmitted || lineItemsTouched;
   useEffect(
     () => () => {
       stopWatchingRef.current?.();
@@ -939,7 +993,7 @@ function TransactionFormEditor({
   };
   const saveLineRows = () => {
     if (hasLineItemErrors) {
-      toast.error("明细金额不能超过剩余金额", { duration: 3000, closeButton: true });
+      dispatchForm({ type: "submit-line-items" });
       return;
     }
     dispatchForm({ type: "save-line-rows" });
@@ -1006,7 +1060,7 @@ function TransactionFormEditor({
       onBack={() => dispatchForm({ type: "set-view", view: "form" })}
       footer={
         view === "lineItems" ? (
-          <IosButton disabled={hasLineItemErrors} onClick={saveLineRows}>
+          <IosButton disabled={showLineItemErrors && hasLineItemErrors} onClick={saveLineRows}>
             保存明细 · 剩余 {yuan(amountNumber - assignedLineAmount)}
           </IosButton>
         ) : (
@@ -1036,7 +1090,8 @@ function TransactionFormEditor({
           rows={lineRows}
           total={amountNumber}
           assigned={assignedLineAmount}
-          errors={lineItemErrors}
+          errors={showLineItemErrors ? lineItemErrors : {}}
+          summaryError={showLineItemErrors ? lineItemTotalError : ""}
           onAdd={addLineRow}
           onRemove={removeLineRow}
           onUpdate={updateLineRow}
@@ -1162,6 +1217,7 @@ function LineItemsEditor({
   total,
   assigned,
   errors,
+  summaryError,
   onAdd,
   onRemove,
   onUpdate,
@@ -1170,6 +1226,7 @@ function LineItemsEditor({
   total: number;
   assigned: number;
   errors: Record<string, string>;
+  summaryError?: string;
   onAdd: () => void;
   onRemove: (row: LineItemRow) => void;
   onUpdate: (id: string, field: "name" | "amount", value: string) => void;
@@ -1189,6 +1246,7 @@ function LineItemsEditor({
           <b>{yuan(assigned)}</b>
         </span>
       </IosCard>
+      {summaryError ? <p className="field-error">{summaryError}</p> : null}
       {rows.map((row) => (
         <div className="ios-line-row" key={row.id}>
           <label>
@@ -1344,6 +1402,23 @@ function RecordEmptyState({ filtered, onReset }: { filtered: boolean; onReset?: 
         </button>
       ) : null}
     </div>
+  );
+}
+
+function RecordErrorState({ onRetry }: { onRetry: () => void }) {
+  return (
+    <IosCard className="ios-record-error-state">
+      <IconTile tint="#fff0e8" color="#ff681c">
+        <WarningCircleIcon size={22} weight="fill" />
+      </IconTile>
+      <span>
+        <b>暂时无法加载流水</b>
+        <small>网络连接不稳定，或服务暂时不可用。</small>
+      </span>
+      <button type="button" onClick={onRetry}>
+        重新加载
+      </button>
+    </IosCard>
   );
 }
 
@@ -1855,17 +1930,21 @@ function getLineItemErrors(rows: Array<{ id: string; amount: string }>, total: n
   return Object.fromEntries(
     rows.map((row) => {
       if (!row.amount) return [row.id, ""];
-      const amount = Number(row.amount);
+      const amount = amountInputToCents(row.amount);
       if (!Number.isFinite(amount) || amount < 0) return [row.id, "请输入有效金额"];
-      const otherAssigned = rows.reduce(
-        (sumValue, item) => (item.id === row.id ? sumValue : sumValue + Number(item.amount || 0)),
-        0,
-      );
-      const remaining = Math.max(0, total - otherAssigned);
-      if (amount > remaining) return [row.id, `不能超过剩余 ${yuan(remaining)}`];
+      if (amountToCents(total) <= 0) return [row.id, "请先输入总金额"];
       return [row.id, ""];
     }),
   );
+}
+
+function amountToCents(value: number) {
+  return Number.isFinite(value) ? Math.round(value * 100) : 0;
+}
+
+function amountInputToCents(value: string) {
+  const amount = Number(value || 0);
+  return Number.isFinite(amount) ? Math.round(amount * 100) : Number.NaN;
 }
 
 function getInitialLineItemRows(items: LineItemValue[] | undefined) {

@@ -6,7 +6,14 @@ import type { ImportJobStatus } from "./status";
 export const maximumAttachmentFiles = 5;
 export const supportedImportAccept = supportedFileAccept;
 
-export type ImportBatchJob = ImportJobStatus;
+export type ImportBatchJob = ImportJobStatus & { index?: number };
+type ImportBatchDuplicate = {
+  index?: number;
+  fileName: string;
+  duplicateOfJobId: string;
+  message?: string;
+  error?: string;
+};
 export type UploadPlaceholder = ImportJobStatus & {
   localOnly: true;
   status: "uploading";
@@ -153,19 +160,26 @@ export async function uploadImportFiles(
         progressText: "上传中…",
       });
     });
-    const response = await api<{ jobs: ImportBatchJob[] }>(`/books/${bookId}/imports/batch`, {
-      method: "POST",
-      body,
-      signal: requestSignal,
-    });
+    const response = await api<{ jobs: ImportBatchJob[]; duplicates?: ImportBatchDuplicate[] }>(
+      `/books/${bookId}/imports/batch`,
+      {
+        method: "POST",
+        body,
+        signal: requestSignal,
+      },
+    );
     return {
       ...response,
-      jobs: response.jobs.map((job, index) => ({
-        ...job,
-        ...(preparedFiles[index]?.localPreviewUrl
-          ? { localPreviewUrl: preparedFiles[index].localPreviewUrl }
-          : {}),
-      })),
+      jobs: [
+        ...response.jobs.map((job, index) => {
+          const prepared = typeof job.index === "number" ? preparedFiles[job.index] : preparedFiles[index];
+          return {
+            ...job,
+            ...(prepared?.localPreviewUrl ? { localPreviewUrl: prepared.localPreviewUrl } : {}),
+          };
+        }),
+        ...(response.duplicates ?? []).map((duplicate) => duplicateImportJob(duplicate, preparedFiles)),
+      ],
     };
   } finally {
     for (const placeholderId of placeholderIds) {
@@ -173,6 +187,29 @@ export async function uploadImportFiles(
       cancelledLocalUploadIds.delete(placeholderId);
     }
   }
+}
+
+function duplicateImportJob(
+  duplicate: ImportBatchDuplicate,
+  preparedFiles: Array<PreparedImportFile & { sourceIndex: number; placeholderId?: string }>,
+): ImportBatchJob {
+  const prepared = typeof duplicate.index === "number" ? preparedFiles[duplicate.index] : undefined;
+  const timestamp = new Date().toISOString();
+  return {
+    id: prepared?.placeholderId ?? `duplicate_${duplicate.duplicateOfJobId}_${duplicate.index ?? "unknown"}`,
+    fileName: duplicate.fileName,
+    fileType: prepared?.metadata.originalType || prepared?.file.type,
+    status: "failed",
+    localOnly: true,
+    errorCode: "DUPLICATE_IMPORT",
+    errorMessage: duplicate.message || duplicate.error || "这张小票已识别过",
+    duplicateOfJobId: duplicate.duplicateOfJobId,
+    progress: 100,
+    progressText: "这张小票已识别过",
+    localPreviewUrl: prepared?.localPreviewUrl,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
 }
 
 export async function prepareImageFileForUpload(

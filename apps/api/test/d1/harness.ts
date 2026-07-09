@@ -167,6 +167,9 @@ function insertRow(db: TestD1Database, sql: string, values: unknown[]) {
   });
   if (table === "import_jobs") {
     Object.assign(row, {
+      file_hash: row.file_hash ?? null,
+      ocr_text_hash: row.ocr_text_hash ?? null,
+      duplicate_of_import_job_id: row.duplicate_of_import_job_id ?? null,
       cancelable: row.cancelable ?? 1,
       retryable: row.retryable ?? 0,
       retry_count: row.retry_count ?? 0,
@@ -558,6 +561,22 @@ function updateImportJobRows(rows: Row[], sql: string, values: unknown[]) {
     });
     return;
   }
+  if (sql.includes("DUPLICATE_IMPORT")) {
+    patch(values[4], {
+      status: "failed",
+      error_message: values[0],
+      error_code: "DUPLICATE_IMPORT",
+      error_stage: "duplicate",
+      error_retryable: 0,
+      error_terminal: 1,
+      cancelable: 0,
+      retryable: 0,
+      duplicate_of_import_job_id: values[1],
+      updated_at: values[2],
+      updated_by_user_id: values[3],
+    });
+    return;
+  }
   if (sql.includes("ocr_input_r2_key=?")) {
     patch(values[6], {
       ocr_input_r2_key: values[0],
@@ -660,6 +679,10 @@ function updateImportJobRows(rows: Row[], sql: string, values: unknown[]) {
       rowPatch.ocr_total_pages = values[index++];
     } else if (assignment === "ocr_completed_at=?") {
       rowPatch.ocr_completed_at = values[index++];
+    } else if (assignment === "ocr_text_hash=?") {
+      rowPatch.ocr_text_hash = values[index++];
+    } else if (assignment === "updated_by_user_id=?") {
+      rowPatch.updated_by_user_id = values[index++];
     } else if (assignment === "cancelable=?") {
       rowPatch.cancelable = values[index++];
     } else if (assignment === "retryable=?") {
@@ -926,7 +949,19 @@ function selectImportJobs(db: TestD1Database, lower: string, values: unknown[]) 
     ];
   }
   let rows = db.rows.import_jobs.filter((row) => !row.deleted_at);
-  if (lower.includes("where id=?")) rows = rows.filter((row) => row.id === values[0]);
+  if (lower.includes("file_hash=?")) {
+    rows = rows.filter(
+      (row) => row.book_id === values[0] && row.user_id === values[1] && row.file_hash === values[2],
+    );
+  } else if (lower.includes("ocr_text_hash=?")) {
+    rows = rows.filter(
+      (row) =>
+        row.book_id === values[0] &&
+        row.user_id === values[1] &&
+        row.ocr_text_hash === values[2] &&
+        row.id !== values[3],
+    );
+  } else if (lower.includes("where id=?")) rows = rows.filter((row) => row.id === values[0]);
   else if (lower.includes("where user_id=?")) rows = rows.filter((row) => row.user_id === values[0]);
   else if (lower.includes("where book_id=?")) rows = rows.filter((row) => row.book_id === values[0]);
   return rows.map(importJobRow);
@@ -1056,6 +1091,9 @@ function importJobRow(row: Row) {
     fileType: row.file_type,
     r2Key: row.r2_key,
     status: row.status,
+    fileHash: row.file_hash,
+    ocrTextHash: row.ocr_text_hash,
+    duplicateOfImportJobId: row.duplicate_of_import_job_id,
     autoConfirm: row.auto_confirm,
     errorMessage: row.error_message,
     errorCode: row.error_code,

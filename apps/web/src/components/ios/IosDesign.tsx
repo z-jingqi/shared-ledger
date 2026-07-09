@@ -185,6 +185,7 @@ export function IosSheet({
   left,
   right,
   full = false,
+  height,
   className = "",
   hideGrabber = false,
   disableDragClose = false,
@@ -199,6 +200,7 @@ export function IosSheet({
   left?: ReactNode;
   right?: ReactNode;
   full?: boolean;
+  height?: "auto" | "large" | "full";
   className?: string;
   hideGrabber?: boolean;
   disableDragClose?: boolean;
@@ -241,7 +243,7 @@ export function IosSheet({
       if (!draggingRef.current) return;
       event?.preventDefault();
       const delta = clientY - startYRef.current;
-      const next = Math.max(-28, latestYRef.current + delta);
+      const next = Math.max(0, latestYRef.current + delta);
       currentDragYRef.current = next;
       setDragY(next);
     },
@@ -320,7 +322,7 @@ export function IosSheet({
   useEffect(() => () => window.clearTimeout(closeTimerRef.current), []);
 
   return (
-    <div className={`ios-overlay ${full ? "full" : ""}${closing ? " closing" : ""}`}>
+    <div className={`ios-overlay ${full || height === "full" ? "full" : ""}${closing ? " closing" : ""}`}>
       <button
         className="ios-overlay-backdrop"
         type="button"
@@ -329,7 +331,7 @@ export function IosSheet({
       />
       <dialog
         open
-        className={`ios-sheet ${full ? "full" : ""} ${className}${closing ? " closing" : ""}${dragging ? " dragging" : ""}`}
+        className={`ios-sheet ${height ?? (full ? "full" : "auto")} ${className}${closing ? " closing" : ""}${dragging ? " dragging" : ""}`}
         aria-modal="true"
         aria-label={title}
         onPointerDown={beginDrag}
@@ -338,10 +340,9 @@ export function IosSheet({
         onPointerCancel={endDrag}
         style={{
           transform: `translateY(${closing ? "110%" : `${dragY}px`})`,
-          marginBottom: !closing && dragY < 0 ? `${dragY}px` : undefined,
         }}
       >
-        <header className={`ios-sheet-header ${full ? "full" : ""}`}>
+        <header className={`ios-sheet-header ${full || height === "full" ? "full" : ""}`}>
           {!hideGrabber && (
             <button
               className="ios-sheet-grabber"

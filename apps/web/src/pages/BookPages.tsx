@@ -11,6 +11,7 @@ import {
   IosListSkeleton,
   IosPage,
   IosScroll,
+  IosSheet,
   IosTopBar,
 } from "../components/ios/IosDesign";
 import { useAuth } from "../features/auth/AuthProvider";
@@ -30,6 +31,7 @@ export function BookHomePage() {
   const { book, books, loading, setActiveBook } = useActiveBook();
   const { openSheet } = useAppSheetActions();
   const [bookSwitcherOpen, setBookSwitcherOpen] = useState(false);
+  const [monthPickerOpen, setMonthPickerOpen] = useState(false);
   const { data: txData, loading: transactionsLoading } = useApi<TransactionResponse>(
     book ? `/books/${book.id}/transactions` : undefined,
   );
@@ -85,21 +87,15 @@ export function BookHomePage() {
       />
       <IosScroll className="ios-home-scroll">
         <section className="ios-balance-hero">
-          <label className="ios-balance-month-select">
+          <button
+            className="ios-balance-month-select"
+            type="button"
+            aria-label="选择统计月份"
+            onClick={() => setMonthPickerOpen(true)}
+          >
             <span>{currentMonthLabel}</span>
-            <select
-              aria-label="选择统计月份"
-              value={selectedMonth.key}
-              onChange={(event) => setSelectedMonthKey(event.currentTarget.value)}
-            >
-              {monthOptions.map((option) => (
-                <option value={option.key} key={option.key}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
             <CaretDownIcon size={14} weight="bold" aria-hidden />
-          </label>
+          </button>
           <strong>{yuan(income - expense, displayBook.currency)}</strong>
           <div>
             <p>
@@ -224,7 +220,48 @@ export function BookHomePage() {
           close={() => setBookSwitcherOpen(false)}
         />
       )}
+      {monthPickerOpen && (
+        <MonthPickerSheet
+          options={monthOptions}
+          selectedKey={selectedMonth.key}
+          onSelect={(key) => {
+            setSelectedMonthKey(key);
+            setMonthPickerOpen(false);
+          }}
+          onClose={() => setMonthPickerOpen(false)}
+        />
+      )}
     </IosPage>
+  );
+}
+
+function MonthPickerSheet({
+  options,
+  selectedKey,
+  onSelect,
+  onClose,
+}: {
+  options: MonthOption[];
+  selectedKey: string;
+  onSelect: (key: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <IosSheet title="选择月份" onClose={onClose}>
+      <div className="ios-month-picker">
+        {options.map((option) => (
+          <button
+            className={option.key === selectedKey ? "selected" : ""}
+            type="button"
+            onClick={() => onSelect(option.key)}
+            key={option.key}
+          >
+            <span>{option.label}</span>
+            {option.key === selectedKey ? <em>当前</em> : null}
+          </button>
+        ))}
+      </div>
+    </IosSheet>
   );
 }
 

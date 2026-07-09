@@ -510,6 +510,11 @@ html.is-ios {
   border-radius: 0;
 }
 
+.ios-sheet.large {
+  height: min(80dvh, 80%);
+  max-height: min(80dvh, 80%);
+}
+
 .ios-sheet.dragging {
   transition: none;
 }

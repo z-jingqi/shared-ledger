@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LedgerAIError, type LedgerAiTestClient } from "@shared-ledger/ai";
-import { finalizeSavedOcrResult, markFailed, processImportPipelineMessage } from "../../src/services/imports";
+import {
+  finalizeSavedOcrResult,
+  markFailed,
+  processImportPipelineMessage,
+  sha256Hex,
+} from "../../src/services/imports";
 import { authHeaders, createD1TestApp, seedBook, seedUser } from "./harness";
 
 type TestObjectRequest = Parameters<LedgerAiTestClient["generateObject"]>[0];
@@ -155,6 +160,170 @@ describe("D1 image import and OCR quota integrity", () => {
     expect(await context.repository.listImportedRecords(job!.id)).toHaveLength(1);
     expect(context.db.rows.image_ocr_usage).toHaveLength(1);
     expect(requests.some((request) => request.url.includes("vision.googleapis.com"))).toBe(true);
+  });
+
+  it("returns duplicate metadata without creating another OCR job for the same uploaded file", async () => {
+    const context = createD1TestApp();
+    const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
+    const book = seedBook(context.db, user, { id: "book_pro" });
+    const firstForm = new FormData();
+    firstForm.append("files", new File(["same-image"], "receipt.jpg", { type: "image/jpeg" }));
+    const first = await context.app.request(
+      `/books/${book.id}/imports/batch`,
+      { method: "POST", headers: authHeaders(user), body: firstForm },
+      context.env,
+    );
+    const firstBody = await first.json<any>();
+    const secondForm = new FormData();
+    secondForm.append("files", new File(["same-image"], "receipt.jpg", { type: "image/jpeg" }));
+
+    const second = await context.app.request(
+      `/books/${book.id}/imports/batch`,
+      { method: "POST", headers: authHeaders(user), body: secondForm },
+      context.env,
+    );
+    const secondBody = await second.json<any>();
+
+    expect(first.status).toBe(202);
+    expect(firstBody.jobs).toHaveLength(1);
+    expect(second.status).toBe(202);
+    expect(secondBody.jobs).toHaveLength(0);
+    expect(secondBody.duplicates[0]).toMatchObject({
+      duplicateOfJobId: firstBody.jobs[0].id,
+      fileName: "receipt.jpg",
+    });
+    expect(context.db.rows.import_jobs).toHaveLength(1);
+    expect(context.importQueue.messages).toHaveLength(1);
+  });
+
+  it("deduplicates repeated files inside the same upload batch", async () => {
+    const context = createD1TestApp();
+    const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
+    const book = seedBook(context.db, user, { id: "book_pro" });
+    const form = new FormData();
+    form.append("files", new File(["same-image"], "receipt-a.jpg", { type: "image/jpeg" }));
+    form.append("files", new File(["same-image"], "receipt-b.jpg", { type: "image/jpeg" }));
+
+    const response = await context.app.request(
+      `/books/${book.id}/imports/batch`,
+      { method: "POST", headers: authHeaders(user), body: form },
+      context.env,
+    );
+    const body = await response.json<any>();
+
+    expect(response.status).toBe(202);
+    expect(body.jobs).toHaveLength(1);
+    expect(body.duplicates).toHaveLength(1);
+    expect(body.duplicates[0]).toMatchObject({
+      index: 1,
+      duplicateOfJobId: body.jobs[0].id,
+      fileName: "receipt-b.jpg",
+    });
+    expect(context.db.rows.import_jobs).toHaveLength(1);
+    expect(context.importQueue.messages).toHaveLength(1);
+  });
+
+  it("deduplicates uploads against failed non-deleted jobs", async () => {
+    const context = createD1TestApp();
+    const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
+    const book = seedBook(context.db, user, { id: "book_pro" });
+    const firstForm = new FormData();
+    firstForm.append("files", new File(["same-image"], "receipt.jpg", { type: "image/jpeg" }));
+    const first = await context.app.request(
+      `/books/${book.id}/imports/batch`,
+      { method: "POST", headers: authHeaders(user), body: firstForm },
+      context.env,
+    );
+    const firstBody = await first.json<any>();
+    await context.repository.updateImportJob(firstBody.jobs[0].id, "failed", "AI 分析失败");
+    const secondForm = new FormData();
+    secondForm.append("files", new File(["same-image"], "receipt.jpg", { type: "image/jpeg" }));
+
+    const second = await context.app.request(
+      `/books/${book.id}/imports/batch`,
+      { method: "POST", headers: authHeaders(user), body: secondForm },
+      context.env,
+    );
+    const secondBody = await second.json<any>();
+
+    expect(second.status).toBe(202);
+    expect(secondBody.jobs).toHaveLength(0);
+    expect(secondBody.duplicates[0]).toMatchObject({
+      duplicateOfJobId: firstBody.jobs[0].id,
+      fileName: "receipt.jpg",
+    });
+    expect(context.db.rows.import_jobs).toHaveLength(1);
+    expect(context.importQueue.messages).toHaveLength(1);
+  });
+
+  it("exposes raw OCR diagnostics outside prod and disables it in prod", async () => {
+    const context = createD1TestApp();
+    const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
+    const book = seedBook(context.db, user, { id: "book_pro" });
+    stubGoogleVision("早餐 12 元\n合计 12 元");
+    const form = new FormData();
+    form.set("file", new File(["image"], "receipt.jpg", { type: "image/jpeg" }));
+    const env = { ...context.env, AI_TEST_CLIENT: aiClientWithImportedRecord(), APP_ENV: "preview" };
+    const uploaded = await context.app.request(
+      `/books/${book.id}/imports`,
+      { method: "POST", headers: authHeaders(user), body: form },
+      env,
+    );
+    const uploadedBody = await uploaded.json<any>();
+    await drainImportQueue(context, env);
+
+    const preview = await context.app.request(
+      `/imports/${uploadedBody.job.id}/ocr-result`,
+      { headers: authHeaders(user) },
+      env,
+    );
+    const prod = await context.app.request(
+      `/imports/${uploadedBody.job.id}/ocr-result`,
+      { headers: authHeaders(user) },
+      { ...env, APP_ENV: "prod" },
+    );
+
+    expect(preview.status).toBe(200);
+    expect((await preview.json<any>()).ocr.rawText).toContain("早餐");
+    expect(prod.status).toBe(404);
+  });
+
+  it("stops before AI when OCR text matches an existing recognized receipt", async () => {
+    const context = createD1TestApp();
+    const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
+    const book = seedBook(context.db, user, { id: "book_pro" });
+    const first = await context.repository.createImportJob({
+      bookId: book.id,
+      userId: user.id,
+      fileName: "first.jpg",
+      fileType: "image/jpeg",
+      r2Key: "imports/test/first.jpg",
+    });
+    await context.repository.setImportJobOcrTextHash(first.id, await sha256Hex("早餐12元"));
+    await context.repository.updateImportJob(first.id, "pending_confirmation");
+    const second = await context.repository.createImportJob({
+      bookId: book.id,
+      userId: user.id,
+      fileName: "second.jpg",
+      fileType: "image/jpeg",
+      r2Key: "imports/test/second.jpg",
+    });
+    await context.files.put(second.r2Key, "different-image", {
+      httpMetadata: { contentType: "image/jpeg" },
+      customMetadata: { importJobId: second.id, bookId: book.id, uploadedBy: user.id },
+    });
+    stubGoogleVision("早餐 12 元");
+
+    await processImportPipelineMessage(context.env, context.repository, { jobId: second.id, step: "ocr" });
+    const duplicate = await context.repository.getImportJob(second.id);
+
+    expect(duplicate).toMatchObject({
+      status: "failed",
+      errorCode: "DUPLICATE_IMPORT",
+      duplicateOfImportJobId: first.id,
+    });
+    expect(await context.repository.listImportedRecords(second.id)).toHaveLength(0);
+    expect(context.importQueue.messages).toHaveLength(0);
   });
 
   it("uses saved OCR raw text for AI retry without calling Google Vision again", async () => {

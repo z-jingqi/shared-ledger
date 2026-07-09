@@ -105,6 +105,7 @@ async function processImportOcrStep(env: Env, repository: D1LedgerRepository, im
       terminal: true,
     });
   }
+  const ocrTextHash = await sha256Hex(normalizeOcrTextForHash(rawText));
 
   await repository.saveImportOcrResult({
     importJobId: job.id,
@@ -117,12 +118,36 @@ async function processImportOcrStep(env: Env, repository: D1LedgerRepository, im
     processedMimeType: preparedInput.fileType,
     actorId: job.userId,
   });
+  await repository.setImportJobOcrTextHash(job.id, ocrTextHash);
+  const duplicate = await repository.findDuplicateImportByOcrTextHash({
+    bookId: job.bookId,
+    userId: job.userId,
+    ocrTextHash,
+    excludeJobId: job.id,
+  });
+  if (duplicate) {
+    await repository.markImportJobDuplicate(job.id, duplicate.id);
+    return;
+  }
   await repository.updateOcrProgress(job.id, {
     progress: 100,
     stage: "ready",
     completedAt: new Date().toISOString(),
   });
   await enqueueImportPipelineStep(env, job.id, "ai");
+}
+
+export async function sha256Hex(input: ArrayBuffer | string) {
+  const data = typeof input === "string" ? new TextEncoder().encode(input) : input;
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return [...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function normalizeOcrTextForHash(value: string) {
+  return value
+    .replace(/\s+/g, "")
+    .replace(/[，。；：、,.，;:]/g, "")
+    .toLowerCase();
 }
 
 async function processImportAiStep(env: Env, repository: D1LedgerRepository, importJobId: string) {

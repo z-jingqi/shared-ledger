@@ -130,6 +130,9 @@ const mapImportJob = (row: Row): ImportJob => ({
   fileType: row.fileType,
   r2Key: row.r2Key,
   status: row.status,
+  ...(row.fileHash ? { fileHash: row.fileHash } : {}),
+  ...(row.ocrTextHash ? { ocrTextHash: row.ocrTextHash } : {}),
+  ...(row.duplicateOfImportJobId ? { duplicateOfImportJobId: row.duplicateOfImportJobId } : {}),
   autoConfirm: Boolean(row.autoConfirm),
   ...(row.errorMessage ? { errorMessage: row.errorMessage } : {}),
   ...(row.errorCode ? { errorCode: row.errorCode } : {}),
@@ -177,7 +180,7 @@ const mapImportOcrResult = (row: Row): ImportOcrResult => ({
 });
 
 const importJobColumns =
-  "id,book_id AS bookId,user_id AS userId,file_name AS fileName,file_type AS fileType,r2_key AS r2Key,status,auto_confirm AS autoConfirm,error_message AS errorMessage,error_code AS errorCode,error_stage AS errorStage,error_request_id AS errorRequestId,error_retryable AS errorRetryable,error_terminal AS errorTerminal,failed_external_job_id AS failedExternalJobId,cancelable,retryable,retry_count AS retryCount,ocr_job_id AS ocrJobId,ocr_provider AS ocrProvider,ocr_input_r2_key AS ocrInputR2Key,ocr_input_file_type AS ocrInputFileType,ocr_submitted_at AS ocrSubmittedAt,ocr_progress AS ocrProgress,ocr_stage AS ocrStage,ocr_current_page AS ocrCurrentPage,ocr_total_pages AS ocrTotalPages,ocr_completed_at AS ocrCompletedAt,ocr_event_sequence AS ocrEventSequence,created_at AS createdAt,updated_at AS updatedAt,deleted_at AS deletedAt,deleted_by_user_id AS deletedByUserId";
+  "id,book_id AS bookId,user_id AS userId,file_name AS fileName,file_type AS fileType,r2_key AS r2Key,status,file_hash AS fileHash,ocr_text_hash AS ocrTextHash,duplicate_of_import_job_id AS duplicateOfImportJobId,auto_confirm AS autoConfirm,error_message AS errorMessage,error_code AS errorCode,error_stage AS errorStage,error_request_id AS errorRequestId,error_retryable AS errorRetryable,error_terminal AS errorTerminal,failed_external_job_id AS failedExternalJobId,cancelable,retryable,retry_count AS retryCount,ocr_job_id AS ocrJobId,ocr_provider AS ocrProvider,ocr_input_r2_key AS ocrInputR2Key,ocr_input_file_type AS ocrInputFileType,ocr_submitted_at AS ocrSubmittedAt,ocr_progress AS ocrProgress,ocr_stage AS ocrStage,ocr_current_page AS ocrCurrentPage,ocr_total_pages AS ocrTotalPages,ocr_completed_at AS ocrCompletedAt,ocr_event_sequence AS ocrEventSequence,created_at AS createdAt,updated_at AS updatedAt,deleted_at AS deletedAt,deleted_by_user_id AS deletedByUserId";
 const importOcrResultColumns =
   "id,import_job_id AS importJobId,provider,engine_version AS engineVersion,raw_text AS rawText,raw_json AS rawJson,converted,source_mime_type AS sourceMimeType,processed_mime_type AS processedMimeType,created_at AS createdAt,updated_at AS updatedAt";
 const aiConfirmationColumns =
@@ -1062,7 +1065,7 @@ export class D1LedgerRepository {
     };
     await this.db
       .prepare(
-        "INSERT INTO import_jobs (id,book_id,user_id,file_name,file_type,r2_key,status,auto_confirm,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO import_jobs (id,book_id,user_id,file_name,file_type,r2_key,status,file_hash,ocr_text_hash,duplicate_of_import_job_id,auto_confirm,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
       )
       .bind(
         job.id,
@@ -1072,6 +1075,9 @@ export class D1LedgerRepository {
         job.fileType,
         job.r2Key,
         job.status,
+        job.fileHash ?? null,
+        job.ocrTextHash ?? null,
+        job.duplicateOfImportJobId ?? null,
         job.autoConfirm ? 1 : 0,
         job.userId,
         job.userId,
@@ -1123,6 +1129,51 @@ export class D1LedgerRepository {
       .bind(jobId)
       .first<Row>();
     return row ? mapImportJob(row) : null;
+  }
+  async findDuplicateImportByFileHash(input: { bookId: string; userId: string; fileHash: string }) {
+    const row = await this.db
+      .prepare(
+        `SELECT ${importJobColumns} FROM import_jobs
+         WHERE book_id=? AND user_id=? AND file_hash=? AND deleted_at IS NULL AND created_at >= ?
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .bind(input.bookId, input.userId, input.fileHash, importJobCutoff())
+      .first<Row>();
+    return row ? mapImportJob(row) : null;
+  }
+  async findDuplicateImportByOcrTextHash(input: {
+    bookId: string;
+    userId: string;
+    ocrTextHash: string;
+    excludeJobId: string;
+  }) {
+    const row = await this.db
+      .prepare(
+        `SELECT ${importJobColumns} FROM import_jobs
+         WHERE book_id=? AND user_id=? AND ocr_text_hash=? AND id<>? AND deleted_at IS NULL AND created_at >= ?
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .bind(input.bookId, input.userId, input.ocrTextHash, input.excludeJobId, importJobCutoff())
+      .first<Row>();
+    return row ? mapImportJob(row) : null;
+  }
+  async setImportJobOcrTextHash(jobId: string, ocrTextHash: string) {
+    const timestamp = now();
+    await this.db
+      .prepare("UPDATE import_jobs SET ocr_text_hash=?,updated_at=?,updated_by_user_id=? WHERE id=?")
+      .bind(ocrTextHash, timestamp, systemActorId, jobId)
+      .run();
+    return this.getImportJob(jobId);
+  }
+  async markImportJobDuplicate(jobId: string, duplicateOfImportJobId: string) {
+    const timestamp = now();
+    await this.db
+      .prepare(
+        "UPDATE import_jobs SET status='failed',error_message=?,error_code='DUPLICATE_IMPORT',error_stage='duplicate',error_retryable=0,error_terminal=1,cancelable=0,retryable=0,duplicate_of_import_job_id=?,updated_at=?,updated_by_user_id=? WHERE id=?",
+      )
+      .bind("这张小票已识别过", duplicateOfImportJobId, timestamp, systemActorId, jobId)
+      .run();
+    return this.getImportJob(jobId);
   }
   async updateImportJob(jobId: string, status: string, errorMessage?: string) {
     const terminal = ["completed", "pending_confirmation", "failed", "cancelled"].includes(status) ? 1 : 0;

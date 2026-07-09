@@ -106,8 +106,10 @@ const queryAddOverlay = () =>
   screen.queryByRole("menu", { name: /添加|新增|记一笔|记账方式/ });
 const currentMonthNetLabel = () => `${new Date().getMonth() + 1}月净收支`;
 const homeNetAmount = () => document.querySelector(".ios-balance-hero > strong");
-const monthKeyForTest = (date: Date) =>
-  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+const monthOptionLabelForTest = (date: Date, now = new Date()) =>
+  date.getFullYear() === now.getFullYear()
+    ? `${date.getMonth() + 1}月`
+    : `${date.getFullYear()}年${date.getMonth() + 1}月`;
 const dateForTest = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 const openManualAddForm = async (user: ReturnType<typeof userEvent.setup>) => {
@@ -1106,7 +1108,8 @@ describe("shared ledger mobile UI", () => {
     expect(screen.getByText(currentMonthNetLabel())).toBeInTheDocument();
     await waitFor(() => expect(homeNetAmount()).toHaveTextContent("-¥100.00"));
 
-    fireEvent.change(screen.getByLabelText("选择统计月份"), { target: { value: monthKeyForTest(previous) } });
+    await userEvent.click(screen.getByRole("button", { name: "选择统计月份" }));
+    await userEvent.click(screen.getByRole("button", { name: monthOptionLabelForTest(previous) }));
 
     await waitFor(() => expect(homeNetAmount()).toHaveTextContent("-¥55.00"));
   });
@@ -1116,7 +1119,8 @@ describe("shared ledger mobile UI", () => {
     render(<App />);
 
     expect(await findBookSwitcher()).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "2025年12月" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "选择统计月份" }));
+    expect(screen.getByRole("button", { name: "2025年12月" })).toBeInTheDocument();
   });
   it("hides bottom navigation on book creation flow pages", async () => {
     window.history.pushState({}, "", "/books/new");
@@ -1868,7 +1872,7 @@ describe("shared ledger mobile UI", () => {
     await user.click(await screen.findByRole("button", { name: "去确认" }));
 
     const dialog = await screen.findByRole("dialog", { name: "待确认记录" });
-    expect(dialog).toHaveClass("ios-sheet", "full");
+    expect(dialog).toHaveClass("ios-sheet", "large");
     expect(await within(dialog).findByText("超市购物")).toBeInTheDocument();
     expect(within(dialog).getByText("牛奶")).toBeInTheDocument();
     expect(within(dialog).getByText("面包")).toBeInTheDocument();
