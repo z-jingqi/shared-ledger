@@ -28,6 +28,7 @@ let bookMutationRequests: Array<{
 let importBatchRequests: Array<{
   path: string;
   files: string[];
+  fileMetadata: Array<{ originalName?: string; originalType?: string; converted?: boolean }>;
   autoConfirm: FormDataEntryValue | null;
 }> = [];
 let importBatchResponseOverride: (() => Promise<Response>) | undefined;
@@ -54,6 +55,7 @@ let aiChatRequests: Array<{
   page?: string;
   sessionId?: string;
   attachments?: Array<{ name: string; type: string; size: number; lastModified: number }>;
+  fileMetadata?: Array<{ originalName?: string; originalType?: string; converted?: boolean }>;
 }> = [];
 let aiConfirmationRequests: string[] = [];
 let aiSessions: Array<{ id: string; title: string; bookId?: string; createdAt: string; updatedAt: string }> =
@@ -516,7 +518,12 @@ describe("shared ledger mobile UI", () => {
               size: file.size,
               lastModified: file.lastModified,
             }));
-          aiChatRequests.push({ message, bookId, page, sessionId, attachments });
+          const fileMetadata = JSON.parse(String(form.get("fileMetadata") ?? "[]")) as Array<{
+            originalName?: string;
+            originalType?: string;
+            converted?: boolean;
+          }>;
+          aiChatRequests.push({ message, bookId, page, sessionId, attachments, fileMetadata });
           aiSessionMessages[sessionId] ??= [];
           aiSessionMessages[sessionId].push({
             id: `user_${aiSessionMessages[sessionId].length + 1}`,
@@ -927,6 +934,11 @@ describe("shared ledger mobile UI", () => {
           importBatchRequests.push({
             path,
             files: body.getAll("files").map((file) => (file instanceof File ? file.name : String(file))),
+            fileMetadata: JSON.parse(String(body.get("fileMetadata") ?? "[]")) as Array<{
+              originalName?: string;
+              originalType?: string;
+              converted?: boolean;
+            }>,
             autoConfirm: body.get("autoConfirm"),
           });
           if (importBatchResponseOverride) return importBatchResponseOverride();
@@ -948,6 +960,13 @@ describe("shared ledger mobile UI", () => {
           importCancelRequests.push(path);
           return Promise.resolve(json({ ok: true }));
         }
+        if (path.includes("/imports/job_heic/file"))
+          return Promise.resolve(
+            new Response(new Blob(["jpeg"], { type: "image/jpeg" }), {
+              status: 200,
+              headers: { "content-type": "image/jpeg" },
+            }),
+          );
         if (path.includes("/imports/job_new/records"))
           return Promise.resolve(
             json({
@@ -1259,6 +1278,11 @@ describe("shared ledger mobile UI", () => {
     expect(aiChatRequests.at(-1)?.attachments?.[0]).toMatchObject({
       name: "invoice.jpg",
       type: "image/jpeg",
+    });
+    expect(aiChatRequests.at(-1)?.fileMetadata?.[0]).toMatchObject({
+      originalName: "invoice.jpg",
+      originalType: "image/jpeg",
+      converted: false,
     });
     expect(within(confirmation).getByText("保存这些附件？")).toBeInTheDocument();
     expect(within(confirmation).getByText("invoice.jpg")).toBeInTheDocument();
@@ -1660,6 +1684,7 @@ describe("shared ledger mobile UI", () => {
     expect(importBatchRequests[0]).toMatchObject({
       path: expect.stringContaining("/books/book_test/imports/batch"),
       files: ["receipt.png"],
+      fileMetadata: [{ originalName: "receipt.png", originalType: "image/png", converted: false }],
       autoConfirm: null,
     });
     expect(window.location.pathname).toBe("/home");
@@ -1688,7 +1713,7 @@ describe("shared ledger mobile UI", () => {
 
     expect(await screen.findByRole("heading", { name: "识别进度" })).toBeInTheDocument();
     expect(screen.getByText("receipt.png")).toBeInTheDocument();
-    expect(screen.getByText("正在上传…")).toBeInTheDocument();
+    expect(screen.getByText("正在准备图片…")).toBeInTheDocument();
 
     resolveBatch(
       json({
@@ -1707,7 +1732,7 @@ describe("shared ledger mobile UI", () => {
     await uploadPromise;
     await waitFor(() => expect(importBatchRequests).toHaveLength(1));
   });
-  it("renders HEIC import jobs as file type previews instead of broken images", async () => {
+  it("renders converted HEIC import jobs as image previews instead of HEIC file fallbacks", async () => {
     const user = userEvent.setup();
     plan = "pro";
     mockImportJobs = [
@@ -1725,7 +1750,8 @@ describe("shared ledger mobile UI", () => {
     await user.click(await screen.findByRole("button", { name: /图片任务处理中/ }));
 
     expect(await screen.findByRole("heading", { name: "识别进度" })).toBeInTheDocument();
-    expect(screen.getByText("HEIC")).toBeInTheDocument();
+    expect(screen.getByText("图片")).toBeInTheDocument();
+    expect(screen.queryByText("HEIC")).not.toBeInTheDocument();
     expect(screen.queryByText("预览失败")).not.toBeInTheDocument();
   });
   it("opens job-specific pending records from the import job confirm action", async () => {
@@ -1778,7 +1804,9 @@ describe("shared ledger mobile UI", () => {
 
     await user.click(await screen.findByRole("button", { name: /图片任务处理中/ }));
     expect(await screen.findByRole("heading", { name: "识别进度" })).toBeInTheDocument();
-    await user.click(await screen.findByRole("button", { name: "取消" }));
+    const jobCard = screen.getByText("receipt.png").closest(".ios-import-job");
+    expect(jobCard).toBeTruthy();
+    await user.click(within(jobCard as HTMLElement).getByRole("button", { name: "取消" }));
 
     await waitFor(() => expect(importCancelRequests).toContain("/api/imports/job_new/cancel"));
   });

@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LedgerAIError, type LedgerAiTestClient } from "@shared-ledger/ai";
-import type { D1LedgerRepository } from "../../src/repository";
 import { finalizeSavedOcrResult, markFailed, processImportPipelineMessage } from "../../src/services/imports";
 import { authHeaders, createD1TestApp, seedBook, seedUser } from "./harness";
 
@@ -145,7 +144,7 @@ describe("D1 image import and OCR quota integrity", () => {
 
     expect(uploaded.status).toBe(202);
     expect(job?.status).toBe("uploaded");
-    expect(context.importQueue.messages).toEqual([{ jobId: job!.id, step: "convert" }]);
+    expect(context.importQueue.messages).toEqual([{ jobId: job!.id, step: "ocr" }]);
     await drainImportQueue(context, env);
 
     const finalized = await context.repository.getImportJob(job!.id);
@@ -276,36 +275,52 @@ describe("D1 image import and OCR quota integrity", () => {
     expect(await context.files.get(job.r2Key)).toBeNull();
   });
 
-  it("does not write OCR input or enqueue OCR when cancelled during conversion", async () => {
+  it("keeps original HEIC display metadata while uploading OCR-ready JPEG bytes", async () => {
     const context = createD1TestApp();
     const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
     const book = seedBook(context.db, user, { id: "book_pro" });
-    const job = await context.repository.createImportJob({
-      bookId: book.id,
-      userId: user.id,
-      fileName: "receipt.jpg",
-      fileType: "image/jpeg",
-      r2Key: "imports/test/receipt.jpg",
-    });
-    await context.files.put(job.r2Key, new Uint8Array([0xff, 0xd8, 0xff, 0xe0]).buffer, {
-      httpMetadata: { contentType: "image/jpeg" },
-      customMetadata: { importJobId: job.id, bookId: book.id, uploadedBy: user.id },
-    });
+    const form = new FormData();
+    form.append(
+      "files",
+      new File([new Uint8Array([0xff, 0xd8, 0xff, 0xe0])], "IMG_4706.jpg", { type: "image/jpeg" }),
+    );
+    form.set(
+      "fileMetadata",
+      JSON.stringify([{ originalName: "IMG_4706.HEIC", originalType: "image/heic", converted: true }]),
+    );
 
-    const repository = Object.create(context.repository) as D1LedgerRepository;
-    let reads = 0;
-    repository.getImportJob = async (jobId: string) => {
-      reads += 1;
-      if (reads === 3) await context.repository.updateImportJob(jobId, "cancelled");
-      return context.repository.getImportJob(jobId);
-    };
+    const response = await context.app.request(
+      `/books/${book.id}/imports/batch`,
+      { method: "POST", headers: authHeaders(user), body: form },
+      context.env,
+    );
+    const body = await response.json<any>();
+    const job = await context.repository.getImportJob(body.jobs[0].id);
 
-    await processImportPipelineMessage(context.env, repository, { jobId: job.id, step: "convert" });
+    expect(response.status).toBe(202);
+    expect(job?.fileName).toBe("IMG_4706.HEIC");
+    expect(job?.fileType).toBe("image/heic");
+    expect(job?.ocrInputR2Key).toBe(job?.r2Key);
+    expect(job?.ocrInputFileType).toBe("image/jpeg");
+    expect(context.importQueue.messages).toEqual([{ jobId: job!.id, step: "ocr" }]);
+  });
 
-    const cancelled = await context.repository.getImportJob(job.id);
-    expect(cancelled?.status).toBe("cancelled");
-    expect(cancelled?.ocrInputR2Key).toBeFalsy();
-    expect(context.importQueue.messages).toHaveLength(0);
+  it("rejects unconverted OCR-unsupported image uploads without creating a job", async () => {
+    const context = createD1TestApp();
+    const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
+    const book = seedBook(context.db, user, { id: "book_pro" });
+    const form = new FormData();
+    form.set("file", new File(["heic"], "IMG_4706.HEIC", { type: "image/heic" }));
+
+    const response = await context.app.request(
+      `/books/${book.id}/imports`,
+      { method: "POST", headers: authHeaders(user), body: form },
+      context.env,
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json<any>()).error).toBe("图片未完成转换，请重新选择文件");
+    expect(context.db.rows.import_jobs).toHaveLength(0);
   });
 
   it("serves import image previews from shared ledger R2", async () => {

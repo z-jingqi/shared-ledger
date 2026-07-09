@@ -558,25 +558,6 @@ function updateImportJobRows(rows: Row[], sql: string, values: unknown[]) {
     });
     return;
   }
-  if (sql.includes("status='converting'")) {
-    patch(values[2], {
-      status: "converting",
-      ocr_progress: 10,
-      ocr_stage: "conversion_starting",
-      error_message: null,
-      error_code: null,
-      error_stage: null,
-      error_request_id: null,
-      error_retryable: 0,
-      error_terminal: 0,
-      failed_external_job_id: null,
-      cancelable: 1,
-      retryable: 0,
-      updated_at: values[0],
-      updated_by_user_id: values[1],
-    });
-    return;
-  }
   if (sql.includes("ocr_input_r2_key=?")) {
     patch(values[6], {
       ocr_input_r2_key: values[0],

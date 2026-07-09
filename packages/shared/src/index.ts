@@ -41,6 +41,27 @@ export const supportedFileTypes = [
   "image/x-adobe-dng",
 ] as const;
 export type SupportedFileType = (typeof supportedFileTypes)[number];
+export const googleVisionSupportedImageTypes = [
+  "image/jpg",
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/bmp",
+  "image/x-ms-bmp",
+  "image/webp",
+  "image/tiff",
+  "image/x-tiff",
+  "image/raw",
+  "image/x-raw",
+  "image/dng",
+  "image/x-dng",
+  "image/x-adobe-dng",
+  "image/x-canon-cr2",
+  "image/x-nikon-nef",
+  "image/x-sony-arw",
+  "image/vnd.microsoft.icon",
+  "image/x-icon",
+] as const;
 export const supportedFileExtensions = [
   ".jpg",
   ".jpeg",

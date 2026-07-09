@@ -3,7 +3,12 @@ import { toast } from "sonner";
 import type { ImportAttachmentView } from "../imports/ImportAttachmentCards";
 import { AiPendingConfirmationBar, AiPromptInput } from "./AiElements";
 import { AiMessageList, type AiMessageIndexItem } from "./AiMessageList";
-import { maximumAttachmentFiles, supportedImportAccept } from "../../features/imports/upload";
+import {
+  maximumAttachmentFiles,
+  prepareImageFileForUpload,
+  supportedImportAccept,
+  type PreparedImportFile,
+} from "../../features/imports/upload";
 import { isSupportedAttachment, unsupportedFileMessage } from "../../features/imports/files";
 import { normalizeAiPart, type AiRenderableMessage, type AiStructuredPart } from "../../features/ai/types";
 import { useAuth } from "../../features/auth/AuthProvider";
@@ -580,22 +585,33 @@ async function requestAiStream(
   },
 ) {
   const body = new FormData();
+  const preparedAttachments: PreparedImportFile[] = [];
   body.set("message", input.message);
   body.set("page", input.page);
   body.set("timeZone", input.timeZone);
   if (input.bookId) body.set("bookId", input.bookId);
-  input.attachments.forEach((file) => body.append("files", file, file.name));
-  const response = await apiFetchWithRefresh(`/ai/sessions/${targetSessionId}/messages/stream`, {
-    method: "POST",
-    body,
-    signal: input.signal,
-  });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => ({ error: "AI 助手暂时不可用" }));
-    throw new Error(String(payload.error ?? "AI 助手暂时不可用"));
+  try {
+    for (const file of input.attachments) {
+      preparedAttachments.push(await prepareImageFileForUpload(file, { signal: input.signal }));
+    }
+    preparedAttachments.forEach((prepared) => body.append("files", prepared.file, prepared.file.name));
+    body.set("fileMetadata", JSON.stringify(preparedAttachments.map((prepared) => prepared.metadata)));
+    const response = await apiFetchWithRefresh(`/ai/sessions/${targetSessionId}/messages/stream`, {
+      method: "POST",
+      body,
+      signal: input.signal,
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({ error: "AI 助手暂时不可用" }));
+      throw new Error(String(payload.error ?? "AI 助手暂时不可用"));
+    }
+    if (!response.body) throw new Error("AI 响应为空");
+    return readAiEventStream(response.body, { signal: input.signal, onDelta: input.onDelta });
+  } finally {
+    preparedAttachments.forEach((prepared) => {
+      if (prepared.localPreviewUrl) URL.revokeObjectURL(prepared.localPreviewUrl);
+    });
   }
-  if (!response.body) throw new Error("AI 响应为空");
-  return readAiEventStream(response.body, { signal: input.signal, onDelta: input.onDelta });
 }
 
 function serverMessageToRenderable(message: AiSessionMessage): AiRenderableMessage {

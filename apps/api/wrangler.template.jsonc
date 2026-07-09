@@ -9,7 +9,6 @@
     "WEB_ORIGIN": "__WEB_ORIGIN__",
     "AI_PROVIDER": "__AI_PROVIDER__",
   },
-  "limits": { "cpu_ms": 300000 },
   "d1_databases": [
     {
       "binding": "DB",

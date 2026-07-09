@@ -1,3 +1,4 @@
+import { googleVisionSupportedImageTypes } from "@shared-ledger/shared";
 import type { Env } from "../types";
 
 export type GoogleVisionErrorPayload = {
@@ -89,24 +90,7 @@ type OcrLayoutBlock = {
 };
 
 const visionEndpoint = "https://vision.googleapis.com/v1/images:annotate";
-const supportedVisionImageTypes = new Set([
-  "image/jpeg",
-  "image/jpg",
-  "image/png",
-  "image/gif",
-  "image/bmp",
-  "image/webp",
-  "image/tiff",
-  "image/x-tiff",
-  "image/raw",
-  "image/x-raw",
-  "image/x-adobe-dng",
-  "image/x-canon-cr2",
-  "image/x-nikon-nef",
-  "image/x-sony-arw",
-  "image/vnd.microsoft.icon",
-  "image/x-icon",
-]);
+const supportedVisionImageTypes = new Set<string>(googleVisionSupportedImageTypes);
 
 export class GoogleVisionOcrClient {
   constructor(private readonly apiKey: string) {}

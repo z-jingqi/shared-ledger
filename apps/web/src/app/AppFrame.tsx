@@ -7,7 +7,11 @@ import {
   type ImportFileUploadInputHandle,
 } from "../components/imports/ImportFileUploadInput";
 import { useAuth } from "../features/auth/AuthProvider";
-import { removeImportJobsFromCache, upsertImportJobsInCache } from "../features/imports/cache";
+import {
+  patchImportJobInCache,
+  removeImportJobsFromCache,
+  upsertImportJobsInCache,
+} from "../features/imports/cache";
 import { revokeUploadPlaceholderUrls } from "../features/imports/upload";
 import { useInvitationBadge } from "../features/invitations/useInvitationBadge";
 import { AppSheetHost } from "../features/sheets/AppSheetHost";
@@ -106,6 +110,24 @@ function AppFrameInner({ children }: { children: ReactNode }) {
                 upsertImportJobsInCache(book?.id, user?.id, placeholders);
                 openSheet({ type: "imports" });
               }}
+              onUploadProgress={(event) => {
+                if (!event.placeholderId) return;
+                const previous = patchImportJobInCache(book?.id, user?.id, event.placeholderId, {
+                  ...(event.fileType ? { fileType: event.fileType } : {}),
+                  ...(typeof event.progress === "number" ? { progress: event.progress } : {}),
+                  ...(event.progressText ? { progressText: event.progressText } : {}),
+                  ...(event.localPreviewUrl ? { localPreviewUrl: event.localPreviewUrl } : {}),
+                  ...(event.errorMessage ? { errorMessage: event.errorMessage } : {}),
+                  updatedAt: new Date().toISOString(),
+                });
+                if (
+                  event.localPreviewUrl &&
+                  previous?.localPreviewUrl &&
+                  previous.localPreviewUrl !== event.localPreviewUrl
+                ) {
+                  URL.revokeObjectURL(previous.localPreviewUrl);
+                }
+              }}
               onUploaded={(jobs, placeholders) => {
                 const removed = removeImportJobsFromCache(
                   book?.id,
@@ -116,13 +138,19 @@ function AppFrameInner({ children }: { children: ReactNode }) {
                 upsertImportJobsInCache(book?.id, user?.id, jobs);
                 openSheet({ type: "imports" });
               }}
-              onUploadError={(placeholders) => {
-                const removed = removeImportJobsFromCache(
-                  book?.id,
-                  user?.id,
-                  placeholders.map((item) => item.id),
-                );
-                revokeUploadPlaceholderUrls(removed.length ? removed : placeholders);
+              onUploadError={(placeholders, error) => {
+                const message = error instanceof Error ? error.message : "图片准备或上传失败";
+                const timestamp = new Date().toISOString();
+                for (const placeholder of placeholders) {
+                  patchImportJobInCache(book?.id, user?.id, placeholder.id, {
+                    status: "failed",
+                    progressText: "处理失败",
+                    errorMessage: message,
+                    retryable: false,
+                    cancelable: false,
+                    updatedAt: timestamp,
+                  });
+                }
               }}
             />
           ) : null}

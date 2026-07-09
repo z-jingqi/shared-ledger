@@ -1,11 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-const convertUnsupportedImageToJpegMock = vi.hoisted(() =>
-  vi.fn(async () => new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00]).buffer),
-);
-
-vi.mock("../src/services/image-codecs", () => ({
-  convertUnsupportedImageToJpeg: convertUnsupportedImageToJpegMock,
-}));
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   assertImageImportFile,
@@ -21,10 +14,6 @@ import {
 } from "../src/services/ocr";
 import { prepareImageForGoogleVision } from "../src/services/image-conversion";
 import type { D1LedgerRepository } from "../src/repository";
-
-beforeEach(() => {
-  convertUnsupportedImageToJpegMock.mockClear();
-});
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -146,45 +135,33 @@ describe("Google Vision OCR client", () => {
 
   it("keeps directly supported images without conversion", async () => {
     const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]).buffer;
-    const result = await prepareImageForGoogleVision(importJob({ fileType: "image/jpeg" }), bytes);
+    const result = await prepareImageForGoogleVision({ fileType: "image/jpeg" }, bytes);
 
     expect(result.fileType).toBe("image/jpeg");
     expect(result.converted).toBe(false);
     expect(result.bytes).toBe(bytes);
-    expect(convertUnsupportedImageToJpegMock).not.toHaveBeenCalled();
   });
 
-  it("converts OCR-unsupported HEIF container images locally before Google Vision", async () => {
+  it("rejects HEIF container images that were not converted in the browser", async () => {
     const source = new Uint8Array([1, 2, 3]).buffer;
-    const result = await prepareImageForGoogleVision(importJob({ fileType: "image/heic" }), source);
-
-    expect(result.fileType).toBe("image/jpeg");
-    expect(result.converted).toBe(true);
-    expect(new Uint8Array(result.bytes).slice(0, 3)).toEqual(new Uint8Array([0xff, 0xd8, 0xff]));
-    expect(convertUnsupportedImageToJpegMock).toHaveBeenCalledWith(source, {
-      maxPixels: 28_000_000,
-      quality: 88,
+    await expect(prepareImageForGoogleVision({ fileType: "image/heic" }, source)).rejects.toMatchObject({
+      code: "UNSUPPORTED_IMAGE_FORMAT",
+      message: "图片未完成转换，请重新选择文件",
+      terminal: true,
     });
   });
 
-  it("converts AVIF images through the same Worker codec path", async () => {
+  it("rejects AVIF images when the browser did not convert them to JPEG", async () => {
     const source = new Uint8Array([4, 5, 6]).buffer;
-    const result = await prepareImageForGoogleVision(importJob({ fileType: "image/avif" }), source);
-
-    expect(result.fileType).toBe("image/jpeg");
-    expect(result.converted).toBe(true);
-    expect(convertUnsupportedImageToJpegMock).toHaveBeenCalledWith(source, {
-      maxPixels: 28_000_000,
-      quality: 88,
+    await expect(prepareImageForGoogleVision({ fileType: "image/avif" }, source)).rejects.toMatchObject({
+      code: "UNSUPPORTED_IMAGE_FORMAT",
+      terminal: true,
     });
   });
 
   it("rejects unsupported image formats instead of using Cloudflare image transforms", async () => {
     await expect(
-      prepareImageForGoogleVision(
-        importJob({ fileType: "image/svg+xml" }),
-        new TextEncoder().encode("<svg />").buffer,
-      ),
+      prepareImageForGoogleVision({ fileType: "image/svg+xml" }, new TextEncoder().encode("<svg />").buffer),
     ).rejects.toMatchObject({
       code: "UNSUPPORTED_IMAGE_FORMAT",
       terminal: true,
@@ -269,19 +246,5 @@ function visionBlock(text: string, x: number, y: number, width: number, height: 
         })),
       },
     ],
-  };
-}
-
-function importJob(input: { fileType: string }) {
-  return {
-    id: "import_test",
-    bookId: "book_test",
-    userId: "user_test",
-    fileName: "receipt",
-    fileType: input.fileType,
-    r2Key: "imports/test/receipt",
-    status: "uploaded",
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
   };
 }

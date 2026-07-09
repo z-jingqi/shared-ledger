@@ -1135,16 +1135,6 @@ export class D1LedgerRepository {
       .run();
     return this.getImportJob(jobId);
   }
-  async markImportJobConverting(jobId: string) {
-    const timestamp = now();
-    await this.db
-      .prepare(
-        "UPDATE import_jobs SET status='converting',ocr_progress=10,ocr_stage='conversion_starting',error_message=NULL,error_code=NULL,error_stage=NULL,error_request_id=NULL,error_retryable=0,error_terminal=0,failed_external_job_id=NULL,cancelable=1,retryable=0,updated_at=?,updated_by_user_id=? WHERE id=?",
-      )
-      .bind(timestamp, systemActorId, jobId)
-      .run();
-    return this.getImportJob(jobId);
-  }
   async setImportJobOcrInput(jobId: string, input: { r2Key: string; fileType: string; converted: boolean }) {
     const timestamp = now();
     await this.db
@@ -1154,8 +1144,8 @@ export class D1LedgerRepository {
       .bind(
         input.r2Key,
         input.fileType,
-        input.converted ? 35 : 30,
-        input.converted ? "conversion_converted" : "conversion_skipped",
+        input.converted ? 25 : 20,
+        input.converted ? "upload_converted" : "upload_ready",
         timestamp,
         systemActorId,
         jobId,
@@ -1313,7 +1303,7 @@ export class D1LedgerRepository {
   async prepareImportJobRetry(jobId: string) {
     await this.db
       .prepare(
-        "UPDATE import_jobs SET retry_count=retry_count+1,status='uploaded',ocr_job_id=NULL,ocr_provider=NULL,ocr_input_r2_key=NULL,ocr_input_file_type=NULL,ocr_submitted_at=NULL,ocr_progress=0,ocr_stage=NULL,ocr_current_page=NULL,ocr_total_pages=NULL,ocr_completed_at=NULL,ocr_event_sequence=0,error_message=NULL,error_code=NULL,error_stage=NULL,error_request_id=NULL,error_retryable=0,error_terminal=0,failed_external_job_id=NULL,cancelable=1,retryable=0,updated_at=? WHERE id=?",
+        "UPDATE import_jobs SET retry_count=retry_count+1,status='uploaded',ocr_job_id=NULL,ocr_provider=NULL,ocr_submitted_at=NULL,ocr_progress=20,ocr_stage='upload_ready',ocr_current_page=NULL,ocr_total_pages=NULL,ocr_completed_at=NULL,ocr_event_sequence=0,error_message=NULL,error_code=NULL,error_stage=NULL,error_request_id=NULL,error_retryable=0,error_terminal=0,failed_external_job_id=NULL,cancelable=1,retryable=0,updated_at=? WHERE id=?",
       )
       .bind(now(), jobId)
       .run();

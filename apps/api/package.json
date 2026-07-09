@@ -19,8 +19,6 @@
     "@shared-ledger/ledger-skills": "workspace:*",
     "@shared-ledger/shared": "workspace:*",
     "hono": "^4.7.7",
-    "jpeg-js": "^0.4.4",
-    "libheif-js": "^1.19.8",
     "zod": "^3.24.3"
   },
   "devDependencies": {

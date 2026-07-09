@@ -9,7 +9,6 @@
     "WEB_ORIGIN": "http://localhost:5175",
     "AI_PROVIDER": "openrouter",
   },
-  "limits": { "cpu_ms": 300000 },
   "d1_databases": [
     {
       "binding": "DB",

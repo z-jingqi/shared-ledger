@@ -11,6 +11,7 @@ import {
   revokeUploadPlaceholderUrls,
   uploadImportFiles,
   type ImportBatchJob,
+  type UploadProgressEvent,
   type UploadPlaceholder,
 } from "../../features/imports/upload";
 
@@ -22,8 +23,9 @@ type ImportFileUploadInputProps = {
   bookId?: string;
   disabled?: boolean;
   onUploadStart?: (placeholders: UploadPlaceholder[]) => void | Promise<void>;
+  onUploadProgress?: (event: UploadProgressEvent) => void;
   onUploaded?: (jobs: ImportBatchJob[], placeholders: UploadPlaceholder[]) => void | Promise<void>;
-  onUploadError?: (placeholders: UploadPlaceholder[]) => void | Promise<void>;
+  onUploadError?: (placeholders: UploadPlaceholder[], error: unknown) => void | Promise<void>;
   onUploadingChange?: (uploading: boolean) => void;
 };
 
@@ -31,6 +33,7 @@ export function ImportFileUploadInput({
   bookId,
   disabled = false,
   onUploadStart,
+  onUploadProgress,
   onUploaded,
   onUploadError,
   onUploadingChange,
@@ -89,12 +92,20 @@ export function ImportFileUploadInput({
     const placeholders = createUploadPlaceholders(selectedFiles);
     await onUploadStart?.(placeholders);
     try {
-      const { jobs } = await uploadImportFiles(bookId, selectedFiles);
+      const { jobs } = await uploadImportFiles(bookId, selectedFiles, {
+        placeholders,
+        onProgress: onUploadProgress,
+      });
       await onUploaded?.(jobs, placeholders);
     } catch (cause) {
-      await onUploadError?.(placeholders);
-      if (!onUploadError) revokeUploadPlaceholderUrls(placeholders);
-      toast.error(cause instanceof Error ? cause.message : "上传失败", { duration: 3000, closeButton: true });
+      await onUploadError?.(placeholders, cause);
+      if (!onUploadError) {
+        revokeUploadPlaceholderUrls(placeholders);
+        toast.error(cause instanceof Error ? cause.message : "上传失败", {
+          duration: 3000,
+          closeButton: true,
+        });
+      }
     } finally {
       setUploadingState(false);
       resetInput();

@@ -23,6 +23,7 @@ import type { MemoryLedgerStore, SimpleEntity } from "../store";
 import type { LedgerUser, Transaction } from "../types";
 import type { Env } from "../types";
 import { updateUserAvatar, updateUserProfile } from "./auth";
+import { prepareImageForGoogleVision } from "./image-conversion";
 import { markFailed, submitOcrJob } from "./imports";
 import {
   assertImageImportFile,
@@ -53,6 +54,13 @@ type AiActionRuntime = {
   timeZone: string;
   origin: string;
   attachments: File[];
+  attachmentFileMetadata?: AiAttachmentFileMetadata[];
+};
+
+type AiAttachmentFileMetadata = {
+  originalName?: string;
+  originalType?: string;
+  converted?: boolean;
 };
 
 type AiActionExecutionResult = {
@@ -786,9 +794,12 @@ async function saveAttachments(runtime: AiActionRuntime, bookId: string, rawArgs
   for (const file of files) assertImageImportFile(file);
   await assertImageOcrQuota(runtime.repository, runtime.user.id, files.length);
   const jobs = [];
-  for (const file of files) {
+  for (const [index, file] of files.entries()) {
     jobs.push(
-      await createImportJobFromFile(runtime, bookId, file, args.autoConfirm, { skipQuotaCheck: true }),
+      await createImportJobFromFile(runtime, bookId, file, args.autoConfirm, {
+        skipQuotaCheck: true,
+        metadata: runtime.attachmentFileMetadata?.[index],
+      }),
     );
   }
   return {
@@ -1130,27 +1141,35 @@ async function createImportJobFromFile(
   bookId: string,
   file: File,
   autoConfirm: boolean,
-  options: { skipQuotaCheck?: boolean } = {},
+  options: { skipQuotaCheck?: boolean; metadata?: AiAttachmentFileMetadata } = {},
 ) {
   if (!(runtime.repository instanceof D1LedgerRepository)) throw new Error("导入功能需要 D1 运行时");
   if (!runtime.env.FILES) throw new Error("导入功能需要 R2 绑定");
   assertImageImportFile(file);
   const resolvedFileType = imageImportFileType(file);
+  const bytes = await file.arrayBuffer();
+  const ocrInput = await prepareImageForGoogleVision({ fileType: resolvedFileType }, bytes);
+  const displayFileName = options.metadata?.originalName?.trim() || file.name;
+  const displayFileType = options.metadata?.originalType?.trim().toLowerCase() || resolvedFileType;
   if (!options.skipQuotaCheck) await assertImageOcrQuota(runtime.repository, runtime.user.id);
-  const suffix = file.name.replaceAll(/[^a-zA-Z0-9._-]/g, "_");
+  const suffix = displayFileName.replaceAll(/[^a-zA-Z0-9._-]/g, "_");
   const job = await runtime.repository.createImportJob({
     bookId,
     userId: runtime.user.id,
-    fileName: file.name,
-    fileType: resolvedFileType,
+    fileName: displayFileName,
+    fileType: displayFileType,
     r2Key: `imports/${bookId}/${crypto.randomUUID()}-${suffix}`,
     autoConfirm,
   });
   try {
-    const bytes = await file.arrayBuffer();
-    await runtime.env.FILES.put(job.r2Key, bytes, {
-      httpMetadata: { contentType: resolvedFileType },
+    await runtime.env.FILES.put(job.r2Key, ocrInput.bytes, {
+      httpMetadata: { contentType: ocrInput.fileType },
       customMetadata: { importJobId: job.id, bookId, uploadedBy: runtime.user.id },
+    });
+    await runtime.repository.setImportJobOcrInput(job.id, {
+      r2Key: job.r2Key,
+      fileType: ocrInput.fileType,
+      converted: Boolean(options.metadata?.converted) || displayFileType !== ocrInput.fileType,
     });
     return await submitOcrJob(runtime.env, runtime.repository, job);
   } catch (error) {

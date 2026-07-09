@@ -21,6 +21,13 @@ type AiRequestBody = {
   page?: string;
   timeZone?: string;
   attachments: File[];
+  fileMetadata?: AiAttachmentFileMetadata[];
+};
+
+type AiAttachmentFileMetadata = {
+  originalName?: string;
+  originalType?: string;
+  converted?: boolean;
 };
 
 const sessionPatchSchema = z.object({
@@ -440,6 +447,7 @@ async function runAiMessage(
     timeZone: body.timeZone ?? "Asia/Shanghai",
     origin: new URL(context.req.url).origin,
     attachments: body.attachments,
+    attachmentFileMetadata: body.fileMetadata,
   };
   let parts: Array<Record<string, any>>;
   if (skillSelection.skillName === "general.chat") {
@@ -642,12 +650,14 @@ async function readAiRequest(context: any): Promise<AiRequestBody> {
       ...form.getAll("file"),
       ...form.getAll("attachments"),
     ].filter((value): value is File => value instanceof File && Boolean(value.name));
+    const fileMetadata = parseAiAttachmentFileMetadata(form.get("fileMetadata"), attachments.length);
     return {
       message: String(form.get("message") ?? ""),
       bookId: stringOrUndefined(form.get("bookId")),
       page: stringOrUndefined(form.get("page")),
       timeZone: stringOrUndefined(form.get("timeZone")),
       attachments,
+      fileMetadata,
     };
   }
   const json = (await context.req.json().catch(() => ({}))) as Record<string, unknown>;
@@ -657,7 +667,39 @@ async function readAiRequest(context: any): Promise<AiRequestBody> {
     page: typeof json.page === "string" ? json.page : undefined,
     timeZone: typeof json.timeZone === "string" ? json.timeZone : undefined,
     attachments: [],
+    fileMetadata: [],
   };
+}
+
+function parseAiAttachmentFileMetadata(value: FormDataEntryValue | null, fileCount: number) {
+  if (typeof value !== "string" || !value.trim()) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed) || parsed.length !== fileCount) return [];
+  return parsed.map(normalizeAiAttachmentFileMetadata);
+}
+
+function normalizeAiAttachmentFileMetadata(value: unknown): AiAttachmentFileMetadata {
+  if (!value || typeof value !== "object") return {};
+  const input = value as Record<string, unknown>;
+  return {
+    originalName: sanitizeMetadataString(input.originalName),
+    originalType: sanitizeMetadataMimeType(input.originalType),
+    converted: input.converted === true,
+  };
+}
+
+function sanitizeMetadataString(value: unknown) {
+  return typeof value === "string" ? value.trim().slice(0, 240) : undefined;
+}
+
+function sanitizeMetadataMimeType(value: unknown) {
+  const normalized = sanitizeMetadataString(value)?.toLowerCase();
+  return normalized?.startsWith("image/") ? normalized : undefined;
 }
 
 async function buildModelContext(repository: AiActionRepository, user: LedgerUser, bookId?: string) {

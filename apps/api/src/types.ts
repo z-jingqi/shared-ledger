@@ -1,6 +1,6 @@
 import type { LedgerAiTestClient } from "@shared-ledger/ai";
 
-export type ImportPipelineStep = "convert" | "ocr" | "ai";
+export type ImportPipelineStep = "ocr" | "ai";
 
 export type ImportPipelineMessage = {
   jobId: string;

@@ -5,7 +5,7 @@ import { D1LedgerRepository } from "../repository";
 import type { ImportedRecord, ImportJob } from "../store";
 import type { Env, ImportPipelineMessage, ImportPipelineStep } from "../types";
 import { runtimeAiProvider } from "./ai";
-import { assertGoogleVisionInlineImageSize, prepareImageForGoogleVision } from "./image-conversion";
+import { prepareImageForGoogleVision } from "./image-conversion";
 import { GoogleVisionOcrError, ocrConfidence, runtimeOcrClient, type GoogleVisionOcrResult } from "./ocr";
 
 const terminalImportStatuses = new Set(["completed", "pending_confirmation", "failed", "cancelled"]);
@@ -23,7 +23,7 @@ export function isImageImportFileType(fileType: string) {
 export async function submitOcrJob(env: Env, repository: D1LedgerRepository, job: ImportJob) {
   if (!isImageImportFileType(job.fileType)) throw new Error("当前只支持图片识别");
   runtimeOcrClient(env);
-  await enqueueImportPipelineStep(env, job.id, "convert");
+  await enqueueImportPipelineStep(env, job.id, "ocr");
   return (await repository.getImportJob(job.id)) ?? job;
 }
 
@@ -50,9 +50,6 @@ export async function processImportPipelineMessage(
 ) {
   try {
     switch (message.step) {
-      case "convert":
-        await processImportConversionStep(env, repository, message.jobId);
-        break;
       case "ocr":
         await processImportOcrStep(env, repository, message.jobId);
         break;
@@ -70,62 +67,11 @@ export async function processImportPipelineMessage(
   }
 }
 
-async function processImportConversionStep(env: Env, repository: D1LedgerRepository, importJobId: string) {
-  let job = await repository.getImportJob(importJobId);
-  if (!job || blockedFinalizeStatuses.has(job.status)) return;
-  if (job.status !== "uploaded" && job.status !== "converting") return;
-  if (job.status === "uploaded") job = (await repository.markImportJobConverting(job.id)) ?? job;
-  await repository.updateOcrProgress(job.id, { stage: "conversion_reading", progress: 15 });
-
-  const source = await readR2Object(env, job.r2Key, {
-    message: "导入原文件不存在",
-    code: "SOURCE_NOT_FOUND",
-  });
-  const latestBeforeConversion = await repository.getImportJob(job.id);
-  if (!latestBeforeConversion || blockedFinalizeStatuses.has(latestBeforeConversion.status)) return;
-
-  await repository.updateOcrProgress(job.id, { stage: "conversion_processing", progress: 20 });
-  const output = await prepareImageForGoogleVision(latestBeforeConversion, source);
-  const latestBeforeWrite = await repository.getImportJob(job.id);
-  if (!latestBeforeWrite || blockedFinalizeStatuses.has(latestBeforeWrite.status)) return;
-
-  const ocrInputKey = output.converted ? ocrInputR2Key(latestBeforeWrite, output.fileType) : job.r2Key;
-  if (output.converted) {
-    await env.FILES?.put(ocrInputKey, output.bytes, {
-      httpMetadata: { contentType: output.fileType },
-      customMetadata: {
-        importJobId: job.id,
-        bookId: latestBeforeWrite.bookId,
-        sourceR2Key: job.r2Key,
-        purpose: "ocr-input",
-      },
-    });
-  }
-  await repository.setImportJobOcrInput(job.id, {
-    r2Key: ocrInputKey,
-    fileType: output.fileType,
-    converted: output.converted,
-  });
-
-  const latestAfterConversion = await repository.getImportJob(job.id);
-  if (!latestAfterConversion || blockedFinalizeStatuses.has(latestAfterConversion.status)) return;
-  await enqueueImportPipelineStep(env, job.id, "ocr");
-}
-
 async function processImportOcrStep(env: Env, repository: D1LedgerRepository, importJobId: string) {
   let job = await repository.getImportJob(importJobId);
   if (!job || blockedFinalizeStatuses.has(job.status)) return;
-  if (!job.ocrInputR2Key || !job.ocrInputFileType) {
-    throw new GoogleVisionOcrError({
-      code: "MISSING_OCR_INPUT",
-      message: "导入任务缺少 OCR 输入文件",
-      stage: "ocr",
-      retryable: false,
-      terminal: true,
-    });
-  }
-  const ocrInputR2Key = job.ocrInputR2Key;
-  const ocrInputFileType = job.ocrInputFileType;
+  const ocrInputR2Key = job.ocrInputR2Key ?? job.r2Key;
+  const ocrInputFileType = job.ocrInputFileType ?? job.fileType;
   if (job.status !== "ocr_processing") {
     job = (await repository.markImportJobOcrProcessing(job.id, ocrJobIdFor(job), "google-vision")) ?? job;
   }
@@ -134,16 +80,16 @@ async function processImportOcrStep(env: Env, repository: D1LedgerRepository, im
     message: "OCR 输入文件不存在",
     code: "OCR_INPUT_NOT_FOUND",
   });
-  assertGoogleVisionInlineImageSize(bytes);
+  const preparedInput = await prepareImageForGoogleVision({ fileType: ocrInputFileType }, bytes);
   const latestBeforeOcr = await repository.getImportJob(job.id);
   if (!latestBeforeOcr || blockedFinalizeStatuses.has(latestBeforeOcr.status)) return;
 
   await repository.updateOcrProgress(job.id, { progress: 65, stage: "ocr_analyzing" });
   const result = await runtimeOcrClient(env).recognizeImage({
-    bytes,
+    bytes: preparedInput.bytes,
     sourceMimeType: job.fileType,
-    processedMimeType: ocrInputFileType,
-    converted: ocrInputR2Key !== job.r2Key || ocrInputFileType !== job.fileType,
+    processedMimeType: preparedInput.fileType,
+    converted: ocrInputR2Key !== job.r2Key || preparedInput.fileType !== job.fileType,
   });
 
   const latestAfterOcr = await repository.getImportJob(job.id);
@@ -166,9 +112,9 @@ async function processImportOcrStep(env: Env, repository: D1LedgerRepository, im
     engineVersion: result.metadata.engineVersion,
     rawText,
     rawJson: result.raw,
-    converted: ocrInputR2Key !== job.r2Key || ocrInputFileType !== job.fileType,
+    converted: ocrInputR2Key !== job.r2Key || preparedInput.fileType !== job.fileType,
     sourceMimeType: job.fileType,
-    processedMimeType: ocrInputFileType,
+    processedMimeType: preparedInput.fileType,
     actorId: job.userId,
   });
   await repository.updateOcrProgress(job.id, {
@@ -236,7 +182,7 @@ export async function retryImportJob(env: Env, repository: D1LedgerRepository, j
   }
   const prepared = await repository.prepareImportJobRetry(job.id);
   if (!prepared) throw new Error("导入任务不存在");
-  await enqueueImportPipelineStep(env, prepared.id, "convert");
+  await enqueueImportPipelineStep(env, prepared.id, "ocr");
   return prepared;
 }
 
@@ -430,11 +376,6 @@ function rawJsonToOcrResult(rawJson: Record<string, unknown>): GoogleVisionOcrRe
       engineVersion: "v1",
     },
   };
-}
-
-function ocrInputR2Key(job: ImportJob, fileType: string) {
-  const extension = fileType === "image/png" ? "png" : "jpg";
-  return `imports/${job.bookId}/ocr/${job.id}.${extension}`;
 }
 
 function ocrJobIdFor(job: ImportJob) {

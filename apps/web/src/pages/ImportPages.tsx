@@ -21,6 +21,7 @@ import {
 import { createPreviewThumbnail } from "../features/imports/preview-thumbnail";
 import { terminalImportStatuses, watchImportJobs, type ImportJobStatus } from "../features/imports/status";
 import {
+  abortLocalImportUpload,
   cancelImportJob,
   deleteImportJob,
   retryImportJob,
@@ -361,6 +362,7 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
   const cancel = async (jobId: string) => {
     const localJob = imports.find((job) => job.id === jobId && job.localOnly);
     if (localJob) {
+      abortLocalImportUpload(jobId);
       const removed = removeImportJobFromCache(book?.id, user?.id, jobId);
       if (removed) revokeUploadPlaceholderUrls([removed]);
       return;
@@ -768,6 +770,11 @@ function ImportJobCard({
             {job.status === "cancel_requested" ? "取消中" : "取消"}
           </button>
         )}
+        {job.localOnly && !terminalImportStatuses.has(job.status) && (
+          <button type="button" disabled={busy} onClick={onCancel}>
+            取消
+          </button>
+        )}
         {canDeleteImportJob(job) && (
           <button type="button" disabled={busy} onClick={onDelete}>
             删除
@@ -827,7 +834,7 @@ function ImageJobThumbnail({
   const [thumbnailUrl, setThumbnailUrl] = useState("");
   const [failed, setFailed] = useState(false);
   const cacheKey = job.id;
-  const unsupportedPreview = !canBrowserPreviewImage(job);
+  const unsupportedPreview = job.localOnly && !job.localPreviewUrl ? true : !canBrowserPreviewImage(job);
 
   useEffect(() => {
     if (job.localPreviewUrl || unsupportedPreview) return undefined;
@@ -920,21 +927,7 @@ function ImageJobThumbnail({
 }
 
 function canBrowserPreviewImage(job: Job) {
-  const type = job.fileType?.toLowerCase() ?? "";
-  if (
-    [
-      "image/jpeg",
-      "image/jpg",
-      "image/png",
-      "image/webp",
-      "image/gif",
-      "image/bmp",
-      "image/x-ms-bmp",
-    ].includes(type)
-  )
-    return true;
-  const extension = fileExtension(job.fileName).toLowerCase();
-  return ["jpg", "jpeg", "png", "webp", "gif", "bmp"].includes(extension);
+  return isImageJob(job);
 }
 
 function getJobIcon() {
