@@ -8,6 +8,7 @@
     "APP_ENV": "__ENV__",
     "WEB_ORIGIN": "__WEB_ORIGIN__",
     "AI_PROVIDER": "__AI_PROVIDER__",
+    "OPENROUTER_MODEL": "__OPENROUTER_MODEL__",
   },
   "d1_databases": [
     {
