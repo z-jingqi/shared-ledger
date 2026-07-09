@@ -118,7 +118,12 @@ export async function uploadImportFiles(
           if (prepared.localPreviewUrl) URL.revokeObjectURL(prepared.localPreviewUrl);
           continue;
         }
-        preparedFiles.push({ ...prepared, sourceIndex: index, placeholderId: placeholder?.id });
+        preparedFiles.push({
+          ...prepared,
+          localPreviewUrl: prepared.localPreviewUrl ?? placeholder?.localPreviewUrl,
+          sourceIndex: index,
+          placeholderId: placeholder?.id,
+        });
         emit({
           progress: 32,
           progressText: "准备上传…",
@@ -148,11 +153,20 @@ export async function uploadImportFiles(
         progressText: "上传中…",
       });
     });
-    return await api<{ jobs: ImportBatchJob[] }>(`/books/${bookId}/imports/batch`, {
+    const response = await api<{ jobs: ImportBatchJob[] }>(`/books/${bookId}/imports/batch`, {
       method: "POST",
       body,
       signal: requestSignal,
     });
+    return {
+      ...response,
+      jobs: response.jobs.map((job, index) => ({
+        ...job,
+        ...(preparedFiles[index]?.localPreviewUrl
+          ? { localPreviewUrl: preparedFiles[index].localPreviewUrl }
+          : {}),
+      })),
+    };
   } finally {
     for (const placeholderId of placeholderIds) {
       localUploadControllers.delete(placeholderId);

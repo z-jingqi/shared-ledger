@@ -134,7 +134,16 @@ function AppFrameInner({ children }: { children: ReactNode }) {
                   user?.id,
                   placeholders.map((item) => item.id),
                 );
-                revokeUploadPlaceholderUrls(removed.length ? removed : placeholders);
+                const transferredPreviewUrls = new Set(
+                  jobs.map((job) => job.localPreviewUrl).filter(Boolean),
+                );
+                revokeUploadPlaceholderUrls(
+                  (removed.length ? removed : placeholders).filter(
+                    (placeholder) =>
+                      !placeholder.localPreviewUrl ||
+                      !transferredPreviewUrls.has(placeholder.localPreviewUrl),
+                  ),
+                );
                 upsertImportJobsInCache(book?.id, user?.id, jobs);
                 openSheet({ type: "imports" });
               }}

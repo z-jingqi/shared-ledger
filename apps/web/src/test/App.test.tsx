@@ -1731,6 +1731,7 @@ describe("shared ledger mobile UI", () => {
     );
     await uploadPromise;
     await waitFor(() => expect(importBatchRequests).toHaveLength(1));
+    await waitFor(() => expect(screen.queryByText("正在准备图片…")).not.toBeInTheDocument());
   });
   it("renders converted HEIC import jobs as image previews instead of HEIC file fallbacks", async () => {
     const user = userEvent.setup();

@@ -7,6 +7,7 @@ type ImportJobsCacheData = {
 };
 
 const localUploadPlaceholders = new Map<string, ImportJobStatus[]>();
+const localImportJobPreviews = new Map<string, Map<string, string>>();
 
 export function importJobsPath(bookId: string | undefined) {
   return bookId ? `/books/${bookId}/imports` : undefined;
@@ -19,6 +20,7 @@ export function upsertImportJobsInCache(
 ) {
   if (!bookId || !jobs.length) return;
   rememberLocalUploadPlaceholders(bookId, userId, jobs);
+  rememberLocalImportJobPreviews(bookId, userId, jobs);
   ledgerQueryClient.setQueryData<ImportJobsCacheData>(
     apiQueryKey(importJobsPath(bookId), userId),
     (current) => {
@@ -84,6 +86,7 @@ export function removeImportJobFromCache(
   let previous: ImportJobStatus | undefined;
   if (!bookId) return previous;
   forgetLocalUploadPlaceholders(bookId, userId, [jobId]);
+  forgetLocalImportJobPreviews(bookId, userId, [jobId]);
   ledgerQueryClient.setQueryData<ImportJobsCacheData>(
     apiQueryKey(importJobsPath(bookId), userId),
     (current) => {
@@ -105,6 +108,7 @@ export function removeImportJobsFromCache(
 ) {
   if (!bookId || !jobIds.length) return [];
   forgetLocalUploadPlaceholders(bookId, userId, jobIds);
+  forgetLocalImportJobPreviews(bookId, userId, jobIds);
   const idSet = new Set(jobIds);
   let removed: ImportJobStatus[] = [];
   ledgerQueryClient.setQueryData<ImportJobsCacheData>(
@@ -126,10 +130,13 @@ export function mergeLocalImportPlaceholders(
   userId: string | undefined,
   imports: ImportJobStatus[],
 ) {
+  const importsWithPreviews = mergeLocalImportJobPreviews(bookId, userId, imports);
   const placeholders = localUploadPlaceholders.get(scopeKey(bookId, userId)) ?? [];
-  if (!placeholders.length) return imports;
-  const existingIds = new Set(imports.map((job) => job.id));
-  return [...placeholders.filter((job) => !existingIds.has(job.id)), ...imports].sort(compareImportJobs);
+  if (!placeholders.length) return importsWithPreviews;
+  const existingIds = new Set(importsWithPreviews.map((job) => job.id));
+  return [...placeholders.filter((job) => !existingIds.has(job.id)), ...importsWithPreviews].sort(
+    compareImportJobs,
+  );
 }
 
 function rememberLocalUploadPlaceholders(
@@ -156,6 +163,48 @@ function forgetLocalUploadPlaceholders(
   const next = (localUploadPlaceholders.get(key) ?? []).filter((job) => !idSet.has(job.id));
   if (next.length) localUploadPlaceholders.set(key, next);
   else localUploadPlaceholders.delete(key);
+}
+
+function rememberLocalImportJobPreviews(
+  bookId: string | undefined,
+  userId: string | undefined,
+  jobs: ImportJobStatus[],
+) {
+  if (!bookId) return;
+  const jobsWithPreviews = jobs.filter((job) => !job.localOnly && job.localPreviewUrl);
+  if (!jobsWithPreviews.length) return;
+  const key = scopeKey(bookId, userId);
+  const previews = localImportJobPreviews.get(key) ?? new Map<string, string>();
+  jobsWithPreviews.forEach((job) => previews.set(job.id, job.localPreviewUrl!));
+  localImportJobPreviews.set(key, previews);
+}
+
+function mergeLocalImportJobPreviews(
+  bookId: string | undefined,
+  userId: string | undefined,
+  imports: ImportJobStatus[],
+) {
+  if (!bookId || !imports.length) return imports;
+  const previews = localImportJobPreviews.get(scopeKey(bookId, userId));
+  if (!previews?.size) return imports;
+  return imports.map((job) => {
+    if (job.localPreviewUrl) return job;
+    const localPreviewUrl = previews.get(job.id);
+    return localPreviewUrl ? { ...job, localPreviewUrl } : job;
+  });
+}
+
+function forgetLocalImportJobPreviews(
+  bookId: string | undefined,
+  userId: string | undefined,
+  jobIds: string[],
+) {
+  if (!bookId || !jobIds.length) return;
+  const key = scopeKey(bookId, userId);
+  const previews = localImportJobPreviews.get(key);
+  if (!previews) return;
+  jobIds.forEach((jobId) => previews.delete(jobId));
+  if (!previews.size) localImportJobPreviews.delete(key);
 }
 
 function scopeKey(bookId: string | undefined, userId: string | undefined) {
