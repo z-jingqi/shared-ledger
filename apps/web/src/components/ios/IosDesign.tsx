@@ -207,10 +207,14 @@ export function IosSheet({
   const [closing, setClosing] = useState(false);
   const [dragY, setDragY] = useState(0);
   const [dragging, setDragging] = useState(false);
+  const [dragArmed, setDragArmed] = useState(false);
   const draggingRef = useRef(false);
+  const pendingDragRef = useRef(false);
   const startYRef = useRef(0);
+  const startXRef = useRef(0);
   const latestYRef = useRef(0);
   const currentDragYRef = useRef(0);
+  const dragPointerIdRef = useRef<number | undefined>(undefined);
   const closeTimerRef = useRef<number | undefined>(undefined);
 
   const closeAnimated = useCallback(() => {
@@ -219,14 +223,34 @@ export function IosSheet({
     window.clearTimeout(closeTimerRef.current);
     closeTimerRef.current = window.setTimeout(onClose, 190);
   }, [closing, onClose]);
-  const applyDrag = useCallback((clientY: number) => {
-    if (!draggingRef.current) return;
-    const delta = clientY - startYRef.current;
-    const next = Math.max(-28, latestYRef.current + delta);
-    currentDragYRef.current = next;
-    setDragY(next);
-  }, []);
+  const applyDrag = useCallback(
+    (clientX: number, clientY: number, event?: Pick<PointerEvent, "preventDefault">) => {
+      if (!draggingRef.current && pendingDragRef.current) {
+        const deltaX = Math.abs(clientX - startXRef.current);
+        const deltaY = clientY - startYRef.current;
+        if (deltaY < 8) return;
+        if (deltaX > deltaY) {
+          pendingDragRef.current = false;
+          setDragArmed(false);
+          return;
+        }
+        pendingDragRef.current = false;
+        draggingRef.current = true;
+        setDragging(true);
+      }
+      if (!draggingRef.current) return;
+      event?.preventDefault();
+      const delta = clientY - startYRef.current;
+      const next = Math.max(-28, latestYRef.current + delta);
+      currentDragYRef.current = next;
+      setDragY(next);
+    },
+    [],
+  );
   const finishDrag = useCallback(() => {
+    if (!draggingRef.current && !pendingDragRef.current) return;
+    pendingDragRef.current = false;
+    setDragArmed(false);
     if (!draggingRef.current) return;
     draggingRef.current = false;
     setDragging(false);
@@ -238,37 +262,47 @@ export function IosSheet({
     }
   }, [closeAnimated]);
   const beginDrag = useCallback(
-    (event: ReactPointerEvent<HTMLElement>) => {
+    (event: ReactPointerEvent<HTMLElement>, force = false) => {
       if (disableDragClose) return;
+      if (!force && shouldIgnoreSheetDrag(event.target)) return;
+      if (!force && isNestedScrollAwayFromTop(event.target)) return;
       startYRef.current = event.clientY;
+      startXRef.current = event.clientX;
       latestYRef.current = dragY;
       currentDragYRef.current = dragY;
-      draggingRef.current = true;
-      setDragging(true);
-      event.currentTarget.setPointerCapture(event.pointerId);
+      dragPointerIdRef.current = event.pointerId;
+      pendingDragRef.current = true;
+      setDragArmed(true);
+      event.currentTarget.setPointerCapture?.(event.pointerId);
     },
     [disableDragClose, dragY],
   );
   const moveDrag = useCallback(
     (event: ReactPointerEvent<HTMLElement>) => {
-      applyDrag(event.clientY);
+      applyDrag(event.clientX, event.clientY, event.nativeEvent);
+      if (draggingRef.current && dragPointerIdRef.current === event.pointerId) {
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+      }
     },
     [applyDrag],
   );
   const endDrag = useCallback(
     (event: ReactPointerEvent<HTMLElement>) => {
-      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-        event.currentTarget.releasePointerCapture(event.pointerId);
+      if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+        event.currentTarget.releasePointerCapture?.(event.pointerId);
       }
+      dragPointerIdRef.current = undefined;
       finishDrag();
     },
     [finishDrag],
   );
-  const handleWindowDragMove = useEffectEvent((event: globalThis.PointerEvent) => applyDrag(event.clientY));
+  const handleWindowDragMove = useEffectEvent((event: globalThis.PointerEvent) =>
+    applyDrag(event.clientX, event.clientY, event),
+  );
   const handleWindowDragEnd = useEffectEvent(() => finishDrag());
 
   useEffect(() => {
-    if (!dragging) return undefined;
+    if (!dragging && !dragArmed) return undefined;
     const handleMove = (event: globalThis.PointerEvent) => handleWindowDragMove(event);
     const handleEnd = () => handleWindowDragEnd();
     window.addEventListener("pointermove", handleMove);
@@ -281,7 +315,7 @@ export function IosSheet({
       window.removeEventListener("pointercancel", handleEnd);
       window.removeEventListener("blur", handleEnd);
     };
-  }, [dragging]);
+  }, [dragArmed, dragging]);
 
   useEffect(() => () => window.clearTimeout(closeTimerRef.current), []);
 
@@ -298,6 +332,10 @@ export function IosSheet({
         className={`ios-sheet ${full ? "full" : ""} ${className}${closing ? " closing" : ""}${dragging ? " dragging" : ""}`}
         aria-modal="true"
         aria-label={title}
+        onPointerDown={beginDrag}
+        onPointerMove={moveDrag}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
         style={{
           transform: `translateY(${closing ? "110%" : `${dragY}px`})`,
           marginBottom: !closing && dragY < 0 ? `${dragY}px` : undefined,
@@ -309,7 +347,10 @@ export function IosSheet({
               className="ios-sheet-grabber"
               type="button"
               aria-label="拖动关闭"
-              onPointerDown={beginDrag}
+              onPointerDown={(event) => {
+                event.stopPropagation();
+                beginDrag(event, true);
+              }}
               onPointerMove={moveDrag}
               onPointerUp={endDrag}
               onPointerCancel={endDrag}
@@ -339,6 +380,21 @@ export function IosSheet({
       </dialog>
     </div>
   );
+}
+
+function shouldIgnoreSheetDrag(target: EventTarget | null) {
+  if (!(target instanceof Element)) return false;
+  return Boolean(
+    target.closest(
+      "button,a,input,textarea,select,summary,[role='button'],[role='link'],[contenteditable='true'],[data-sheet-drag-ignore='true']",
+    ),
+  );
+}
+
+function isNestedScrollAwayFromTop(target: EventTarget | null) {
+  if (!(target instanceof Element)) return false;
+  const scrollable = target.closest<HTMLElement>(".ios-scroll, [data-sheet-scroll='true']");
+  return Boolean(scrollable && scrollable.scrollTop > 0);
 }
 
 export function IosButton({

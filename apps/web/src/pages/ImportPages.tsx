@@ -8,7 +8,15 @@ import {
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { IconTile, IosButton, IosCard, IosField, IosSegment, IosSheet } from "../components/ios/IosDesign";
+import {
+  IconTile,
+  IosButton,
+  IosCard,
+  IosField,
+  IosListSkeleton,
+  IosSegment,
+  IosSheet,
+} from "../components/ios/IosDesign";
 import { useAuth } from "../features/auth/AuthProvider";
 import { yuan } from "../features/formatting/money";
 import {
@@ -62,8 +70,9 @@ type PendingEditDraft = {
   categoryName: string;
   items: Array<{ name: string; amount: string; categoryName: string; note: string }>;
 };
-type PendingRecordsState = { records: PendingRecord[]; error: string };
+type PendingRecordsState = { records: PendingRecord[]; error: string; loading: boolean };
 type PendingRecordsAction =
+  | { type: "loading" }
   | { type: "reset" }
   | { type: "success"; records: PendingRecord[] }
   | { type: "error"; error: string };
@@ -90,22 +99,30 @@ let activeThumbnailLoads = 0;
 const thumbnailQueue: (() => void)[] = [];
 function pendingRecordsReducer(_: PendingRecordsState, action: PendingRecordsAction): PendingRecordsState {
   switch (action.type) {
+    case "loading":
+      return { records: [], error: "", loading: true };
     case "reset":
-      return { records: [], error: "" };
+      return { records: [], error: "", loading: false };
     case "success":
-      return { records: action.records, error: "" };
+      return { records: action.records, error: "", loading: false };
     case "error":
-      return { records: [], error: action.error };
+      return { records: [], error: action.error, loading: false };
   }
 }
 
 function usePendingRecords(jobId?: string) {
   const { user } = useAuth();
   const { book } = useActiveBook();
-  const { data: jobs, reload: reloadJobs } = useApi<{ imports: Job[] }>(
-    book ? `/books/${book.id}/imports` : undefined,
-  );
-  const [{ records, error }, dispatchRecords] = useReducer(pendingRecordsReducer, { records: [], error: "" });
+  const {
+    data: jobs,
+    loading: jobsLoading,
+    reload: reloadJobs,
+  } = useApi<{ imports: Job[] }>(book ? `/books/${book.id}/imports` : undefined);
+  const [{ records, error, loading }, dispatchRecords] = useReducer(pendingRecordsReducer, {
+    records: [],
+    error: "",
+    loading: true,
+  });
   const imports = jobs?.imports ?? emptyJobs;
   const pendingJobs = useMemo(
     () => imports.filter((job) => job.status === "pending_confirmation" && (!jobId || job.id === jobId)),
@@ -115,9 +132,10 @@ function usePendingRecords(jobId?: string) {
   useEffect(() => {
     let cancelled = false;
     if (!pendingJobs.length) {
-      dispatchRecords({ type: "reset" });
+      dispatchRecords(jobsLoading ? { type: "loading" } : { type: "reset" });
       return undefined;
     }
+    dispatchRecords({ type: "loading" });
     void Promise.all(
       pendingJobs.map((job) => api<{ records: PendingRecord[] }>(`/imports/${job.id}/records`)),
     )
@@ -138,9 +156,9 @@ function usePendingRecords(jobId?: string) {
     return () => {
       cancelled = true;
     };
-  }, [pendingJobs]);
+  }, [jobsLoading, pendingJobs]);
 
-  return { bookId: book?.id, records, error, reload: reloadJobs, userId: user?.id };
+  return { bookId: book?.id, records, error, loading, reload: reloadJobs, userId: user?.id };
 }
 
 export function PendingImportsPage() {
@@ -148,7 +166,7 @@ export function PendingImportsPage() {
 }
 
 export function PendingImportsSheet({ jobId, onClose }: { jobId?: string; onClose: () => void }) {
-  const { bookId, records, error, reload, userId } = usePendingRecords(jobId);
+  const { bookId, records, error, loading, reload, userId } = usePendingRecords(jobId);
   const [busy, setBusy] = useState("");
   const [editing, setEditing] = useState<PendingRecord | undefined>();
   const close = onClose;
@@ -233,8 +251,10 @@ export function PendingImportsSheet({ jobId, onClose }: { jobId?: string; onClos
       <IosSheet
         title="待确认记录"
         onClose={close}
+        full
+        className="ios-pending-review-sheet"
         right={
-          records.length ? (
+          records.length > 1 ? (
             <button
               className="ios-sheet-text-action"
               type="button"
@@ -251,7 +271,12 @@ export function PendingImportsSheet({ jobId, onClose }: { jobId?: string; onClos
             以下记录由图片识别或 AI 生成，确认后才会正式入账。低置信度字段已标记，请核对。
           </p>
           {error && <p className="field-error">{error}</p>}
-          {!records.length && (
+          {loading && (
+            <IosCard className="ios-pending-card">
+              <IosListSkeleton rows={3} />
+            </IosCard>
+          )}
+          {!loading && !records.length && (
             <div className="ios-empty">
               <b>没有待确认记录</b>
               <p>所有识别结果都已处理。</p>
@@ -264,6 +289,7 @@ export function PendingImportsSheet({ jobId, onClose }: { jobId?: string; onClos
               onConfirm={() => void confirm(record.id)}
               onIgnore={() => void ignore(record.id)}
               onEdit={() => setEditing(record)}
+              full={records.length === 1}
               key={record.id}
             />
           ))}
@@ -510,53 +536,58 @@ function PendingRecordCard({
   onConfirm,
   onIgnore,
   onEdit,
+  full = false,
 }: {
   record: PendingRecord;
   disabled: boolean;
   onConfirm: () => void;
   onIgnore: () => void;
   onEdit: () => void;
+  full?: boolean;
 }) {
   const tx = record.suggestedTransaction;
   const type = tx.type ?? "expense";
   const warning = tx.warnings.length > 0 || tx.confidence < 0.75;
   return (
-    <IosCard className="ios-pending-card">
-      <div className="ios-pending-main">
-        <IconTile
-          tint={type === "income" ? "#e8f7ef" : "#fff0e8"}
-          color={type === "income" ? "#1f9d57" : "#ff681c"}
-        >
-          <ShoppingCartIcon size={18} weight="fill" />
-        </IconTile>
-        <span>
-          <b>{tx.note || "待确认记录"}</b>
-          <small>
-            {tx.categoryName || (type === "income" ? "收入" : "支出")}
-            {warning ? <em>待核对</em> : null}
-            {tx.occurredAt ? ` · ${tx.occurredAt.slice(0, 10)}` : ""}
-          </small>
-        </span>
-        <strong className={type}>
-          {type === "income" ? "+" : "-"}
-          {yuan(tx.amount)}
-        </strong>
+    <IosCard className={`ios-pending-card${full ? " full" : ""}`}>
+      <div className="ios-pending-fixed">
+        <div className="ios-pending-main">
+          <IconTile
+            tint={type === "income" ? "#e8f7ef" : "#fff0e8"}
+            color={type === "income" ? "#1f9d57" : "#ff681c"}
+          >
+            <ShoppingCartIcon size={18} weight="fill" />
+          </IconTile>
+          <span>
+            <b>{tx.note || "待确认记录"}</b>
+            <small>
+              {tx.categoryName || (type === "income" ? "收入" : "支出")}
+              {warning ? <em>待核对</em> : null}
+              {tx.occurredAt ? ` · ${tx.occurredAt.slice(0, 10)}` : ""}
+            </small>
+          </span>
+          <strong className={type}>
+            {type === "income" ? "+" : "-"}
+            {yuan(tx.amount)}
+          </strong>
+        </div>
+        {tx.warnings.length > 0 && <p className="ios-pending-warning">{tx.warnings.join("；")}</p>}
       </div>
-      {tx.warnings.length > 0 && <p className="ios-pending-warning">{tx.warnings.join("；")}</p>}
-      {tx.items?.length ? (
-        <ul className="ios-pending-items">
-          {tx.items.slice(0, 3).map((item, index) => (
-            <li key={`${item.name}-${index}`}>
-              <span>
-                {item.name}
-                {item.categoryName ? <em>{item.categoryName}</em> : null}
-              </span>
-              <b>{yuan(item.amount)}</b>
-            </li>
-          ))}
-          {tx.items.length > 3 ? <li className="more">还有 {tx.items.length - 3} 项明细</li> : null}
-        </ul>
-      ) : null}
+      <div className="ios-pending-items-scroll" data-sheet-scroll="true">
+        {tx.items?.length ? (
+          <ul className="ios-pending-items">
+            {tx.items.map((item, index) => (
+              <li key={`${item.name}-${index}`}>
+                <span>
+                  {item.name}
+                  {item.categoryName ? <em>{item.categoryName}</em> : null}
+                </span>
+                <b>{yuan(item.amount)}</b>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
       <div className="ios-pending-actions">
         <button type="button" disabled={disabled} onClick={onIgnore}>
           忽略

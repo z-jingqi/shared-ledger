@@ -776,6 +776,16 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-height: 100%;
+}
+
+.ios-pending-review-sheet .ios-sheet-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.ios-pending-review-sheet .ios-pending-sheet {
+  flex: 1;
 }
 
 .ios-import-hero {
@@ -1033,6 +1043,13 @@
   padding: 14px;
 }
 
+.ios-pending-card.full {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .ios-pending-card + .ios-pending-card {
   margin-top: 11px;
 }
@@ -1095,6 +1112,21 @@
   font-size: 12px;
 }
 
+.ios-pending-items-scroll {
+  min-height: 92px;
+}
+
+.ios-pending-card.full .ios-pending-items-scroll {
+  flex: 1;
+  min-height: 180px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.ios-pending-card.full .ios-pending-items-scroll::-webkit-scrollbar {
+  display: none;
+}
+
 .ios-pending-items {
   display: grid;
   gap: 6px;
@@ -1130,16 +1162,16 @@
   font-weight: 700;
 }
 
-.ios-pending-items .more {
-  justify-content: center;
-  color: var(--ios-muted);
-  font-weight: 800;
-}
-
 .ios-pending-actions {
   display: flex;
   gap: 8px;
   margin-top: 12px;
+}
+
+.ios-pending-card.full .ios-pending-actions {
+  flex-shrink: 0;
+  margin-top: auto;
+  padding-top: 12px;
 }
 
 .ios-pending-actions button {

@@ -14,6 +14,7 @@ type VisibleSeries = {
   expense: boolean;
   income: boolean;
 };
+type BookMember = { id: string; userId: string; name: string; role: string };
 
 export function AnalysisPage() {
   const { user } = useAuth();
@@ -26,7 +27,20 @@ export function AnalysisPage() {
   const { data } = useApi<{ transactions: LedgerTransaction[] }>(
     book ? `/books/${book.id}/transactions` : undefined,
   );
+  const { data: memberData } = useApi<{ members: BookMember[] }>(
+    book ? `/books/${book.id}/members` : undefined,
+  );
   const transactions = data?.transactions ?? [];
+  const memberNameById = useMemo(
+    () =>
+      new Map(
+        (memberData?.members ?? []).flatMap((member) => [
+          [member.id, member.name],
+          [member.userId, member.name],
+        ]),
+      ),
+    [memberData?.members],
+  );
   const rangeInfo = useMemo(() => getRange(range), [range]);
   const visible = useMemo(
     () =>
@@ -40,7 +54,7 @@ export function AnalysisPage() {
   const expense = sum(visible, "expense");
   const expenseItems = visible.filter((item) => item.type === "expense");
   const categories = groupBy(expenseItems, (item) => item.categoryName ?? item.categoryId ?? "未分类");
-  const members = groupBy(expenseItems, (item) => item.memberId ?? "我");
+  const members = groupMembers(expenseItems, memberNameById);
   const canUseAi = user?.plan === "pro";
   const bars = useMemo(() => rangeBars(range, visible, rangeInfo), [range, rangeInfo, visible]);
   const selected = bars[selectedBar] ?? bars[0];
@@ -266,6 +280,17 @@ function groupBy(transactions: LedgerTransaction[], label: (item: LedgerTransact
   return [...groups.entries()]
     .map(([name, amount]) => ({ name, amount }))
     .sort((a, b) => b.amount - a.amount);
+}
+
+function groupMembers(transactions: LedgerTransaction[], memberNameById: Map<string, string>) {
+  const groups = new Map<string, { name: string; amount: number }>();
+  transactions.forEach((item) => {
+    const key = item.memberId ?? "me";
+    const name = item.memberId ? (memberNameById.get(item.memberId) ?? "已移除成员") : "我";
+    const current = groups.get(key);
+    groups.set(key, { name, amount: (current?.amount ?? 0) + item.amount });
+  });
+  return [...groups.values()].sort((a, b) => b.amount - a.amount);
 }
 
 function rangeBars(range: Range, transactions: LedgerTransaction[], limits: { start: string; end: string }) {

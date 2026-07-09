@@ -1,5 +1,5 @@
-import { CalendarBlankIcon, CaretRightIcon } from "@phosphor-icons/react";
-import { useState } from "react";
+import { CalendarBlankIcon, CaretDownIcon, CaretRightIcon } from "@phosphor-icons/react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { BookSwitcherSheet } from "../components/books/BookSwitcherSheet";
@@ -37,9 +37,13 @@ export function BookHomePage() {
   const hasBook = Boolean(book?.id);
   const displayBook = book ?? { id: "", name: "一起记", currency: "CNY" };
   const transactions = txData?.transactions ?? [];
-  const now = new Date();
-  const currentMonthLabel = `${now.getMonth() + 1}月净收支`;
-  const monthTransactions = transactions.filter((item) => isSameMonth(item.occurredAt, now));
+  const now = useMemo(() => new Date(), []);
+  const monthOptions = useMemo(() => recentMonthOptions(now), [now]);
+  const [selectedMonthKey, setSelectedMonthKey] = useState(() => monthOptions[0]?.key ?? monthKey(now));
+  const selectedMonth =
+    monthOptions.find((option) => option.key === selectedMonthKey) ?? monthOptionFromDate(now, now);
+  const currentMonthLabel = `${selectedMonth.label}净收支`;
+  const monthTransactions = transactions.filter((item) => isSameMonthOption(item.occurredAt, selectedMonth));
   const todayTransactions = transactions.filter((item) => isSameDay(item.occurredAt, now));
   const income = sum(monthTransactions, "income");
   const expense = sum(monthTransactions, "expense");
@@ -81,7 +85,21 @@ export function BookHomePage() {
       />
       <IosScroll className="ios-home-scroll">
         <section className="ios-balance-hero">
-          <span>{currentMonthLabel}</span>
+          <label className="ios-balance-month-select">
+            <span>{currentMonthLabel}</span>
+            <select
+              aria-label="选择统计月份"
+              value={selectedMonth.key}
+              onChange={(event) => setSelectedMonthKey(event.currentTarget.value)}
+            >
+              {monthOptions.map((option) => (
+                <option value={option.key} key={option.key}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <CaretDownIcon size={14} weight="bold" aria-hidden />
+          </label>
           <strong>{yuan(income - expense, displayBook.currency)}</strong>
           <div>
             <p>
@@ -214,9 +232,29 @@ function sum(transactions: LedgerTransaction[], type: "income" | "expense") {
   return transactions.filter((item) => item.type === type).reduce((total, item) => total + item.amount, 0);
 }
 
-function isSameMonth(value: string, now: Date) {
+type MonthOption = { key: string; year: number; month: number; label: string };
+
+function recentMonthOptions(now: Date): MonthOption[] {
+  const currentYear = now.getFullYear();
+  return Array.from({ length: 6 }, (_, offset) =>
+    monthOptionFromDate(new Date(now.getFullYear(), now.getMonth() - offset, 1), now, currentYear),
+  );
+}
+
+function monthOptionFromDate(date: Date, now: Date, currentYear = now.getFullYear()): MonthOption {
+  const year = date.getFullYear();
+  const month = date.getMonth();
+  const label = year === currentYear ? `${month + 1}月` : `${year}年${month + 1}月`;
+  return { key: monthKey(date), year, month, label };
+}
+
+function monthKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function isSameMonthOption(value: string, option: MonthOption) {
   const date = new Date(value);
-  return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+  return date.getFullYear() === option.year && date.getMonth() === option.month;
 }
 
 function isSameDay(value: string, now: Date) {

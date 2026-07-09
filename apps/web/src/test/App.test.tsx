@@ -42,6 +42,7 @@ let mockImportJobs: Array<{
   stage?: string;
   cancelable?: boolean;
 }> = [];
+let pendingRecordsResponseOverride: (() => Promise<Response>) | undefined;
 let importCancelRequests: string[] = [];
 let aiSearchRequests: Array<{
   bookId?: string;
@@ -104,6 +105,11 @@ const queryAddOverlay = () =>
   screen.queryByRole("dialog", { name: /添加|新增|记一笔|记账方式/ }) ??
   screen.queryByRole("menu", { name: /添加|新增|记一笔|记账方式/ });
 const currentMonthNetLabel = () => `${new Date().getMonth() + 1}月净收支`;
+const homeNetAmount = () => document.querySelector(".ios-balance-hero > strong");
+const monthKeyForTest = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+const dateForTest = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 const openManualAddForm = async (user: ReturnType<typeof userEvent.setup>) => {
   await findBookSwitcher();
   const addButton =
@@ -300,6 +306,7 @@ describe("shared ledger mobile UI", () => {
     importBatchRequests = [];
     importBatchResponseOverride = undefined;
     mockImportJobs = [];
+    pendingRecordsResponseOverride = undefined;
     importCancelRequests = [];
     aiSearchRequests = [];
     aiChatRequests = [];
@@ -967,7 +974,8 @@ describe("shared ledger mobile UI", () => {
               headers: { "content-type": "image/jpeg" },
             }),
           );
-        if (path.includes("/imports/job_new/records"))
+        if (path.includes("/imports/job_new/records")) {
+          if (pendingRecordsResponseOverride) return pendingRecordsResponseOverride();
           return Promise.resolve(
             json({
               records: [
@@ -981,7 +989,12 @@ describe("shared ledger mobile UI", () => {
                     occurredAt: "2026-06-28",
                     note: "超市购物",
                     categoryName: "餐饮",
-                    items: [{ name: "牛奶", amount: 18.5, categoryName: "餐饮" }],
+                    items: [
+                      { name: "牛奶", amount: 18.5, categoryName: "餐饮" },
+                      { name: "面包", amount: 12, categoryName: "餐饮" },
+                      { name: "鸡蛋", amount: 19.8, categoryName: "餐饮" },
+                      { name: "纸巾", amount: 15, categoryName: "日用" },
+                    ],
                     confidence: 0.92,
                     warnings: [],
                   },
@@ -989,6 +1002,7 @@ describe("shared ledger mobile UI", () => {
               ],
             }),
           );
+        }
         if (path.includes("/imports/job_new"))
           return Promise.resolve(
             json({ job: { id: "job_new", fileName: "invoice.jpg", status: "pending_confirmation" } }),
@@ -1063,6 +1077,46 @@ describe("shared ledger mobile UI", () => {
     expect(screen.queryByRole("link", { name: "账本" })).not.toBeInTheDocument();
     expect(screen.getByRole("main")).toHaveClass("has-bottom-nav");
     expect(screen.queryByLabelText("打开 AI 助手")).not.toBeInTheDocument();
+  });
+  it("switches home net summary between recent months", async () => {
+    const now = new Date();
+    const previous = new Date(now.getFullYear(), now.getMonth() - 1, 15);
+    transactionsByBook = {
+      ...transactionsByBook,
+      book_test: [
+        {
+          id: "tx_current_month",
+          type: "expense",
+          amount: 100,
+          note: "本月",
+          occurredAt: dateForTest(new Date(now.getFullYear(), now.getMonth(), 12)),
+        },
+        {
+          id: "tx_previous_month",
+          type: "expense",
+          amount: 55,
+          note: "上月",
+          occurredAt: dateForTest(previous),
+        },
+      ],
+    };
+    render(<App />);
+
+    expect(await findBookSwitcher()).toBeInTheDocument();
+    expect(screen.getByText(currentMonthNetLabel())).toBeInTheDocument();
+    await waitFor(() => expect(homeNetAmount()).toHaveTextContent("-¥100.00"));
+
+    fireEvent.change(screen.getByLabelText("选择统计月份"), { target: { value: monthKeyForTest(previous) } });
+
+    await waitFor(() => expect(homeNetAmount()).toHaveTextContent("-¥55.00"));
+  });
+  it("shows years for home month options across year boundaries", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-01-15T12:00:00+08:00"));
+    render(<App />);
+
+    expect(await findBookSwitcher()).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "2025年12月" })).toBeInTheDocument();
   });
   it("hides bottom navigation on book creation flow pages", async () => {
     window.history.pushState({}, "", "/books/new");
@@ -1428,6 +1482,36 @@ describe("shared ledger mobile UI", () => {
     expect(screen.getByRole("button", { name: "本年" })).toHaveClass("active");
     expect(screen.getByRole("button", { name: "本月" })).not.toHaveClass("active");
   });
+  it("renders analysis member contribution with member names instead of ids", async () => {
+    transactionsByBook = {
+      ...transactionsByBook,
+      book_test: [
+        {
+          id: "tx_member",
+          type: "expense",
+          amount: 234.49,
+          note: "购物",
+          occurredAt: "2026-07-02",
+          memberId: "member_test",
+        },
+        {
+          id: "tx_removed_member",
+          type: "expense",
+          amount: 12,
+          note: "旧成员",
+          occurredAt: "2026-07-03",
+          memberId: "member_removed",
+        },
+      ],
+    };
+    window.history.pushState({}, "", "/analysis?bookId=book_test");
+    render(<App />);
+
+    expect(await screen.findByText("成员贡献")).toBeInTheDocument();
+    expect(await screen.findByText("测试用户")).toBeInTheDocument();
+    expect(screen.getByText("已移除成员")).toBeInTheDocument();
+    expect(screen.queryByText(/member_/)).not.toBeInTheDocument();
+  });
   it("opens analysis directly with the requested book selected", async () => {
     transactionsByBook = {
       ...transactionsByBook,
@@ -1783,9 +1867,41 @@ describe("shared ledger mobile UI", () => {
 
     await user.click(await screen.findByRole("button", { name: "去确认" }));
 
-    expect(await screen.findByRole("heading", { name: "待确认记录" })).toBeInTheDocument();
-    expect(screen.getByText("超市购物")).toBeInTheDocument();
-    expect(screen.getByText("牛奶")).toBeInTheDocument();
+    const dialog = await screen.findByRole("dialog", { name: "待确认记录" });
+    expect(dialog).toHaveClass("ios-sheet", "full");
+    expect(await within(dialog).findByText("超市购物")).toBeInTheDocument();
+    expect(within(dialog).getByText("牛奶")).toBeInTheDocument();
+    expect(within(dialog).getByText("面包")).toBeInTheDocument();
+    expect(within(dialog).getByText("鸡蛋")).toBeInTheDocument();
+    expect(within(dialog).getByText("纸巾")).toBeInTheDocument();
+    expect(within(dialog).queryByText(/还有 \d+ 项明细/)).not.toBeInTheDocument();
+  });
+  it("shows a skeleton while pending import records are loading", async () => {
+    const user = userEvent.setup();
+    let resolveRecords: (response: Response) => void = () => {};
+    pendingRecordsResponseOverride = () =>
+      new Promise((resolve) => {
+        resolveRecords = resolve;
+      });
+    mockImportJobs = [
+      {
+        id: "job_new",
+        fileName: "receipt.png",
+        fileType: "image/png",
+        status: "pending_confirmation",
+      },
+    ];
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: /待确认记录/ }));
+
+    expect(await screen.findByRole("dialog", { name: "待确认记录" })).toBeInTheDocument();
+    expect(screen.getByLabelText("加载中")).toBeInTheDocument();
+    expect(screen.queryByText("没有待确认记录")).not.toBeInTheDocument();
+
+    resolveRecords(json({ records: [] }));
+
+    expect(await screen.findByText("没有待确认记录")).toBeInTheDocument();
   });
   it("shows cancel action for queued import jobs even when cancelable is false", async () => {
     const user = userEvent.setup();

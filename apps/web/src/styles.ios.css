@@ -500,7 +500,7 @@ html.is-ios {
   box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.18);
   animation: iosSheetUp 0.3s cubic-bezier(0.22, 1, 0.36, 1);
   transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
-  touch-action: none;
+  touch-action: pan-y;
   will-change: transform;
 }
 
@@ -622,6 +622,8 @@ html.is-ios {
 .ios-sheet-body {
   flex: 1;
   padding: 0 16px 16px;
+  min-height: 0;
+  touch-action: pan-y;
 }
 
 .ios-sheet-footer {
