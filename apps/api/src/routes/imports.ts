@@ -564,13 +564,16 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     if (user instanceof Response) return user;
     const denied = await requireMember(context, store, job.bookId, user);
     if (denied) return denied;
+    const book = await repository.getBook(job.bookId);
+    if (!book) return jsonError(context, "账本不存在", 404);
     const candidate = aiImportRecordSchema.safeParse({
       ...record.suggestedTransaction,
       ...(await context.req.json()),
     });
     if (!candidate.success) return jsonError(context, "待确认记录数据不合法");
+    const suggested = book.incomeEnabled ? candidate.data : { ...candidate.data, type: "expense" as const };
     return context.json({
-      record: await repository.updateImportedRecord(record.id, candidate.data, undefined, user.id),
+      record: await repository.updateImportedRecord(record.id, suggested, undefined, user.id),
     });
   });
 
@@ -593,7 +596,12 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
         details: { duplicateOfJobId: job.duplicateOfImportJobId },
       };
     }
-    const suggested = aiImportRecordSchema.parse(record.suggestedTransaction);
+    const book = await repository.getBook(job.bookId);
+    if (!book) return { error: "账本不存在", status: 404 };
+    const parsedSuggestion = aiImportRecordSchema.parse(record.suggestedTransaction);
+    const suggested = book.incomeEnabled
+      ? parsedSuggestion
+      : { ...parsedSuggestion, type: "expense" as const };
     const categoryCache = new Map<string, Awaited<ReturnType<D1LedgerRepository["findOrCreateCategory"]>>>();
     const resolveCategory = async (name?: string) => {
       const normalized = name?.trim();
@@ -626,12 +634,7 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
       occurredAt: suggested.occurredAt,
       items,
     } as any);
-    const updated = await repository.updateImportedRecord(
-      record.id,
-      record.suggestedTransaction,
-      "confirmed",
-      user.id,
-    );
+    const updated = await repository.updateImportedRecord(record.id, suggested, "confirmed", user.id);
     const updatedJob = await completeImportJobIfNoPending(repository, job);
     return { record: updated, transaction, job: importJobStatusPayload(updatedJob) };
   };

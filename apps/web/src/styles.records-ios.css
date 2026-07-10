@@ -333,6 +333,12 @@
   color: #1f9d57;
 }
 
+.ios-transaction-row strong.neutral,
+.ios-record-detail-hero strong.neutral,
+.ios-pending-main strong.neutral {
+  color: var(--ios-text);
+}
+
 .ios-record-empty-state {
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.72);

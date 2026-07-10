@@ -26,6 +26,7 @@ export const books = sqliteTable("books", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   currency: text("currency").notNull().default("CNY"),
+  incomeEnabled: integer("income_enabled", { mode: "boolean" }).notNull().default(false),
   ...fullAudit,
 });
 export const bookMembers = sqliteTable(

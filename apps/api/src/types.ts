@@ -43,6 +43,7 @@ export type Book = {
   id: string;
   name: string;
   currency: string;
+  incomeEnabled: boolean;
   createdByUserId: string;
   createdAt: string;
   updatedAt: string;

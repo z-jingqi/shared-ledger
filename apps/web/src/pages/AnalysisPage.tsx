@@ -31,6 +31,7 @@ export function AnalysisPage() {
     book ? `/books/${book.id}/members` : undefined,
   );
   const transactions = data?.transactions ?? [];
+  const incomeEnabled = Boolean(book?.incomeEnabled);
   const memberNameById = useMemo(
     () =>
       new Map(
@@ -61,7 +62,10 @@ export function AnalysisPage() {
   const maxBar = Math.max(
     1,
     ...bars.map((item) =>
-      Math.max(visibleSeries.expense ? item.expense : 0, visibleSeries.income ? item.income : 0),
+      Math.max(
+        visibleSeries.expense ? item.expense : 0,
+        incomeEnabled && visibleSeries.income ? item.income : 0,
+      ),
     ),
   );
   const toggleSeries = (series: keyof VisibleSeries) => {
@@ -74,7 +78,7 @@ export function AnalysisPage() {
         <IosTopBar book={book} />
         <div className="ios-empty">
           <b>当前还没有账本</b>
-          <p>创建账本后即可查看收支分析。</p>
+          <p>创建账本后即可查看记账分析。</p>
         </div>
       </IosPage>
     );
@@ -114,31 +118,35 @@ export function AnalysisPage() {
           </button>
         ) : null}
 
-        <div className="ios-analysis-summary">
-          <IosMetric label="收入" value={yuan(income, book?.currency)} tone="income" />
-          <IosMetric label="支出" value={yuan(expense, book?.currency)} />
+        <div className={`ios-analysis-summary${incomeEnabled ? "" : " single"}`}>
+          {incomeEnabled ? (
+            <IosMetric label="收入" value={yuan(income, book?.currency)} tone="income" />
+          ) : null}
+          <IosMetric label={incomeEnabled ? "支出" : "总额"} value={yuan(expense, book?.currency)} />
         </div>
 
         <section className="ios-chart-card">
           <header>
-            <h2>收支趋势</h2>
-            <div className="ios-chart-legend" aria-label="收支图例">
+            <h2>{incomeEnabled ? "收支趋势" : "记账趋势"}</h2>
+            <div className="ios-chart-legend" aria-label={incomeEnabled ? "收支图例" : "记账图例"}>
               <button
                 className={visibleSeries.expense ? "" : "muted"}
                 type="button"
                 onClick={() => toggleSeries("expense")}
               >
                 <i />
-                支出
+                {incomeEnabled ? "支出" : "金额"}
               </button>
-              <button
-                className={visibleSeries.income ? "" : "muted"}
-                type="button"
-                onClick={() => toggleSeries("income")}
-              >
-                <i className="income" />
-                收入
-              </button>
+              {incomeEnabled ? (
+                <button
+                  className={visibleSeries.income ? "" : "muted"}
+                  type="button"
+                  onClick={() => toggleSeries("income")}
+                >
+                  <i className="income" />
+                  收入
+                </button>
+              ) : null}
             </div>
           </header>
           <div
@@ -151,13 +159,17 @@ export function AnalysisPage() {
                 key={item.key}
                 type="button"
                 onClick={() => setSelectedBar(index)}
-                aria-label={`${item.label} ${yuan(item.expense, book?.currency)} ${yuan(item.income, book?.currency)}`}
+                aria-label={
+                  incomeEnabled
+                    ? `${item.label} ${yuan(item.expense, book?.currency)} ${yuan(item.income, book?.currency)}`
+                    : `${item.label} ${yuan(item.expense, book?.currency)}`
+                }
               >
                 <span>
                   {visibleSeries.expense && (
                     <i style={{ height: `${Math.max(4, (item.expense / maxBar) * 100)}%` }} />
                   )}
-                  {visibleSeries.income && (
+                  {incomeEnabled && visibleSeries.income && (
                     <i
                       className="income"
                       style={{ height: `${Math.max(4, (item.income / maxBar) * 100)}%` }}
@@ -171,7 +183,7 @@ export function AnalysisPage() {
           {selected && (
             <div className="ios-chart-values" aria-live="polite">
               {visibleSeries.expense && <span>{yuan(selected.expense, book?.currency)}</span>}
-              {visibleSeries.income && (
+              {incomeEnabled && visibleSeries.income && (
                 <span className="income">{yuan(selected.income, book?.currency)}</span>
               )}
             </div>
@@ -179,7 +191,7 @@ export function AnalysisPage() {
         </section>
 
         <section className="ios-chart-card ios-breakdown">
-          <h2>支出构成</h2>
+          <h2>{incomeEnabled ? "支出构成" : "分类构成"}</h2>
           <div>
             <div className="ios-donut" style={donutStyle(categories, expense)}>
               <span>
@@ -196,13 +208,13 @@ export function AnalysisPage() {
                   <b>{expense ? Math.round((item.amount / expense) * 100) : 0}%</b>
                 </li>
               ))}
-              {!categories.length && <li>暂无支出记录</li>}
+              {!categories.length && <li>暂无记录</li>}
             </ul>
           </div>
         </section>
 
         <section className="ios-chart-card">
-          <h2>成员贡献</h2>
+          <h2>{incomeEnabled ? "成员贡献" : "成员记录"}</h2>
           <div className="ios-member-bars">
             {members.map((member, index) => (
               <div key={member.name}>
@@ -226,7 +238,7 @@ export function AnalysisPage() {
                 </p>
               </div>
             ))}
-            {!members.length && <p className="muted">暂无成员支出数据</p>}
+            {!members.length && <p className="muted">暂无成员记录</p>}
           </div>
         </section>
       </IosScroll>

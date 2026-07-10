@@ -197,6 +197,7 @@ function insertRow(db: TestD1Database, sql: string, values: unknown[]) {
       error_terminal: row.error_terminal ?? 0,
     });
   }
+  if (table === "books") row.income_enabled ??= 0;
   if (/or ignore/i.test(sql)) {
     if (
       table === "book_members" &&
@@ -222,13 +223,14 @@ function updateRows(db: TestD1Database, sql: string, values: unknown[]) {
 
   if (table === "books" && sql.includes("SET name = ?")) {
     rows
-      .filter((row) => row.id === values[4])
+      .filter((row) => row.id === values[5])
       .forEach((row) =>
         set(row, {
           name: values[0],
           currency: values[1],
-          updated_at: values[2],
-          updated_by_user_id: values[3],
+          income_enabled: values[2],
+          updated_at: values[3],
+          updated_by_user_id: values[4],
         }),
       );
     return;
@@ -1102,6 +1104,7 @@ function bookRow(row: Row) {
     id: row.id,
     name: row.name,
     currency: row.currency,
+    incomeEnabled: Boolean(row.income_enabled),
     createdByUserId: row.created_by_user_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -1301,13 +1304,14 @@ export function seedUser(db: TestD1Database, input: Partial<LedgerUser> & { id?:
 export function seedBook(
   db: TestD1Database,
   creator: LedgerUser,
-  input: { id?: string; name?: string; currency?: string } = {},
+  input: { id?: string; name?: string; currency?: string; incomeEnabled?: boolean } = {},
 ) {
   const timestamp = now();
   const book = {
     id: input.id ?? id("book"),
     name: input.name ?? `${creator.name} 的账本`,
     currency: input.currency ?? "CNY",
+    incomeEnabled: input.incomeEnabled ?? false,
     createdByUserId: creator.id,
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -1316,6 +1320,7 @@ export function seedBook(
     id: book.id,
     name: book.name,
     currency: book.currency,
+    income_enabled: book.incomeEnabled ? 1 : 0,
     created_by_user_id: creator.id,
     updated_by_user_id: creator.id,
     created_at: timestamp,

@@ -106,6 +106,7 @@ export class MemoryLedgerStore {
       id: "book_home",
       name: "家庭账本",
       currency: "CNY",
+      incomeEnabled: true,
       createdByUserId: "user_demo",
       createdAt: now(),
       updatedAt: now(),
@@ -172,6 +173,7 @@ export class MemoryLedgerStore {
       id: id("book"),
       name,
       currency,
+      incomeEnabled: false,
       createdByUserId: user.id,
       createdAt: now(),
       updatedAt: now(),
@@ -195,6 +197,9 @@ export class MemoryLedgerStore {
     userId: string,
     input: Omit<Transaction, "id" | "bookId" | "createdByUserId">,
   ) {
+    const book = this.books.find((item) => item.id === bookId);
+    if (!book) throw new Error("账本不存在");
+    if (!book.incomeEnabled && input.type === "income") throw new Error("当前账本未启用收入记录");
     const tx = {
       ...input,
       id: id("tx"),

@@ -453,6 +453,10 @@
   gap: 9px;
 }
 
+.ios-analysis-summary.single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .ios-analysis-ai-action {
   width: 100%;
   min-height: 50px;
@@ -1077,6 +1081,50 @@
 .ios-settings-info small {
   color: #aab2bd;
   font-size: 13px;
+}
+
+.ios-settings-toggle-row > span:nth-child(2) small {
+  display: block;
+  margin-top: 2px;
+  color: var(--ios-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ios-switch {
+  position: relative;
+  flex: 0 0 46px;
+  width: 46px;
+  height: 28px;
+  border: 0;
+  border-radius: 14px;
+  background: #d7dce4;
+  padding: 2px;
+  cursor: pointer;
+  transition: background 160ms ease;
+}
+
+.ios-switch[aria-checked="true"] {
+  background: var(--ios-accent);
+}
+
+.ios-switch span {
+  display: block;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 5px rgba(16, 24, 39, 0.2);
+  transition: transform 160ms ease;
+}
+
+.ios-switch[aria-checked="true"] span {
+  transform: translateX(18px);
+}
+
+.ios-switch:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 .ios-danger-link {

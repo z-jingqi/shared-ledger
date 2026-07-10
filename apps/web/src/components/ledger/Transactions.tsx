@@ -16,10 +16,12 @@ export function IosTransactionRow({
   transaction,
   categoryNames,
   currency,
+  incomeEnabled = true,
 }: {
   transaction: LedgerTransaction;
   categoryNames?: Record<string, string>;
   currency?: string;
+  incomeEnabled?: boolean;
 }) {
   const { openSheet } = useAppSheetActions();
   const label = getCategoryLabel(transaction, categoryNames);
@@ -34,10 +36,10 @@ export function IosTransactionRow({
       <span className="ios-transaction-category-name">{label}</span>
       <span className="ios-transaction-copy">
         <b>{transaction.note?.trim() || "无备注"}</b>
-        <small className={transaction.type}>{typeLabel}</small>
+        {incomeEnabled ? <small className={transaction.type}>{typeLabel}</small> : null}
       </span>
-      <strong className={transaction.type}>
-        {transaction.type === "income" ? "+" : "-"}
+      <strong className={incomeEnabled ? transaction.type : "neutral"}>
+        {incomeEnabled ? (transaction.type === "income" ? "+" : "-") : ""}
         {yuan(transaction.amount, currency)}
       </strong>
     </button>

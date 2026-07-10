@@ -45,6 +45,7 @@ export type AiContext = {
   userId: string;
   page?: string;
   text: string;
+  incomeEnabled?: boolean;
   categories?: Array<{ name: string; type: "income" | "expense" }>;
   onImportProgress?: (progress: AiImportProgress) => Promise<void> | void;
 };
@@ -140,6 +141,7 @@ const importSummarySystemPrompt = [
   "You extract the receipt-level bookkeeping summary from OCR text.",
   "Return only JSON matching the supplied schema.",
   "Do not include reasoning, explanations, Markdown, or text outside the JSON object.",
+  "The payload contains allowedTransactionTypes. The returned type must be one of those values.",
   "If OCR visual rows are present, use their row grouping and x positions as primary evidence while inferring column meanings from the receipt headers.",
   "Use the merchant/receipt purpose as note, the transaction date, the final paid/received total, transaction type, and a likely category.",
   "Prefer category names from the provided existing categories. If none fits and the text clearly implies a category, return a concise new categoryName.",
@@ -411,6 +413,7 @@ export function createLedgerAiProvider(runtime: LedgerAiRuntime): AiProvider {
               bookId: input.bookId,
               userId: input.userId,
               page: input.page ?? "导入",
+              allowedTransactionTypes: input.incomeEnabled === false ? ["expense"] : ["expense", "income"],
               existingCategories: input.categories ?? [],
               summaryText: buildImportSummaryText(input.text),
             },
@@ -424,6 +427,7 @@ export function createLedgerAiProvider(runtime: LedgerAiRuntime): AiProvider {
         summary = fallbackImportReceiptSummary(input.text, input.categories ?? [], error);
       }
       summary = reconcileImportReceiptSummary(summary, input.text, input.categories ?? []);
+      if (input.incomeEnabled === false) summary = { ...summary, type: "expense" };
       let chunkResults = await extractImportItemChunks({
         generateStructured,
         input,
@@ -733,6 +737,7 @@ async function extractImportItemsChunk(input: {
           bookId: input.input.bookId,
           userId: input.input.userId,
           page: input.input.page ?? "导入",
+          allowedTransactionTypes: input.input.incomeEnabled === false ? ["expense"] : ["expense", "income"],
           existingCategories: input.input.categories ?? [],
           receiptContext: {
             type: input.receiptSummary.type,

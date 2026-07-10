@@ -5,7 +5,15 @@ import { RecordDetailSheet, TransactionFormSheet } from "../../pages/RecordPages
 import { AboutSheet, ExportSheet, HelpSheet } from "../../pages/SettingsPages";
 import { useAppSheet } from "./SheetContext";
 
-export function AppSheetHost({ bookId, currency }: { bookId?: string; currency?: string }) {
+export function AppSheetHost({
+  bookId,
+  currency,
+  incomeEnabled,
+}: {
+  bookId?: string;
+  currency?: string;
+  incomeEnabled?: boolean;
+}) {
   const { sheet, openSheet, closeSheet } = useAppSheet();
   if (!sheet) return null;
   if (sheet.type === "record-form") {
@@ -18,6 +26,7 @@ export function AppSheetHost({ bookId, currency }: { bookId?: string; currency?:
       <RecordDetailSheet
         bookId={bookId}
         currency={currency}
+        incomeEnabled={incomeEnabled}
         transactionId={sheet.transactionId}
         onClose={closeSheet}
         onEdit={(transactionId) => openSheet({ type: "record-form", recordId: transactionId })}

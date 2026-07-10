@@ -14,6 +14,7 @@ const mapBook = (row: Row): Book => ({
   id: row.id,
   name: row.name,
   currency: row.currency,
+  incomeEnabled: Boolean(row.incomeEnabled),
   createdByUserId: row.createdByUserId,
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
@@ -232,7 +233,7 @@ export class D1LedgerRepository {
   async listBooks(userId: string) {
     const result = await this.db
       .prepare(
-        `SELECT b.id,b.name,b.currency,b.created_by_user_id AS createdByUserId,b.created_at AS createdAt,b.updated_at AS updatedAt
+        `SELECT b.id,b.name,b.currency,b.income_enabled AS incomeEnabled,b.created_by_user_id AS createdByUserId,b.created_at AS createdAt,b.updated_at AS updatedAt
          FROM books b JOIN book_members bm ON bm.book_id = b.id
          WHERE bm.user_id = ? AND bm.deleted_at IS NULL AND b.deleted_at IS NULL ORDER BY b.updated_at DESC`,
       )
@@ -244,7 +245,7 @@ export class D1LedgerRepository {
   async getBook(bookId: string) {
     const result = await this.db
       .prepare(
-        "SELECT id,name,currency,created_by_user_id AS createdByUserId,created_at AS createdAt,updated_at AS updatedAt FROM books WHERE id = ? AND deleted_at IS NULL",
+        "SELECT id,name,currency,income_enabled AS incomeEnabled,created_by_user_id AS createdByUserId,created_at AS createdAt,updated_at AS updatedAt FROM books WHERE id = ? AND deleted_at IS NULL",
       )
       .bind(bookId)
       .first<Row>();
@@ -257,6 +258,7 @@ export class D1LedgerRepository {
       id: id("book"),
       name,
       currency,
+      incomeEnabled: false,
       createdByUserId: userId,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -276,7 +278,11 @@ export class D1LedgerRepository {
     return book;
   }
 
-  async updateBook(bookId: string, input: Partial<Pick<Book, "name" | "currency">>, actorId = systemActorId) {
+  async updateBook(
+    bookId: string,
+    input: Partial<Pick<Book, "name" | "currency" | "incomeEnabled">>,
+    actorId = systemActorId,
+  ) {
     const book = await this.getBook(bookId);
     if (!book) return null;
     const timestamp = now();
@@ -284,11 +290,14 @@ export class D1LedgerRepository {
       ...book,
       name: input.name ?? book.name,
       currency: input.currency ?? book.currency,
+      incomeEnabled: input.incomeEnabled ?? book.incomeEnabled,
       updatedAt: timestamp,
     };
     await this.db
-      .prepare("UPDATE books SET name = ?, currency = ?, updated_at = ?, updated_by_user_id = ? WHERE id = ?")
-      .bind(updated.name, updated.currency, timestamp, actorId, bookId)
+      .prepare(
+        "UPDATE books SET name = ?, currency = ?, income_enabled = ?, updated_at = ?, updated_by_user_id = ? WHERE id = ?",
+      )
+      .bind(updated.name, updated.currency, updated.incomeEnabled ? 1 : 0, timestamp, actorId, bookId)
       .run();
     return updated;
   }
@@ -431,6 +440,9 @@ export class D1LedgerRepository {
     userId: string,
     input: Omit<Transaction, "id" | "bookId" | "createdByUserId">,
   ) {
+    const book = await this.getBook(bookId);
+    if (!book) throw new Error("账本不存在");
+    if (!book.incomeEnabled && input.type === "income") throw new Error("当前账本未启用收入记录");
     await this.assertTransactionCategoriesBelongToUser(userId, input);
     const timestamp = now();
     const transaction: Transaction = {
@@ -491,6 +503,9 @@ export class D1LedgerRepository {
   ) {
     const current = await this.getTransaction(transactionId);
     if (!current) return null;
+    const book = await this.getBook(current.bookId);
+    if (!book) throw new Error("账本不存在");
+    if (!book.incomeEnabled && input.type === "income") throw new Error("当前账本未启用收入记录");
     await this.assertTransactionCategoriesBelongToUser(actorId, input);
     const timestamp = now();
     const transaction: Transaction = {

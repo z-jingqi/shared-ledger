@@ -12,6 +12,7 @@ export async function structureForConfirmation(input: {
   userId: string;
   normalized: NormalizedImport;
   ai: AiProvider;
+  incomeEnabled?: boolean;
   categories?: Array<{ name: string; type: TransactionType }>;
   onProgress?: (progress: AiImportProgress) => Promise<void> | void;
 }) {
@@ -20,6 +21,7 @@ export async function structureForConfirmation(input: {
     userId: input.userId,
     text: input.normalized.rawText,
     page: "图片识别",
+    incomeEnabled: input.incomeEnabled,
     categories: input.categories,
     onImportProgress: input.onProgress,
   });

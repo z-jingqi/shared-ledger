@@ -375,7 +375,12 @@ async function executeConfirmedTool(
 
 async function searchRecords(runtime: AiActionRuntime, bookId: string, rawArgs: Record<string, unknown>) {
   const args = searchArgsSchema.parse(rawArgs);
-  const transactions = await searchTransactions(runtime.repository, bookId, args);
+  const incomeEnabled = await bookIncomeEnabled(runtime.repository, bookId);
+  if (!incomeEnabled && args.type === "income") return textResult("当前账本未启用收入记录。");
+  const transactions = await searchTransactions(runtime.repository, bookId, {
+    ...args,
+    type: incomeEnabled ? args.type : "expense",
+  });
   const limited = transactions.slice(0, args.limit);
   const expense = transactions
     .filter((item) => item.type === "expense")
@@ -387,20 +392,22 @@ async function searchRecords(runtime: AiActionRuntime, bookId: string, rawArgs: 
     parts: [
       {
         type: "text",
-        text: `找到 ${transactions.length} 条记录，支出 ¥${expense.toFixed(2)}，收入 ¥${income.toFixed(2)}。`,
+        text: incomeEnabled
+          ? `找到 ${transactions.length} 条记录，支出 ¥${expense.toFixed(2)}，收入 ¥${income.toFixed(2)}。`
+          : `找到 ${transactions.length} 条记录，合计 ¥${expense.toFixed(2)}。`,
       },
       {
         type: "search-result-card",
         title: "搜索结果",
         summary: `共 ${transactions.length} 条记录`,
-        results: limited.map(transactionResult),
+        results: limited.map((transaction) => transactionResult(transaction, incomeEnabled)),
         pageName: "记录页",
         href: `/records?bookId=${bookId}`,
       },
       {
         type: "filter-result",
         filters: args,
-        chips: chipsFromSearchArgs(args),
+        chips: chipsFromSearchArgs(incomeEnabled ? args : { ...args, type: undefined }),
         href: `/records?bookId=${bookId}`,
       } as any,
     ],
@@ -410,15 +417,24 @@ async function searchRecords(runtime: AiActionRuntime, bookId: string, rawArgs: 
 
 async function analyzeRecords(runtime: AiActionRuntime, bookId: string, rawArgs: Record<string, unknown>) {
   const args = searchArgsSchema.parse(rawArgs);
-  const transactions = await searchTransactions(runtime.repository, bookId, args);
+  const incomeEnabled = await bookIncomeEnabled(runtime.repository, bookId);
+  if (!incomeEnabled && args.type === "income") return textResult("当前账本未启用收入记录。");
+  const transactions = await searchTransactions(runtime.repository, bookId, {
+    ...args,
+    type: incomeEnabled ? args.type : "expense",
+  });
   const expenseItems = transactions.filter((item) => item.type === "expense");
   const incomeItems = transactions.filter((item) => item.type === "income");
   const expense = expenseItems.reduce((sum, item) => sum + item.amount, 0);
   const income = incomeItems.reduce((sum, item) => sum + item.amount, 0);
   const largest = [...expenseItems].sort((left, right) => right.amount - left.amount)[0];
-  const summary = largest
-    ? `当前范围内支出 ¥${expense.toFixed(2)}，收入 ¥${income.toFixed(2)}。最大支出是「${largest.note ?? "无备注"}」¥${largest.amount.toFixed(2)}。`
-    : `当前范围内支出 ¥${expense.toFixed(2)}，收入 ¥${income.toFixed(2)}。`;
+  const summary = incomeEnabled
+    ? largest
+      ? `当前范围内支出 ¥${expense.toFixed(2)}，收入 ¥${income.toFixed(2)}。最大支出是「${largest.note ?? "无备注"}」¥${largest.amount.toFixed(2)}。`
+      : `当前范围内支出 ¥${expense.toFixed(2)}，收入 ¥${income.toFixed(2)}。`
+    : largest
+      ? `当前范围内共记录 ¥${expense.toFixed(2)}。最大一笔是「${largest.note ?? "无备注"}」¥${largest.amount.toFixed(2)}。`
+      : `当前范围内共记录 ¥${expense.toFixed(2)}。`;
   return {
     parts: [
       {
@@ -426,11 +442,17 @@ async function analyzeRecords(runtime: AiActionRuntime, bookId: string, rawArgs:
         title: "账本分析",
         summary,
         metrics: [
-          { label: "收入", value: `¥${income.toFixed(2)}` },
-          { label: "支出", value: `¥${expense.toFixed(2)}` },
+          ...(incomeEnabled ? [{ label: "收入", value: `¥${income.toFixed(2)}` }] : []),
+          { label: incomeEnabled ? "支出" : "金额", value: `¥${expense.toFixed(2)}` },
           { label: "记录数", value: transactions.length },
           ...(largest
-            ? [{ label: "最大支出", value: `¥${largest.amount.toFixed(2)}`, hint: largest.note ?? "无备注" }]
+            ? [
+                {
+                  label: incomeEnabled ? "最大支出" : "最大一笔",
+                  value: `¥${largest.amount.toFixed(2)}`,
+                  hint: largest.note ?? "无备注",
+                },
+              ]
             : []),
         ],
       },
@@ -442,6 +464,10 @@ async function analyzeRecords(runtime: AiActionRuntime, bookId: string, rawArgs:
 async function createRecord(runtime: AiActionRuntime, bookId: string, rawArgs: Record<string, unknown>) {
   const args = createRecordsArgsSchema.parse(rawArgs);
   const records = "records" in args ? args.records : [args];
+  const incomeEnabled = await bookIncomeEnabled(runtime.repository, bookId);
+  if (!incomeEnabled && records.some((record) => record.type === "income")) {
+    return textResult("当前账本未启用收入记录。");
+  }
   const transactions = [];
   for (const record of records) {
     const input = await transactionInput(runtime.repository, runtime.user.id, record, runtime.today);
@@ -459,13 +485,16 @@ async function createRecord(runtime: AiActionRuntime, bookId: string, rawArgs: R
         type: "text",
         text:
           transactions.length === 1
-            ? `已保存${first.type === "income" ? "收入" : "支出"} ¥${first.amount.toFixed(2)}。`
+            ? incomeEnabled
+              ? `已保存${first.type === "income" ? "收入" : "支出"} ¥${first.amount.toFixed(2)}。`
+              : `已保存记录 ¥${first.amount.toFixed(2)}。`
             : `已创建 ${transactions.length} 笔记录。`,
       },
-      recordCard(first, await categoryName(runtime.repository, first.categoryId)) as unknown as Record<
-        string,
-        unknown
-      >,
+      recordCard(
+        first,
+        await categoryName(runtime.repository, first.categoryId),
+        incomeEnabled,
+      ) as unknown as Record<string, unknown>,
     ],
     result: { transactionId: first.id, transactionIds: transactions.map((transaction) => transaction.id) },
     changed: ["transactions"],
@@ -486,6 +515,10 @@ async function updateRecord(runtime: AiActionRuntime, bookId: string, rawArgs: R
     transaction,
   );
   const parsed = createTransactionSchema.parse(patch);
+  const incomeEnabled = await bookIncomeEnabled(runtime.repository, bookId);
+  if (!incomeEnabled && parsed.type === "income") {
+    return textResult("当前账本未启用收入记录。");
+  }
   const updated =
     runtime.repository instanceof D1LedgerRepository
       ? await runtime.repository.updateTransaction(transaction.id, parsed as any, runtime.user.id)
@@ -496,6 +529,7 @@ async function updateRecord(runtime: AiActionRuntime, bookId: string, rawArgs: R
       recordCard(
         updated as Transaction,
         await categoryName(runtime.repository, (updated as Transaction).categoryId),
+        incomeEnabled,
       ) as unknown as Record<string, unknown>,
     ],
     result: { transactionId: transaction.id },
@@ -533,8 +567,11 @@ async function deleteRecord(runtime: AiActionRuntime, bookId: string, rawArgs: R
   };
 }
 
-async function createCategory(runtime: AiActionRuntime, _bookId: string, rawArgs: Record<string, unknown>) {
+async function createCategory(runtime: AiActionRuntime, bookId: string, rawArgs: Record<string, unknown>) {
   const args = categoryArgsSchema.parse(rawArgs);
+  if (!(await bookIncomeEnabled(runtime.repository, bookId)) && args.type === "income") {
+    return textResult("当前账本未启用收入记录。");
+  }
   const parsed = categorySchema.parse({
     name: args.name,
     type: args.type ?? "expense",
@@ -556,10 +593,15 @@ async function createCategory(runtime: AiActionRuntime, _bookId: string, rawArgs
   };
 }
 
-async function updateCategory(runtime: AiActionRuntime, _bookId: string, rawArgs: Record<string, unknown>) {
+async function updateCategory(runtime: AiActionRuntime, bookId: string, rawArgs: Record<string, unknown>) {
   const args = categoryArgsSchema.parse(rawArgs);
+  const incomeEnabled = await bookIncomeEnabled(runtime.repository, bookId);
+  if (!incomeEnabled && args.type === "income") {
+    return textResult("当前账本未启用收入记录。");
+  }
   const category = await resolveCategory(runtime.repository, runtime.user.id, args.id, args.name, args.type);
   if (!category) return textResult("我没有找到这个分类。");
+  if (!incomeEnabled && category.type === "income") return textResult("当前账本未启用收入记录。");
   const parsed = categorySchema.parse({
     name: args.newName ?? args.name ?? category.name,
     type: args.type ?? (category.type === "income" ? "income" : "expense"),
@@ -574,10 +616,13 @@ async function updateCategory(runtime: AiActionRuntime, _bookId: string, rawArgs
   };
 }
 
-async function deleteCategory(runtime: AiActionRuntime, _bookId: string, rawArgs: Record<string, unknown>) {
+async function deleteCategory(runtime: AiActionRuntime, bookId: string, rawArgs: Record<string, unknown>) {
   const args = categoryArgsSchema.parse(rawArgs);
   const category = await resolveCategory(runtime.repository, runtime.user.id, args.id, args.name, args.type);
   if (!category) return textResult("我没有找到这个分类。");
+  if (!(await bookIncomeEnabled(runtime.repository, bookId)) && category.type === "income") {
+    return textResult("当前账本未启用收入记录。");
+  }
   await deleteCategoryEntity(runtime.repository, category.id, runtime.user.id);
   return {
     parts: [{ type: "text", text: `已删除分类「${category.name}」，关联记录已保留。` }],
@@ -898,18 +943,23 @@ async function resolveTransaction(
   bookId: string,
   args: { transactionId?: string; relative?: string; amount?: number; note?: string },
 ) {
+  const incomeEnabled = await bookIncomeEnabled(repository, bookId);
   if (args.transactionId) {
     const transaction =
       repository instanceof D1LedgerRepository
         ? await repository.getTransaction(args.transactionId)
         : repository.transactions.find((item) => item.id === args.transactionId);
-    return transaction?.bookId === bookId ? transaction : undefined;
+    return transaction?.bookId === bookId && (incomeEnabled || transaction.type === "expense")
+      ? transaction
+      : undefined;
   }
   const transactions =
     repository instanceof D1LedgerRepository
       ? await repository.listTransactions(bookId)
       : repository.transactions.filter((item) => item.bookId === bookId);
-  const own = transactions.filter((item) => item.createdByUserId === userId);
+  const own = transactions.filter(
+    (item) => item.createdByUserId === userId && (incomeEnabled || item.type === "expense"),
+  );
   if (args.relative) return own[0];
   return own.find(
     (item) =>
@@ -924,19 +974,21 @@ async function resolveTransactionsForDelete(
   bookId: string,
   args: z.infer<typeof targetRecordArgsSchema>,
 ) {
+  const incomeEnabled = await bookIncomeEnabled(repository, bookId);
   const all =
     repository instanceof D1LedgerRepository
       ? await repository.listTransactions(bookId)
       : repository.transactions.filter((item) => item.bookId === bookId);
+  const visible = incomeEnabled ? all : all.filter((item) => item.type === "expense");
   if (args.transactionIds.length || args.transactionId) {
     const ids = new Set(
       [args.transactionId, ...args.transactionIds].filter((value): value is string => Boolean(value)),
     );
-    return all.filter((transaction) => ids.has(transaction.id));
+    return visible.filter((transaction) => ids.has(transaction.id));
   }
   if (args.q || args.note) {
     const query = (args.q ?? args.note ?? "").toLowerCase();
-    return all
+    return visible
       .filter((transaction) => transaction.createdByUserId === userId)
       .filter((transaction) =>
         [transaction.note, ...transaction.items.map((item) => `${item.name} ${item.note ?? ""}`)]
@@ -954,6 +1006,14 @@ async function resolveBookId(repository: AiActionRepository, userId: string, boo
   if (bookId) return bookId;
   if (repository instanceof D1LedgerRepository) return (await repository.listBooks(userId))[0]?.id;
   return repository.books.find((book) => repository.role(book.id, userId))?.id;
+}
+
+async function bookIncomeEnabled(repository: AiActionRepository, bookId: string) {
+  const book =
+    repository instanceof D1LedgerRepository
+      ? await repository.getBook(bookId)
+      : repository.books.find((item) => item.id === bookId);
+  return Boolean(book?.incomeEnabled);
 }
 
 async function bookRoleFor(
@@ -1231,21 +1291,23 @@ function chipsFromSearchArgs(args: z.infer<typeof searchArgsSchema>) {
   ].filter(Boolean);
 }
 
-function transactionResult(transaction: Transaction) {
+function transactionResult(transaction: Transaction, incomeEnabled = true) {
   return {
     id: transaction.id,
-    title: transaction.note || (transaction.type === "income" ? "收入" : "支出"),
-    description: `${transaction.type === "income" ? "收入" : "支出"} · ${transaction.occurredAt.slice(0, 10)}`,
-    amount: transaction.type === "income" ? transaction.amount : -transaction.amount,
+    title: transaction.note || "记录",
+    description: incomeEnabled
+      ? `${transaction.type === "income" ? "收入" : "支出"} · ${transaction.occurredAt.slice(0, 10)}`
+      : transaction.occurredAt.slice(0, 10),
+    amount: incomeEnabled && transaction.type === "expense" ? -transaction.amount : transaction.amount,
     pageName: "交易详情",
     href: `/records/${transaction.id}`,
   };
 }
 
-function recordCard(transaction: Transaction, category?: string): AiChatPart {
+function recordCard(transaction: Transaction, category?: string, incomeEnabled = true): AiChatPart {
   return {
     type: "record-card",
-    title: transaction.type === "income" ? "收入记录" : "支出记录",
+    title: incomeEnabled ? (transaction.type === "income" ? "收入记录" : "支出记录") : "记账记录",
     transactionId: transaction.id,
     transactionType: transaction.type,
     amount: transaction.amount,

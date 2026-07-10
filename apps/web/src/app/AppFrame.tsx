@@ -174,7 +174,7 @@ function AppFrameInner({ children }: { children: ReactNode }) {
           />
         </>
       )}
-      <AppSheetHost bookId={book?.id} currency={book?.currency} />
+      <AppSheetHost bookId={book?.id} currency={book?.currency} incomeEnabled={book?.incomeEnabled} />
     </main>
   );
 }

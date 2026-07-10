@@ -53,7 +53,10 @@ export function registerBookRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryL
     const bookId = context.req.param("id");
     const denied = await requireBookManager(context, store, bookId);
     if (denied) return denied;
-    const body = await context.req.json<{ name?: string; currency?: string }>();
+    const body = await context.req.json<{ name?: string; currency?: string; incomeEnabled?: boolean }>();
+    if (body.incomeEnabled !== undefined && typeof body.incomeEnabled !== "boolean") {
+      return jsonError(context, "收入设置数据不合法", 400);
+    }
     const repository = context.env.DB ? new D1LedgerRepository(context.env.DB) : undefined;
     const user = await currentUser(context, store);
     if (!user) return jsonError(context, "请先登录", 401);
@@ -65,6 +68,7 @@ export function registerBookRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryL
       Object.assign(book, {
         name: body.name ?? book.name,
         currency: body.currency ?? book.currency,
+        incomeEnabled: body.incomeEnabled ?? book.incomeEnabled,
         updatedAt: new Date().toISOString(),
       });
     return context.json({ book });

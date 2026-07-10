@@ -7,7 +7,13 @@ import type {
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 import { CaretLeftIcon } from "@phosphor-icons/react";
 
-export type IosBookLike = { id?: string; name?: string; currency?: string; color?: string };
+export type IosBookLike = {
+  id?: string;
+  name?: string;
+  currency?: string;
+  incomeEnabled?: boolean;
+  color?: string;
+};
 
 export function BookMark({ book, size = 26 }: { book?: IosBookLike; size?: number }) {
   const color = bookColor(book);

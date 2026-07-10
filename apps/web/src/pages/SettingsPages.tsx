@@ -29,6 +29,7 @@ import {
   IosTopBar,
 } from "../components/ios/IosDesign";
 import { useAuth } from "../features/auth/AuthProvider";
+import { invalidateLedgerData } from "../features/data/invalidations";
 import { mergeLocalImportPlaceholders } from "../features/imports/cache";
 import { terminalImportStatuses, type ImportJobStatus } from "../features/imports/status";
 import { useInvitationBadge } from "../features/invitations/useInvitationBadge";
@@ -380,16 +381,21 @@ export function ManagementSettingsPage() {
 
 function BookSettingsPage({ bookId }: { bookId: string }) {
   const navigate = useNavigate();
-  const { data, reload } = useApi<{ book: { name: string; currency: string }; role?: string }>(
-    `/books/${bookId}`,
-  );
+  const { data, reload } = useApi<{
+    book: { name: string; currency: string; incomeEnabled: boolean };
+    role?: string;
+  }>(`/books/${bookId}`);
   const [bookNameEdit, setBookNameEdit] = useState<{ bookId: string; name: string }>();
+  const [incomeEdit, setIncomeEdit] = useState<{ bookId: string; enabled: boolean }>();
   const [bookError, setBookError] = useState("");
   const [savingBook, setSavingBook] = useState(false);
+  const [savingIncome, setSavingIncome] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const canManageBook = data?.role === "creator" || data?.role === "admin";
   const bookName = bookNameEdit?.bookId === bookId ? bookNameEdit.name : (data?.book.name ?? "");
+  const incomeEnabled =
+    incomeEdit?.bookId === bookId ? incomeEdit.enabled : Boolean(data?.book.incomeEnabled);
   const trimmedBookName = bookName.trim();
   const saveBook = async () => {
     if (!trimmedBookName || trimmedBookName === data?.book.name) return;
@@ -404,6 +410,30 @@ function BookSettingsPage({ bookId }: { bookId: string }) {
       setBookError(cause instanceof Error ? cause.message : "保存失败");
     } finally {
       setSavingBook(false);
+    }
+  };
+  const saveIncomeEnabled = async (enabled: boolean) => {
+    if (!data?.book || savingIncome || enabled === incomeEnabled) return;
+    const previous = incomeEnabled;
+    setIncomeEdit({ bookId, enabled });
+    setSavingIncome(true);
+    setBookError("");
+    try {
+      await api(`/books/${bookId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ incomeEnabled: enabled }),
+      });
+      invalidateLedgerData({
+        bookId,
+        scopes: ["books", "book", "transactions", "categories", "imports"],
+      });
+      await reload();
+      setIncomeEdit(undefined);
+    } catch (cause) {
+      setIncomeEdit({ bookId, enabled: previous });
+      setBookError(cause instanceof Error ? cause.message : "保存失败");
+    } finally {
+      setSavingIncome(false);
     }
   };
   const remove = async () => {
@@ -429,6 +459,26 @@ function BookSettingsPage({ bookId }: { bookId: string }) {
             </IconTile>
             <span>默认货币</span>
             <small>{data?.book.currency ?? "CNY"}</small>
+          </div>
+          <div className="ios-settings-info ios-settings-toggle-row">
+            <IconTile>
+              <FilesIcon size={18} />
+            </IconTile>
+            <span>
+              收入记录
+              <small>{incomeEnabled ? "已启用收入与支出" : "仅记录日常账目"}</small>
+            </span>
+            <button
+              className="ios-switch"
+              type="button"
+              role="switch"
+              aria-label="启用收入记录"
+              aria-checked={incomeEnabled}
+              disabled={!canManageBook || savingIncome || !data?.book}
+              onClick={() => void saveIncomeEnabled(!incomeEnabled)}
+            >
+              <span />
+            </button>
           </div>
           <SettingsRow
             to={bookId ? `/members?bookId=${encodeURIComponent(bookId)}` : "/members"}
@@ -475,12 +525,15 @@ function BookSettingsPage({ bookId }: { bookId: string }) {
 
 function CategoryManagerPage() {
   const navigate = useNavigate();
+  const { book } = useActiveBook();
   const { data, reload } = useApi<{ categories: Resource[] }>("/me/categories");
   const [editing, setEditing] = useState<Resource | undefined>();
   const [deleteTarget, setDeleteTarget] = useState<Resource | undefined>();
   const [name, setName] = useState("");
   const [error, setError] = useState("");
-  const items = data?.categories ?? [];
+  const items = (data?.categories ?? []).filter(
+    (category) => book?.incomeEnabled || category.type !== "income",
+  );
 
   const startEdit = (item: Resource) => {
     setEditing(item);

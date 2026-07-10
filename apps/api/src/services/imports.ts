@@ -267,6 +267,8 @@ async function finalizeImportJob(
     return existing;
   }
   await repository.markImportJobAiProcessing(job.id, "ai_text_ready");
+  const book = await repository.getBook(latest.bookId);
+  if (!book) throw new Error("账本不存在");
   let suggestions;
   try {
     await repository.updateOcrProgress(job.id, { stage: "ai_structuring", progress: 100 });
@@ -274,6 +276,7 @@ async function finalizeImportJob(
       bookId: latest.bookId,
       userId: latest.userId,
       normalized,
+      incomeEnabled: book.incomeEnabled,
       categories: (await repository.listCategories(latest.userId))
         .map((category) => ({
           name: category.name,
@@ -281,7 +284,7 @@ async function finalizeImportJob(
         }))
         .filter(
           (category): category is { name: string; type: "income" | "expense" } =>
-            category.type === "income" || category.type === "expense",
+            (category.type === "income" && book.incomeEnabled) || category.type === "expense",
         ),
       ai: runtimeAiProvider(env, { id: latest.userId, plan: await repository.getUserPlan(latest.userId) }),
       onProgress: async (progress) => {
@@ -322,8 +325,10 @@ async function confirmImportedRecords(
   job: ImportJob,
   records: ImportedRecord[],
 ) {
+  const book = await repository.getBook(job.bookId);
+  if (!book) throw new Error("账本不存在");
   for (const record of records) {
-    const suggested = record.suggestedTransaction as {
+    const parsedSuggestion = record.suggestedTransaction as {
       type: "expense" | "income";
       amount: number;
       categoryName?: string;
@@ -331,6 +336,9 @@ async function confirmImportedRecords(
       occurredAt: string;
       items?: Array<{ name: string; amount: number; categoryName?: string; note?: string }>;
     };
+    const suggested = book.incomeEnabled
+      ? parsedSuggestion
+      : { ...parsedSuggestion, type: "expense" as const };
     const categoryCache = new Map<string, Awaited<ReturnType<D1LedgerRepository["findOrCreateCategory"]>>>();
     const resolveCategory = async (name?: string) => {
       const normalized = name?.trim();

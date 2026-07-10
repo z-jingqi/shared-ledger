@@ -5,6 +5,7 @@ export type BookSwitcherBook = {
   id: string;
   name: string;
   currency: string;
+  incomeEnabled?: boolean;
   color?: string;
 };
 

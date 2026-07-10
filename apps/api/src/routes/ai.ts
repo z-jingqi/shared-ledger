@@ -729,9 +729,15 @@ async function buildModelContext(repository: AiActionRepository, user: LedgerUse
     user: publicUser(user),
     books,
     currentBook: book,
-    categories,
+    incomeEnabled: Boolean(book?.incomeEnabled),
+    categories: book?.incomeEnabled
+      ? categories
+      : categories.filter((category) => category.type !== "income"),
     members,
-    recentTransactions: transactions.slice(0, 20),
+    recentTransactions: (book?.incomeEnabled
+      ? transactions
+      : transactions.filter((transaction) => transaction.type === "expense")
+    ).slice(0, 20),
     recentImportJobs: imports.slice(0, 10),
   };
 }

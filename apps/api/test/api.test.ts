@@ -181,6 +181,69 @@ describe("Hono REST API", () => {
     expect(invalidTransaction.status).toBe(400);
   });
 
+  it("defaults new books to expense-only mode and enforces the income setting", async () => {
+    const store = new MemoryLedgerStore();
+    const app = createApp(store);
+    const created = await app.request(
+      "/books",
+      {
+        method: "POST",
+        body: JSON.stringify({ name: "日常账本", currency: "CNY" }),
+        headers: jsonHeaders,
+      },
+      { APP_ENV: "test" },
+    );
+    const createdBook = (await created.json<any>()).book;
+    expect(createdBook.incomeEnabled).toBe(false);
+
+    const disabled = await app.request(
+      "/books/book_home",
+      {
+        method: "PATCH",
+        body: JSON.stringify({ incomeEnabled: false }),
+        headers: jsonHeaders,
+      },
+      { APP_ENV: "test" },
+    );
+    expect((await disabled.json<any>()).book.incomeEnabled).toBe(false);
+
+    const listed = await app.request("/books/book_home/transactions", undefined, { APP_ENV: "test" });
+    const listedBody = await listed.json<any>();
+    expect(listedBody.transactions.map((transaction: any) => transaction.id)).toEqual(["tx_market"]);
+
+    const rejectedIncome = await app.request(
+      "/books/book_home/transactions",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          type: "income",
+          amount: 100,
+          occurredAt: "2026-07-10",
+          items: [],
+        }),
+        headers: jsonHeaders,
+      },
+      { APP_ENV: "test" },
+    );
+    expect(rejectedIncome.status).toBe(400);
+    expect((await rejectedIncome.json<any>()).error).toBe("当前账本未启用收入记录");
+
+    await app.request(
+      "/books/book_home",
+      {
+        method: "PATCH",
+        body: JSON.stringify({ incomeEnabled: true }),
+        headers: jsonHeaders,
+      },
+      { APP_ENV: "test" },
+    );
+    const restored = await app.request("/books/book_home/transactions", undefined, { APP_ENV: "test" });
+    expect((await restored.json<any>()).transactions.map((transaction: any) => transaction.id)).toEqual([
+      "tx_market",
+      "tx_salary",
+    ]);
+  });
+
   it("updates the current user's avatar in the test runtime", async () => {
     const store = new MemoryLedgerStore();
     const app = createApp(store);

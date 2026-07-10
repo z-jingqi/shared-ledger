@@ -44,12 +44,14 @@ export function BookHomePage() {
   const [selectedMonthKey, setSelectedMonthKey] = useState(() => monthOptions[0]?.key ?? monthKey(now));
   const selectedMonth =
     monthOptions.find((option) => option.key === selectedMonthKey) ?? monthOptionFromDate(now, now);
-  const currentMonthLabel = `${selectedMonth.label}净收支`;
+  const incomeEnabled = Boolean(book?.incomeEnabled);
+  const currentMonthLabel = `${selectedMonth.label}${incomeEnabled ? "净收支" : "记账"}`;
   const monthTransactions = transactions.filter((item) => isSameMonthOption(item.occurredAt, selectedMonth));
   const todayTransactions = transactions.filter((item) => isSameDay(item.occurredAt, now));
   const income = sum(monthTransactions, "income");
   const expense = sum(monthTransactions, "expense");
   const todayExpense = sum(todayTransactions, "expense");
+  const averageExpense = monthTransactions.length ? expense / monthTransactions.length : 0;
   const importJobs = mergeLocalImportPlaceholders(book?.id, user?.id, imports?.imports ?? []);
   const processing = importJobs.filter(isProcessingJob);
   const duplicateReviews = importJobs.filter((job) => job.status === "duplicate_review");
@@ -97,16 +99,31 @@ export function BookHomePage() {
             <span>{currentMonthLabel}</span>
             <CaretDownIcon size={14} weight="bold" aria-hidden />
           </button>
-          <strong>{yuan(income - expense, displayBook.currency)}</strong>
+          <strong>{yuan(incomeEnabled ? income - expense : expense, displayBook.currency)}</strong>
           <div>
-            <p>
-              <small>收入</small>
-              <b>{yuan(income, displayBook.currency)}</b>
-            </p>
-            <p>
-              <small>支出</small>
-              <b>{yuan(expense, displayBook.currency)}</b>
-            </p>
+            {incomeEnabled ? (
+              <>
+                <p>
+                  <small>收入</small>
+                  <b>{yuan(income, displayBook.currency)}</b>
+                </p>
+                <p>
+                  <small>支出</small>
+                  <b>{yuan(expense, displayBook.currency)}</b>
+                </p>
+              </>
+            ) : (
+              <>
+                <p>
+                  <small>记录</small>
+                  <b>{monthTransactions.length} 笔</b>
+                </p>
+                <p>
+                  <small>笔均</small>
+                  <b>{yuan(averageExpense, displayBook.currency)}</b>
+                </p>
+              </>
+            )}
           </div>
         </section>
 
@@ -117,7 +134,7 @@ export function BookHomePage() {
           <div>
             <b>今日记账</b>
             <small>
-              {todayTransactions.length} 笔 · 支出 {yuan(todayExpense, displayBook.currency)}
+              {todayTransactions.length} 笔 · {yuan(todayExpense, displayBook.currency)}
             </small>
           </div>
           <button type="button" onClick={openRecordForm}>
@@ -212,7 +229,12 @@ export function BookHomePage() {
               <IosListSkeleton rows={3} />
             ) : recent.length ? (
               recent.map((item) => (
-                <IosTransactionRow transaction={item} currency={displayBook.currency} key={item.id} />
+                <IosTransactionRow
+                  transaction={item}
+                  currency={displayBook.currency}
+                  incomeEnabled={incomeEnabled}
+                  key={item.id}
+                />
               ))
             ) : (
               <div className="ios-transaction-empty" data-testid="recent-empty-state">

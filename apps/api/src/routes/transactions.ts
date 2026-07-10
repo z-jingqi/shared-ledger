@@ -11,10 +11,18 @@ export function registerTransactionRoutes(app: Hono<{ Bindings: Env }>, store?: 
     const bookId = context.req.param("bookId");
     const denied = await requireMember(context, store, bookId);
     if (denied) return denied;
+    const repository = context.env.DB ? new D1LedgerRepository(context.env.DB) : undefined;
+    const book = repository
+      ? await repository.getBook(bookId)
+      : store?.books.find((item) => item.id === bookId);
+    if (!book) return jsonError(context, "账本不存在", 404);
+    const transactions = repository
+      ? await repository.listTransactions(bookId)
+      : (store?.transactions.filter((item) => item.bookId === bookId) ?? []);
     return context.json({
-      transactions: context.env.DB
-        ? await new D1LedgerRepository(context.env.DB).listTransactions(bookId)
-        : (store?.transactions.filter((item) => item.bookId === bookId) ?? []),
+      transactions: book.incomeEnabled
+        ? transactions
+        : transactions.filter((item) => item.type === "expense"),
     });
   });
 
@@ -24,15 +32,23 @@ export function registerTransactionRoutes(app: Hono<{ Bindings: Env }>, store?: 
     if (user instanceof Response) return user;
     const denied = await requireMember(context, store, bookId, user);
     if (denied) return denied;
+    const repository = context.env.DB ? new D1LedgerRepository(context.env.DB) : undefined;
+    const book = repository
+      ? await repository.getBook(bookId)
+      : store?.books.find((item) => item.id === bookId);
+    if (!book) return jsonError(context, "账本不存在", 404);
     const body = await parseJson(context, createTransactionSchema);
     if (!body) return jsonError(context, "记录数据不合法，检查金额与明细总额");
+    if (!book.incomeEnabled && body.type === "income") {
+      return jsonError(context, "当前账本未启用收入记录", 400);
+    }
     if (!context.env.DB && store && !memoryCategoriesBelongToUser(store, user.id, body as any)) {
       return jsonError(context, "分类不存在或不属于当前用户", 400);
     }
     let transaction;
     try {
-      transaction = context.env.DB
-        ? await new D1LedgerRepository(context.env.DB).createTransaction(bookId, user.id, body as any)
+      transaction = repository
+        ? await repository.createTransaction(bookId, user.id, body as any)
         : store?.createTransaction(bookId, user.id, body as any);
     } catch (error) {
       if (error instanceof Error && error.message.includes("分类不存在"))
@@ -49,7 +65,9 @@ export function registerTransactionRoutes(app: Hono<{ Bindings: Env }>, store?: 
       : store?.transactions.find((item) => item.id === context.req.param("id"));
     if (!transaction) return jsonError(context, "记录不存在", 404);
     const denied = await requireMember(context, store, transaction.bookId);
-    return denied ?? context.json({ transaction });
+    if (denied) return denied;
+    if (!(await incomeVisible(context, store, transaction))) return jsonError(context, "记录不存在", 404);
+    return context.json({ transaction });
   });
 
   app.patch("/transactions/:id", async (context) => {
@@ -65,6 +83,9 @@ export function registerTransactionRoutes(app: Hono<{ Bindings: Env }>, store?: 
     const body = await context.req.json<Record<string, unknown>>();
     const candidate = createTransactionSchema.safeParse({ ...transaction, ...body });
     if (!candidate.success) return jsonError(context, "记录数据不合法，检查金额与明细总额");
+    if (!(await incomeVisible(context, store, { ...transaction, type: candidate.data.type }))) {
+      return jsonError(context, "当前账本未启用收入记录", 400);
+    }
     if (!repository && store && !memoryCategoriesBelongToUser(store, user.id, candidate.data as any)) {
       return jsonError(context, "分类不存在或不属于当前用户", 400);
     }
@@ -87,6 +108,7 @@ export function registerTransactionRoutes(app: Hono<{ Bindings: Env }>, store?: 
       ? await repository.getTransaction(context.req.param("id"))
       : store?.transactions.find((item) => item.id === context.req.param("id"));
     if (!transaction) return jsonError(context, "记录不存在", 404);
+    if (!(await incomeVisible(context, store, transaction))) return jsonError(context, "记录不存在", 404);
     const user = await currentUser(context, store);
     if (!user) return jsonError(context, "请先登录", 401);
     if (!canMutateTransaction(user.id, transaction.createdByUserId))
@@ -95,6 +117,18 @@ export function registerTransactionRoutes(app: Hono<{ Bindings: Env }>, store?: 
     else if (store) store.transactions = store.transactions.filter((item) => item.id !== transaction.id);
     return context.body(null, 204);
   });
+}
+
+async function incomeVisible(
+  context: { env: Env },
+  store: MemoryLedgerStore | undefined,
+  transaction: { bookId: string; type: "income" | "expense" },
+) {
+  if (transaction.type !== "income") return true;
+  const book = context.env.DB
+    ? await new D1LedgerRepository(context.env.DB).getBook(transaction.bookId)
+    : store?.books.find((item) => item.id === transaction.bookId);
+  return Boolean(book?.incomeEnabled);
 }
 
 function memoryCategoriesBelongToUser(

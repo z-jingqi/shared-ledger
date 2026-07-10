@@ -351,9 +351,11 @@ function useRecordsPageController() {
   const { book, books, setActiveBook } = useActiveBook();
   const { openSheet } = useAppSheetActions();
   const canUseAiSearch = user?.plan === "pro";
+  const incomeEnabled = Boolean(book?.incomeEnabled);
   const filters = useMemo(
-    () => normalizeRecordFiltersForPlan(rawFilters, canUseAiSearch),
-    [canUseAiSearch, rawFilters],
+    () =>
+      normalizeRecordFiltersForBook(normalizeRecordFiltersForPlan(rawFilters, canUseAiSearch), incomeEnabled),
+    [canUseAiSearch, incomeEnabled, rawFilters],
   );
   const {
     data,
@@ -481,6 +483,7 @@ function useRecordsPageController() {
     books,
     bookSwitcherOpen,
     canUseAiSearch,
+    incomeEnabled,
     categoryNames,
     closeBookSwitcher: () => dispatchPage({ type: "close-book-switcher" }),
     closeFilters: () => dispatchPage({ type: "close-filters" }),
@@ -526,6 +529,7 @@ export function RecordsPage() {
     books,
     bookSwitcherOpen,
     canUseAiSearch,
+    incomeEnabled,
     categoryNames,
     closeBookSwitcher,
     closeFilters,
@@ -602,18 +606,20 @@ export function RecordsPage() {
           )}
         </form>
 
-        <div className="ios-filter-chips" aria-label="记录类型筛选">
-          {recordTypeFilterOptions.map((option) => (
-            <button
-              className={filters.type === option.value ? "active" : ""}
-              type="button"
-              onClick={() => setRecordTypeFilter(option.value)}
-              key={option.value}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
+        {incomeEnabled ? (
+          <div className="ios-filter-chips" aria-label="记录类型筛选">
+            {recordTypeFilterOptions.map((option) => (
+              <button
+                className={filters.type === option.value ? "active" : ""}
+                type="button"
+                onClick={() => setRecordTypeFilter(option.value)}
+                key={option.value}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         {shouldShowResetBar && (
           <ActiveFilterResetBar source={filters.source} chips={activeFilterChips} onReset={resetFilters} />
@@ -706,8 +712,14 @@ export function RecordsPage() {
                 <header>
                   <h2>{group.label}</h2>
                   <span>
-                    收入 {yuan(sum(group.items, "income"), book?.currency)}
-                    <b>支出 {yuan(sum(group.items, "expense"), book?.currency)}</b>
+                    {incomeEnabled ? (
+                      <>
+                        收入 {yuan(sum(group.items, "income"), book?.currency)}
+                        <b>支出 {yuan(sum(group.items, "expense"), book?.currency)}</b>
+                      </>
+                    ) : (
+                      <b>{yuan(sum(group.items, "expense"), book?.currency)}</b>
+                    )}
                   </span>
                 </header>
                 <IosCard className="ios-record-list">
@@ -716,6 +728,7 @@ export function RecordsPage() {
                       transaction={transaction}
                       categoryNames={categoryNames}
                       currency={book?.currency}
+                      incomeEnabled={incomeEnabled}
                       key={transaction.id}
                     />
                   ))}
@@ -745,13 +758,15 @@ export function RecordsPage() {
           }
         >
           <div className="ios-filter-sheet">
-            <IosField label="类型">
-              <IosSegment
-                value={draftFilters.type}
-                onChange={(value) => setDraftFilters((current) => ({ ...current, type: value }))}
-                options={recordTypeFilterOptions}
-              />
-            </IosField>
+            {incomeEnabled ? (
+              <IosField label="类型">
+                <IosSegment
+                  value={draftFilters.type}
+                  onChange={(value) => setDraftFilters((current) => ({ ...current, type: value }))}
+                  options={recordTypeFilterOptions}
+                />
+              </IosField>
+            ) : null}
             <IosField label="排序">
               <IosSegment
                 value={draftFilters.sort}
@@ -854,6 +869,8 @@ export function TransactionFormSheet({
   const initialDraft = readRecordDraft(draftKey);
   const sourceDraft =
     initialDraft ?? (existing?.transaction ? transactionToRecordDraft(existing.transaction) : undefined);
+  const normalizedSourceDraft =
+    book?.incomeEnabled === false && sourceDraft ? { ...sourceDraft, type: "expense" as const } : sourceDraft;
   const categories = categoriesData?.categories ?? [];
 
   if (id && !initialDraft && !existing?.transaction) {
@@ -866,12 +883,15 @@ export function TransactionFormSheet({
 
   return (
     <TransactionFormEditor
-      key={`${id ?? "new"}:${book?.id ?? ""}:${sourceDraft?.occurredAt ?? ""}:${sourceDraft?.amount ?? ""}`}
+      key={`${id ?? "new"}:${book?.id ?? ""}:${normalizedSourceDraft?.occurredAt ?? ""}:${normalizedSourceDraft?.amount ?? ""}`}
       id={id}
       book={book}
       categories={categories}
       draftKey={draftKey}
-      initialState={createTransactionFormState(sourceDraft, initialType)}
+      initialState={createTransactionFormState(
+        normalizedSourceDraft,
+        book?.incomeEnabled ? initialType : "expense",
+      )}
       onClose={onClose}
     />
   );
@@ -910,10 +930,15 @@ function TransactionFormEditor({
     view,
   } = state;
   const canUseImageRecognition = user?.plan === "pro";
+  const incomeEnabled = Boolean(book?.incomeEnabled);
+  const effectiveType = incomeEnabled ? type : "expense";
   const fileInput = useRef<HTMLInputElement>(null);
   const stopWatchingRef = useRef<(() => void) | undefined>(undefined);
   const amountNumber = Number(amount || 0);
-  const selectedCategory = categories.find((category) => category.id === categoryId);
+  const visibleCategories = categories.filter(
+    (category) => !category.type || category.type === effectiveType,
+  );
+  const selectedCategory = visibleCategories.find((category) => category.id === categoryId);
   const amountCents = amountToCents(amountNumber);
   const assignedLineAmountCents = lineRows.reduce((sumValue, item) => {
     const cents = amountInputToCents(item.amount);
@@ -1031,9 +1056,9 @@ function TransactionFormEditor({
     if (!closeImmediately) dispatchForm({ type: "set-saving", saving: true });
     dispatchForm({ type: "set-error", error: "" });
     const payload = {
-      type,
+      type: effectiveType,
       amount: amountNumber,
-      categoryId: categoryId || undefined,
+      categoryId: selectedCategory?.id,
       note: note.trim() || undefined,
       occurredAt,
       items: normalizeLineItemPayload(items),
@@ -1073,7 +1098,15 @@ function TransactionFormEditor({
   return (
     <IosSheet
       title={
-        view === "lineItems" ? "添加明细" : id ? "编辑记录" : type === "income" ? "记一笔收入" : "记一笔支出"
+        view === "lineItems"
+          ? "添加明细"
+          : id
+            ? "编辑记录"
+            : incomeEnabled
+              ? type === "income"
+                ? "记一笔收入"
+                : "记一笔支出"
+              : "记一笔"
       }
       onClose={close}
       back={view === "lineItems"}
@@ -1094,12 +1127,20 @@ function TransactionFormEditor({
               disabled={saving}
               onClick={() => void save(false)}
               style={
-                type === "income"
+                incomeEnabled && type === "income"
                   ? { background: "#1f9d57", boxShadow: "0 9px 22px rgba(31, 157, 87, .22)" }
                   : undefined
               }
             >
-              {saving ? "保存中…" : id ? "保存修改" : type === "income" ? "保存收入" : "保存支出"}
+              {saving
+                ? "保存中…"
+                : id
+                  ? "保存修改"
+                  : incomeEnabled
+                    ? type === "income"
+                      ? "保存收入"
+                      : "保存支出"
+                    : "保存记录"}
             </IosButton>
           </div>
         )
@@ -1118,24 +1159,26 @@ function TransactionFormEditor({
         />
       ) : (
         <div className="ios-record-form">
-          <IosSegment
-            value={type}
-            onChange={(value) => dispatchForm({ type: "set-type", value })}
-            options={[
-              { value: "expense", label: "支出" },
-              { value: "income", label: "收入" },
-            ]}
-          />
+          {incomeEnabled ? (
+            <IosSegment
+              value={type}
+              onChange={(value) => dispatchForm({ type: "set-type", value })}
+              options={[
+                { value: "expense", label: "支出" },
+                { value: "income", label: "收入" },
+              ]}
+            />
+          ) : null}
 
           <section className="ios-amount-panel">
             <span>¥</span>
-            <strong className={type}>{formatAmountText(amount)}</strong>
+            <strong className={incomeEnabled ? type : "neutral"}>{formatAmountText(amount)}</strong>
           </section>
 
           <section>
             <h3>类别</h3>
             <div className="ios-category-strip">
-              {categories.slice(0, 8).map((category) => (
+              {visibleCategories.slice(0, 8).map((category) => (
                 <button
                   aria-label={category.name}
                   className={category.id === categoryId ? "active" : ""}
@@ -1145,18 +1188,16 @@ function TransactionFormEditor({
                 >
                   <IconTile
                     tint={
-                      category.id === categoryId
-                        ? categoryColor(category, type)
-                        : `${categoryColor(category, type)}18`
+                      category.id === categoryId ? categoryColor(category) : `${categoryColor(category)}18`
                     }
-                    color={category.id === categoryId ? "#fff" : categoryColor(category, type)}
+                    color={category.id === categoryId ? "#fff" : categoryColor(category)}
                   >
                     {category.name[0] ?? "类"}
                   </IconTile>
                   <span>{category.name}</span>
                 </button>
               ))}
-              {!categories.length && <p className="muted">暂无分类，可稍后在设置中维护。</p>}
+              {!visibleCategories.length && <p className="muted">暂无分类，可稍后在设置中维护。</p>}
             </div>
           </section>
 
@@ -1307,12 +1348,14 @@ export function RecordDetailPage() {
 export function RecordDetailSheet({
   bookId,
   currency,
+  incomeEnabled = true,
   transactionId,
   onClose,
   onEdit,
 }: {
   bookId?: string;
   currency?: string;
+  incomeEnabled?: boolean;
   transactionId: string;
   onClose: () => void;
   onEdit: (transactionId: string) => void;
@@ -1343,7 +1386,9 @@ export function RecordDetailSheet({
       {transaction && (
         <div className="ios-record-detail">
           <div className="ios-record-detail-hero">
-            <strong className={transaction.type}>{yuan(transaction.amount, currency)}</strong>
+            <strong className={incomeEnabled ? transaction.type : "neutral"}>
+              {yuan(transaction.amount, currency)}
+            </strong>
             <span>{transaction.note || "未命名记录"}</span>
             <small>{categoryLabel(transaction)}</small>
           </div>
@@ -1469,6 +1514,10 @@ function ActiveFilterResetBar({
 function normalizeRecordFiltersForPlan(filters: RecordFilters, canUseAiSearch: boolean): RecordFilters {
   if (canUseAiSearch || filters.source !== "ai") return filters;
   return { ...filters, source: "", chips: [] };
+}
+
+function normalizeRecordFiltersForBook(filters: RecordFilters, incomeEnabled: boolean): RecordFilters {
+  return incomeEnabled || filters.type === "all" ? filters : { ...filters, type: "all" };
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) {
@@ -1823,13 +1872,13 @@ function categoryLabel(transaction: LedgerTransaction, categoryNames?: Record<st
   return transaction.categoryId ?? "未分类";
 }
 
-function categoryColor(category: { name?: string }, type: "income" | "expense") {
-  if (type === "income") return "#1f9d57";
-  const name = category.name ?? "";
-  if (name.includes("餐") || name.includes("饭") || name.includes("食")) return "#ff681c";
-  if (name.includes("交通") || name.includes("车")) return "#4c8dff";
-  if (name.includes("购") || name.includes("物")) return "#ff5d8f";
-  return "#a855f7";
+const categoryColors = ["#ff681c", "#4c8dff", "#ff5d8f", "#14b8a6", "#a855f7", "#e0a21a"];
+
+function categoryColor(category: { name?: string }) {
+  const name = category.name?.trim() || "分类";
+  let hash = 0;
+  for (const char of name) hash = (hash * 31 + char.codePointAt(0)!) >>> 0;
+  return categoryColors[hash % categoryColors.length]!;
 }
 
 function isActiveImport(job: ImportJobStatus) {

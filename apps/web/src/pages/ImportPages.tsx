@@ -170,6 +170,7 @@ function usePendingRecords(jobId?: string) {
 
   return {
     bookId: book?.id,
+    incomeEnabled: Boolean(book?.incomeEnabled),
     records,
     error,
     hasDuplicateRecords,
@@ -184,7 +185,8 @@ export function PendingImportsPage() {
 }
 
 export function PendingImportsSheet({ jobId, onClose }: { jobId?: string; onClose: () => void }) {
-  const { bookId, records, error, hasDuplicateRecords, loading, reload, userId } = usePendingRecords(jobId);
+  const { bookId, incomeEnabled, records, error, hasDuplicateRecords, loading, reload, userId } =
+    usePendingRecords(jobId);
   const [busy, setBusy] = useState("");
   const [editing, setEditing] = useState<PendingRecord | undefined>();
   const [duplicateConfirmation, setDuplicateConfirmation] = useState<
@@ -271,7 +273,7 @@ export function PendingImportsSheet({ jobId, onClose }: { jobId?: string; onClos
       await api(`/imported-records/${record.id}`, {
         method: "PATCH",
         body: JSON.stringify({
-          type: draft.type,
+          type: incomeEnabled ? draft.type : "expense",
           note: draft.note.trim() || undefined,
           amount: Number(draft.amount),
           occurredAt: draft.occurredAt,
@@ -341,6 +343,7 @@ export function PendingImportsSheet({ jobId, onClose }: { jobId?: string; onClos
               onConfirm={() => void confirm(record.id)}
               onIgnore={() => void ignore(record.id)}
               onEdit={() => setEditing(record)}
+              incomeEnabled={incomeEnabled}
               full={records.length === 1}
               key={record.id}
             />
@@ -351,6 +354,7 @@ export function PendingImportsSheet({ jobId, onClose }: { jobId?: string; onClos
         <PendingEditSheet
           record={editing}
           busy={busy === editing.id}
+          incomeEnabled={incomeEnabled}
           onBack={() => setEditing(undefined)}
           onClose={() => setEditing(undefined)}
           onSave={(draft) => void updateRecord(editing, draft)}
@@ -619,6 +623,7 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
 function PendingRecordCard({
   record,
   disabled,
+  incomeEnabled,
   onConfirm,
   onIgnore,
   onEdit,
@@ -626,13 +631,14 @@ function PendingRecordCard({
 }: {
   record: PendingRecord;
   disabled: boolean;
+  incomeEnabled: boolean;
   onConfirm: () => void;
   onIgnore: () => void;
   onEdit: () => void;
   full?: boolean;
 }) {
   const tx = record.suggestedTransaction;
-  const type = tx.type ?? "expense";
+  const type = incomeEnabled ? (tx.type ?? "expense") : "expense";
   const warning = tx.warnings.length > 0 || tx.confidence < 0.75;
   const warningText = tx.warnings.join("；");
   return (
@@ -640,21 +646,21 @@ function PendingRecordCard({
       <div className="ios-pending-fixed">
         <div className="ios-pending-main">
           <IconTile
-            tint={type === "income" ? "#e8f7ef" : "#fff0e8"}
-            color={type === "income" ? "#1f9d57" : "#ff681c"}
+            tint={incomeEnabled && type === "income" ? "#e8f7ef" : "#fff0e8"}
+            color={incomeEnabled && type === "income" ? "#1f9d57" : "#ff681c"}
           >
             <ShoppingCartIcon size={18} weight="fill" />
           </IconTile>
           <span>
             <b>{tx.note || "待确认记录"}</b>
             <small>
-              {tx.categoryName || (type === "income" ? "收入" : "支出")}
+              {tx.categoryName || (incomeEnabled ? (type === "income" ? "收入" : "支出") : "待确认")}
               {warning ? <em>待核对</em> : null}
               {tx.occurredAt ? ` · ${tx.occurredAt.slice(0, 10)}` : ""}
             </small>
           </span>
-          <strong className={type}>
-            {type === "income" ? "+" : "-"}
+          <strong className={incomeEnabled ? type : "neutral"}>
+            {incomeEnabled ? (type === "income" ? "+" : "-") : ""}
             {yuan(tx.amount)}
           </strong>
         </div>
@@ -718,19 +724,21 @@ function PendingWarning({ text }: { text: string }) {
 function PendingEditSheet({
   record,
   busy,
+  incomeEnabled,
   onBack,
   onClose,
   onSave,
 }: {
   record: PendingRecord;
   busy: boolean;
+  incomeEnabled: boolean;
   onBack: () => void;
   onClose: () => void;
   onSave: (draft: PendingEditDraft) => void;
 }) {
   const tx = record.suggestedTransaction;
   const [draft, setDraft] = useState<PendingEditDraft>({
-    type: tx.type ?? "expense",
+    type: incomeEnabled ? (tx.type ?? "expense") : "expense",
     note: tx.note ?? "",
     amount: String(tx.amount ?? ""),
     occurredAt: tx.occurredAt?.slice(0, 10) ?? new Date().toISOString().slice(0, 10),
@@ -770,16 +778,18 @@ function PendingEditSheet({
       }
     >
       <div className="ios-pending-edit">
-        <IosField label="类型">
-          <IosSegment
-            value={draft.type}
-            onChange={(value) => setDraft((current) => ({ ...current, type: value }))}
-            options={[
-              { value: "expense", label: "支出" },
-              { value: "income", label: "收入" },
-            ]}
-          />
-        </IosField>
+        {incomeEnabled ? (
+          <IosField label="类型">
+            <IosSegment
+              value={draft.type}
+              onChange={(value) => setDraft((current) => ({ ...current, type: value }))}
+              options={[
+                { value: "expense", label: "支出" },
+                { value: "income", label: "收入" },
+              ]}
+            />
+          </IosField>
+        ) : null}
         <IosField label="金额">
           <input
             aria-label="金额"

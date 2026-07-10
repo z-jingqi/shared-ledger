@@ -4,7 +4,7 @@ import { useAuth } from "../features/auth/AuthProvider";
 import { clearLastActiveBookId, readLastActiveBookId, writeLastActiveBookId } from "./activeBookStorage";
 import { useApi } from "./useApi";
 
-type Book = { id: string; name: string; currency: string };
+type Book = { id: string; name: string; currency: string; incomeEnabled: boolean };
 const emptyBooks: Book[] = [];
 
 export function useActiveBook() {

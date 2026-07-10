@@ -11,7 +11,7 @@ let plan: "free" | "pro" = "free";
 let authMode: "signed-in" | "signed-out" | "expired-once" = "signed-in";
 let authMeCalls = 0;
 let loginError = "";
-let bookList: Array<{ id: string; name: string; currency: string }> = [];
+let bookList: Array<{ id: string; name: string; currency: string; incomeEnabled: boolean }> = [];
 let transactionsByBook: Record<string, LedgerTransaction[]> = {};
 let categories: Array<{ id: string; name: string; type: "expense" | "income" }> = [];
 let transactionError = "";
@@ -272,7 +272,14 @@ function mockUserSummary(userId: string) {
 }
 
 function mockBookSummary(bookId: string) {
-  return bookList.find((book) => book.id === bookId) ?? { id: bookId, name: "账本", currency: "CNY" };
+  return (
+    bookList.find((book) => book.id === bookId) ?? {
+      id: bookId,
+      name: "账本",
+      currency: "CNY",
+      incomeEnabled: true,
+    }
+  );
 }
 
 describe("shared ledger mobile UI", () => {
@@ -283,8 +290,8 @@ describe("shared ledger mobile UI", () => {
     authMeCalls = 0;
     loginError = "";
     bookList = [
-      { id: "book_test", name: "家庭账本", currency: "CNY" },
-      { id: "book_b", name: "旅行账本", currency: "CNY" },
+      { id: "book_test", name: "家庭账本", currency: "CNY", incomeEnabled: true },
+      { id: "book_b", name: "旅行账本", currency: "CNY", incomeEnabled: true },
     ];
     transactionsByBook = {
       book_test: [
@@ -385,7 +392,14 @@ describe("shared ledger mobile UI", () => {
         if (path.includes("/auth/register")) {
           const body = JSON.parse(bodyText ?? "{}") as { name?: string };
           authMode = "signed-in";
-          bookList = [{ id: "book_registered", name: body.name ?? "新用户", currency: "CNY" }];
+          bookList = [
+            {
+              id: "book_registered",
+              name: body.name ?? "新用户",
+              currency: "CNY",
+              incomeEnabled: false,
+            },
+          ];
           transactionsByBook = { book_registered: [] };
           return Promise.resolve(
             new Response(
@@ -1026,13 +1040,21 @@ describe("shared ledger mobile UI", () => {
         if (path.includes("/books/book_test/imports"))
           return Promise.resolve(json({ imports: mockImportJobs }));
         if (path.includes("/books/book_test") && method === "PATCH") {
-          const body = JSON.parse(bodyText ?? "{}") as { name?: string; currency?: string };
+          const body = JSON.parse(bodyText ?? "{}") as {
+            name?: string;
+            currency?: string;
+            incomeEnabled?: boolean;
+          };
           bookMutationRequests.push({ path, method, body });
           bookList = bookList.map((item) => (item.id === "book_test" ? { ...item, ...body } : item));
           return Promise.resolve(json({ book: bookList.find((item) => item.id === "book_test") }));
         }
         if (path.includes("/books/book_b") && method === "PATCH") {
-          const body = JSON.parse(bodyText ?? "{}") as { name?: string; currency?: string };
+          const body = JSON.parse(bodyText ?? "{}") as {
+            name?: string;
+            currency?: string;
+            incomeEnabled?: boolean;
+          };
           bookMutationRequests.push({ path, method, body });
           bookList = bookList.map((item) => (item.id === "book_b" ? { ...item, ...body } : item));
           return Promise.resolve(json({ book: bookList.find((item) => item.id === "book_b") }));
@@ -1737,6 +1759,53 @@ describe("shared ledger mobile UI", () => {
     await waitFor(() => expect(window.location.pathname).toBe("/books/manage"));
     expect(bookMutationRequests).toContainEqual(expect.objectContaining({ method: "DELETE" }));
     expect(bookList.some((item) => item.id === "book_b")).toBe(false);
+  });
+  it("updates the income setting from book settings", async () => {
+    const user = userEvent.setup();
+    bookList = bookList.map((book) => (book.id === "book_test" ? { ...book, incomeEnabled: false } : book));
+    window.history.pushState({}, "", "/books/book_test/settings?bookId=book_test");
+    render(<App />);
+
+    const toggle = await screen.findByRole("switch", { name: "启用收入记录" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText("仅记录日常账目")).toBeInTheDocument();
+    await user.click(toggle);
+
+    await waitFor(() =>
+      expect(bookMutationRequests).toContainEqual(
+        expect.objectContaining({
+          method: "PATCH",
+          body: expect.objectContaining({ incomeEnabled: true }),
+        }),
+      ),
+    );
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+  });
+  it("uses neutral expense-only UI when income is disabled", async () => {
+    const user = userEvent.setup();
+    bookList = bookList.map((book) => (book.id === "book_test" ? { ...book, incomeEnabled: false } : book));
+    window.history.pushState({}, "", "/home?bookId=book_test");
+    const { container } = render(<App />);
+
+    expect(await findBookSwitcher()).toBeInTheDocument();
+    expect(screen.getByText(`${monthOptionLabelForTest(new Date())}记账`)).toBeInTheDocument();
+    await waitFor(() => expect(recordRow(container, "tx_home")).toBeInTheDocument());
+    const homeRow = recordRow(container, "tx_home")!;
+    expect(within(homeRow).queryByText("支出")).not.toBeInTheDocument();
+    expect(within(homeRow).getByText("¥100.00")).toBeInTheDocument();
+
+    const addButton = screen.getByRole("button", { name: "记一笔" });
+    await user.click(addButton);
+    expect(await screen.findByRole("heading", { name: "记一笔" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "收入" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "支出" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "工资" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存记录" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "1" }));
+    await user.click(screen.getByRole("button", { name: "保存记录" }));
+    await waitFor(() => expect(transactionRequests).toHaveLength(1));
+    expect(transactionRequests[0]?.body.type).toBe("expense");
   });
   it("switches books from the records page and refreshes the records list", async () => {
     const user = userEvent.setup();
