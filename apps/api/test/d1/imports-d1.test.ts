@@ -279,7 +279,7 @@ describe("D1 image import and OCR quota integrity", () => {
     expect(context.importQueue.messages).toHaveLength(1);
   });
 
-  it("deduplicates uploads against failed non-deleted jobs", async () => {
+  it("allows a fresh upload after the previous job failed", async () => {
     const context = createD1TestApp();
     const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
     const book = seedBook(context.db, user, { id: "book_pro" });
@@ -305,12 +305,131 @@ describe("D1 image import and OCR quota integrity", () => {
     expect(second.status).toBe(202);
     expect(secondBody.jobs).toHaveLength(1);
     expect(secondBody.jobs[0]).toMatchObject({
-      duplicateOfJobId: firstBody.jobs[0].id,
       fileName: "receipt.jpg",
-      status: "duplicate_review",
+      status: "uploaded",
     });
+    expect(secondBody.jobs[0].duplicateOfJobId).toBeUndefined();
     expect(context.db.rows.import_jobs).toHaveLength(2);
-    expect(context.importQueue.messages).toHaveLength(1);
+    expect(context.importQueue.messages).toHaveLength(2);
+  });
+
+  it("allows a fresh upload after all recognized records were ignored", async () => {
+    const context = createD1TestApp();
+    const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
+    const book = seedBook(context.db, user, { id: "book_pro" });
+    const original = await context.repository.createImportJob({
+      bookId: book.id,
+      userId: user.id,
+      fileName: "receipt.jpg",
+      fileType: "image/jpeg",
+      r2Key: "imports/test/original.jpg",
+      fileHash: await sha256Hex("same-image"),
+    });
+    const [record] = await context.repository.createImportedRecords(original.id, [
+      {
+        type: "expense",
+        amount: 12,
+        occurredAt: "2026-07-10",
+        note: "早餐",
+        items: [],
+        confidence: 0.9,
+        warnings: [],
+      },
+    ]);
+    await context.repository.updateImportedRecord(record.id, record.suggestedTransaction, "ignored", user.id);
+    await context.repository.updateImportJob(original.id, "completed");
+    const form = new FormData();
+    form.append("files", new File(["same-image"], "receipt.jpg", { type: "image/jpeg" }));
+
+    const response = await context.app.request(
+      `/books/${book.id}/imports/batch`,
+      { method: "POST", headers: authHeaders(user), body: form },
+      context.env,
+    );
+    const body = await response.json<any>();
+
+    expect(response.status).toBe(202);
+    expect(body.jobs[0]).toMatchObject({ status: "uploaded", fileName: "receipt.jpg" });
+    expect(body.jobs[0].duplicateOfJobId).toBeUndefined();
+    expect(context.importQueue.messages).toEqual([{ jobId: body.jobs[0].id, step: "ocr" }]);
+  });
+
+  it("still warns when the previous recognized record was confirmed", async () => {
+    const context = createD1TestApp();
+    const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
+    const book = seedBook(context.db, user, { id: "book_pro" });
+    const original = await context.repository.createImportJob({
+      bookId: book.id,
+      userId: user.id,
+      fileName: "receipt.jpg",
+      fileType: "image/jpeg",
+      r2Key: "imports/test/confirmed.jpg",
+      fileHash: await sha256Hex("same-image"),
+    });
+    const [record] = await context.repository.createImportedRecords(original.id, [
+      {
+        type: "expense",
+        amount: 12,
+        occurredAt: "2026-07-10",
+        note: "早餐",
+        items: [],
+        confidence: 0.9,
+        warnings: [],
+      },
+    ]);
+    await context.repository.updateImportedRecord(
+      record.id,
+      record.suggestedTransaction,
+      "confirmed",
+      user.id,
+    );
+    await context.repository.updateImportJob(original.id, "completed");
+    const form = new FormData();
+    form.append("files", new File(["same-image"], "receipt.jpg", { type: "image/jpeg" }));
+
+    const response = await context.app.request(
+      `/books/${book.id}/imports/batch`,
+      { method: "POST", headers: authHeaders(user), body: form },
+      context.env,
+    );
+    const body = await response.json<any>();
+
+    expect(response.status).toBe(202);
+    expect(body.jobs[0]).toMatchObject({
+      status: "duplicate_review",
+      duplicateOfJobId: original.id,
+    });
+    expect(context.importQueue.messages).toHaveLength(0);
+  });
+
+  it("allows a fresh upload after the previous task was deleted", async () => {
+    const context = createD1TestApp();
+    const user = seedUser(context.db, { id: "user_pro", name: "Pro", plan: "pro" });
+    const book = seedBook(context.db, user, { id: "book_pro" });
+    const original = await context.repository.createImportJob({
+      bookId: book.id,
+      userId: user.id,
+      fileName: "receipt.jpg",
+      fileType: "image/jpeg",
+      r2Key: "imports/test/deleted.jpg",
+      fileHash: await sha256Hex("same-image"),
+    });
+    await context.repository.updateImportJob(original.id, "failed", "识别失败");
+    await context.repository.softDeleteImportJob(original.id, user.id);
+    const form = new FormData();
+    form.append("files", new File(["same-image"], "receipt.jpg", { type: "image/jpeg" }));
+
+    const response = await context.app.request(
+      `/books/${book.id}/imports/batch`,
+      { method: "POST", headers: authHeaders(user), body: form },
+      context.env,
+    );
+    const body = await response.json<any>();
+
+    expect(response.status).toBe(202);
+    expect(body.jobs[0]).toMatchObject({ status: "uploaded", fileName: "receipt.jpg" });
+    expect(body.jobs[0].duplicateOfJobId).toBeUndefined();
+    expect(context.importQueue.messages).toEqual([{ jobId: body.jobs[0].id, step: "ocr" }]);
   });
 
   it("does not expose persisted OCR results", async () => {

@@ -673,7 +673,7 @@ function PendingRecordCard({
         ) : null}
       </div>
       <div className="ios-pending-actions">
-        <button type="button" disabled={disabled} onClick={onIgnore}>
+        <button className="danger" type="button" disabled={disabled} onClick={onIgnore}>
           忽略
         </button>
         <button type="button" disabled={disabled} onClick={onEdit}>

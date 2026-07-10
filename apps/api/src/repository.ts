@@ -160,6 +160,13 @@ const mapImportJob = (row: Row): ImportJob => ({
 
 const importJobColumns =
   "id,book_id AS bookId,user_id AS userId,file_name AS fileName,file_type AS fileType,r2_key AS r2Key,status,file_hash AS fileHash,ocr_text_hash AS ocrTextHash,duplicate_of_import_job_id AS duplicateOfImportJobId,auto_confirm AS autoConfirm,error_message AS errorMessage,error_code AS errorCode,error_stage AS errorStage,error_request_id AS errorRequestId,error_retryable AS errorRetryable,error_terminal AS errorTerminal,failed_external_job_id AS failedExternalJobId,cancelable,retryable,retry_count AS retryCount,ocr_job_id AS ocrJobId,ocr_provider AS ocrProvider,ocr_input_r2_key AS ocrInputR2Key,ocr_input_file_type AS ocrInputFileType,ocr_submitted_at AS ocrSubmittedAt,ocr_progress AS ocrProgress,ocr_stage AS ocrStage,ocr_current_page AS ocrCurrentPage,ocr_total_pages AS ocrTotalPages,ocr_completed_at AS ocrCompletedAt,ocr_event_sequence AS ocrEventSequence,created_at AS createdAt,updated_at AS updatedAt,deleted_at AS deletedAt,deleted_by_user_id AS deletedByUserId";
+const validDuplicateImportSourcePredicate = `deleted_at IS NULL AND (
+  status IN ('uploaded','converting','ocr_processing','cancel_requested','ai_processing','pending_confirmation')
+  OR (status='completed' AND EXISTS (
+    SELECT 1 FROM imported_records
+    WHERE import_job_id=import_jobs.id AND status='confirmed' AND deleted_at IS NULL
+  ))
+)`;
 const aiConfirmationColumns =
   "id,user_id AS userId,book_id AS bookId,action,status,payload,result,expires_at AS expiresAt,confirmed_at AS confirmedAt,cancelled_at AS cancelledAt,created_at AS createdAt,updated_at AS updatedAt";
 const aiSessionColumns =
@@ -1114,7 +1121,7 @@ export class D1LedgerRepository {
     const row = await this.db
       .prepare(
         `SELECT ${importJobColumns} FROM import_jobs
-         WHERE book_id=? AND file_hash=? AND status NOT IN ('duplicate_review','cancelled')
+         WHERE book_id=? AND file_hash=? AND ${validDuplicateImportSourcePredicate}
          ORDER BY created_at DESC LIMIT 1`,
       )
       .bind(input.bookId, input.fileHash)
@@ -1129,7 +1136,7 @@ export class D1LedgerRepository {
     const row = await this.db
       .prepare(
         `SELECT ${importJobColumns} FROM import_jobs
-         WHERE book_id=? AND ocr_text_hash=? AND id<>? AND status NOT IN ('duplicate_review','cancelled')
+         WHERE book_id=? AND ocr_text_hash=? AND id<>? AND ${validDuplicateImportSourcePredicate}
          ORDER BY created_at DESC LIMIT 1`,
       )
       .bind(input.bookId, input.ocrTextHash, input.excludeJobId)

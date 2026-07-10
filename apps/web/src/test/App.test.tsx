@@ -1893,6 +1893,7 @@ describe("shared ledger mobile UI", () => {
     expect(within(dialog).getByText("鸡蛋")).toBeInTheDocument();
     expect(within(dialog).getByText("纸巾")).toBeInTheDocument();
     expect(within(dialog).queryByText(/还有 \d+ 项明细/)).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "忽略" })).toHaveClass("danger");
   });
   it("shows a skeleton while pending import records are loading", async () => {
     const user = userEvent.setup();

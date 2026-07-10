@@ -1003,9 +1003,7 @@ function selectImportJobs(db: TestD1Database, lower: string, values: unknown[]) 
   if (lower.includes("file_hash=?")) {
     rows = rows.filter(
       (row) =>
-        row.book_id === values[0] &&
-        row.file_hash === values[1] &&
-        !["duplicate_review", "cancelled"].includes(row.status),
+        row.book_id === values[0] && row.file_hash === values[1] && isValidDuplicateImportSource(db, row),
     );
   } else if (lower.includes("ocr_text_hash=?")) {
     rows = rows.filter(
@@ -1013,12 +1011,34 @@ function selectImportJobs(db: TestD1Database, lower: string, values: unknown[]) 
         row.book_id === values[0] &&
         row.ocr_text_hash === values[1] &&
         row.id !== values[2] &&
-        !["duplicate_review", "cancelled"].includes(row.status),
+        isValidDuplicateImportSource(db, row),
     );
   } else if (lower.includes("where id=?")) rows = rows.filter((row) => row.id === values[0]);
   else if (lower.includes("where user_id=?")) rows = rows.filter((row) => row.user_id === values[0]);
   else if (lower.includes("where book_id=?")) rows = rows.filter((row) => row.book_id === values[0]);
   return rows.map(importJobRow);
+}
+
+function isValidDuplicateImportSource(db: TestD1Database, job: Row) {
+  if (job.deleted_at) return false;
+  if (
+    [
+      "uploaded",
+      "converting",
+      "ocr_processing",
+      "cancel_requested",
+      "ai_processing",
+      "pending_confirmation",
+    ].includes(String(job.status))
+  ) {
+    return true;
+  }
+  return (
+    job.status === "completed" &&
+    db.rows.imported_records.some(
+      (record) => record.import_job_id === job.id && record.status === "confirmed" && !record.deleted_at,
+    )
+  );
 }
 
 function selectImportedRecords(db: TestD1Database, lower: string, values: unknown[]) {
