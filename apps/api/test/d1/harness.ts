@@ -14,7 +14,6 @@ type TableName =
   | "categories"
   | "invitations"
   | "import_jobs"
-  | "import_ocr_results"
   | "imported_records"
   | "image_ocr_usage"
   | "ai_sessions"
@@ -37,7 +36,6 @@ const tableNames: TableName[] = [
   "categories",
   "invitations",
   "import_jobs",
-  "import_ocr_results",
   "imported_records",
   "image_ocr_usage",
   "ai_sessions",
@@ -147,8 +145,28 @@ class TestD1Statement {
 
 function executeMutation(db: TestD1Database, sql: string, values: unknown[]) {
   const normalized = normalizeSql(sql);
+  if (/^insert into image_ocr_usage .* select /i.test(normalized)) {
+    const importJobId = values[9];
+    const userId = values[10];
+    const usageDate = values[11];
+    const limit = Number(values[12]);
+    if (db.rows.image_ocr_usage.some((row) => row.import_job_id === importJobId && !row.deleted_at)) return;
+    const used = db.rows.image_ocr_usage.filter(
+      (row) => row.user_id === userId && row.usage_date === usageDate && !row.deleted_at,
+    ).length;
+    if (used >= limit) return;
+    return insertRow(db, normalized.replace(/ select .*$/i, " values"), values.slice(0, 9));
+  }
   if (/^insert(?: or ignore)? into /i.test(normalized)) return insertRow(db, normalized, values);
   if (/^update /i.test(normalized)) return updateRows(db, normalized, values);
+  if (/^delete from import_jobs where id=\?/i.test(normalized)) {
+    db.rows.import_jobs = db.rows.import_jobs.filter((row) => row.id !== values[0]);
+    return;
+  }
+  if (/^delete from image_ocr_usage where import_job_id=\?/i.test(normalized)) {
+    db.rows.image_ocr_usage = db.rows.image_ocr_usage.filter((row) => row.import_job_id !== values[0]);
+    return;
+  }
   if (/^delete from auth_sessions/i.test(normalized)) {
     db.rows.auth_sessions = db.rows.auth_sessions.filter((row) => row.token_hash !== values[0]);
     return;
@@ -192,24 +210,6 @@ function insertRow(db: TestD1Database, sql: string, values: unknown[]) {
       db.rows.image_ocr_usage.some((item) => item.import_job_id === row.import_job_id)
     )
       return;
-  }
-  if (table === "import_ocr_results" && /on conflict\(import_job_id\)/i.test(sql)) {
-    const existing = db.rows.import_ocr_results.find((item) => item.import_job_id === row.import_job_id);
-    if (existing) {
-      Object.assign(existing, {
-        provider: row.provider,
-        engine_version: row.engine_version,
-        raw_text: row.raw_text,
-        raw_json: row.raw_json,
-        converted: row.converted,
-        source_mime_type: row.source_mime_type,
-        processed_mime_type: row.process_mime_type ?? row.processed_mime_type,
-        updated_by_user_id: row.updated_by_user_id,
-        updated_at: row.updated_at,
-        deleted_at: null,
-      });
-      return;
-    }
   }
   db.rows[table].push(row);
 }
@@ -561,20 +561,60 @@ function updateImportJobRows(rows: Row[], sql: string, values: unknown[]) {
     });
     return;
   }
-  if (sql.includes("DUPLICATE_IMPORT")) {
-    patch(values[4], {
-      status: "failed",
-      error_message: values[0],
-      error_code: "DUPLICATE_IMPORT",
-      error_stage: "duplicate",
+  if (sql.includes("status='duplicate_review'") && sql.includes("duplicate_of_import_job_id=?")) {
+    patch(values[3], {
+      status: "duplicate_review",
+      duplicate_of_import_job_id: values[0],
+      error_message: null,
+      error_code: null,
+      error_stage: null,
       error_retryable: 0,
-      error_terminal: 1,
-      cancelable: 0,
+      error_terminal: 0,
+      cancelable: 1,
       retryable: 0,
-      duplicate_of_import_job_id: values[1],
-      updated_at: values[2],
-      updated_by_user_id: values[3],
+      ocr_stage: "duplicate_review",
+      ocr_progress: 0,
+      updated_at: values[1],
+      updated_by_user_id: values[2],
     });
+    return;
+  }
+  if (sql.includes("SET duplicate_of_import_job_id=?")) {
+    patch(values[3], {
+      duplicate_of_import_job_id: values[0],
+      updated_at: values[1],
+      updated_by_user_id: values[2],
+    });
+    return;
+  }
+  if (sql.includes("SET status='uploaded'") && sql.includes("status='duplicate_review'")) {
+    rows
+      .filter((row) => row.id === values[2] && row.status === "duplicate_review")
+      .forEach((row) =>
+        Object.assign(row, {
+          status: "uploaded",
+          ocr_stage: "upload_ready",
+          cancelable: 1,
+          retryable: 0,
+          updated_at: values[0],
+          updated_by_user_id: values[1],
+        }),
+      );
+    return;
+  }
+  if (sql.includes("SET status='duplicate_review'") && sql.includes("status='uploaded'")) {
+    rows
+      .filter((row) => row.id === values[2] && row.status === "uploaded")
+      .forEach((row) =>
+        Object.assign(row, {
+          status: "duplicate_review",
+          ocr_stage: "duplicate_review",
+          cancelable: 1,
+          retryable: 0,
+          updated_at: values[0],
+          updated_by_user_id: values[1],
+        }),
+      );
     return;
   }
   if (sql.includes("ocr_input_r2_key=?")) {
@@ -735,13 +775,16 @@ function executeSelect(db: TestD1Database, sql: string, values: unknown[]) {
   if (lower.includes("from auth_sessions session")) return selectSessionUsers(db, values);
   if (lower.includes("from refresh_tokens")) return selectRefreshTokens(db, values);
   if (lower.includes("from import_jobs")) return selectImportJobs(db, lower, values);
-  if (lower.includes("from import_ocr_results")) return selectImportOcrResults(db, values);
   if (lower.includes("from imported_records")) return selectImportedRecords(db, lower, values);
   if (lower.includes("from image_ocr_usage"))
     return [
       {
         count: db.rows.image_ocr_usage.filter(
-          (row) => row.user_id === values[0] && row.usage_date === values[1] && !row.deleted_at,
+          (row) =>
+            !row.deleted_at &&
+            (lower.includes("where import_job_id=?")
+              ? row.import_job_id === values[0]
+              : row.user_id === values[0] && row.usage_date === values[1]),
         ).length,
       },
     ];
@@ -943,46 +986,39 @@ function selectImportJobs(db: TestD1Database, lower: string, values: unknown[]) 
             !row.deleted_at &&
             String(row.created_at) >= String(values[1]) &&
             String(row.created_at) < String(values[2]) &&
-            !["completed", "pending_confirmation", "failed", "cancelled"].includes(row.status),
+            !["completed", "pending_confirmation", "duplicate_review", "failed", "cancelled"].includes(
+              row.status,
+            ) &&
+            !db.rows.image_ocr_usage.some((usage) => usage.import_job_id === row.id && !usage.deleted_at),
         ).length,
       },
     ];
   }
-  let rows = db.rows.import_jobs.filter((row) => !row.deleted_at);
+  let rows =
+    lower.includes("file_hash=?") || lower.includes("ocr_text_hash=?")
+      ? [...db.rows.import_jobs]
+      : db.rows.import_jobs.filter((row) => !row.deleted_at);
+  if (lower.includes("created_at < ?"))
+    rows = rows.filter((row) => String(row.created_at) < String(values[0]));
   if (lower.includes("file_hash=?")) {
     rows = rows.filter(
-      (row) => row.book_id === values[0] && row.user_id === values[1] && row.file_hash === values[2],
+      (row) =>
+        row.book_id === values[0] &&
+        row.file_hash === values[1] &&
+        !["duplicate_review", "cancelled"].includes(row.status),
     );
   } else if (lower.includes("ocr_text_hash=?")) {
     rows = rows.filter(
       (row) =>
         row.book_id === values[0] &&
-        row.user_id === values[1] &&
-        row.ocr_text_hash === values[2] &&
-        row.id !== values[3],
+        row.ocr_text_hash === values[1] &&
+        row.id !== values[2] &&
+        !["duplicate_review", "cancelled"].includes(row.status),
     );
   } else if (lower.includes("where id=?")) rows = rows.filter((row) => row.id === values[0]);
   else if (lower.includes("where user_id=?")) rows = rows.filter((row) => row.user_id === values[0]);
   else if (lower.includes("where book_id=?")) rows = rows.filter((row) => row.book_id === values[0]);
   return rows.map(importJobRow);
-}
-
-function selectImportOcrResults(db: TestD1Database, values: unknown[]) {
-  return db.rows.import_ocr_results
-    .filter((row) => row.import_job_id === values[0] && !row.deleted_at)
-    .map((row) => ({
-      id: row.id,
-      importJobId: row.import_job_id,
-      provider: row.provider,
-      engineVersion: row.engine_version,
-      rawText: row.raw_text,
-      rawJson: row.raw_json,
-      converted: row.converted,
-      sourceMimeType: row.source_mime_type,
-      processedMimeType: row.processed_mime_type,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
 }
 
 function selectImportedRecords(db: TestD1Database, lower: string, values: unknown[]) {
@@ -1346,6 +1382,7 @@ class FakeR2Bucket {
       body: new Blob([object.bytes]).stream(),
       httpMetadata: object.httpMetadata,
       customMetadata: object.customMetadata,
+      size: object.bytes.byteLength,
       arrayBuffer: async () => object.bytes,
     };
   }

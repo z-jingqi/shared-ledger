@@ -24,12 +24,13 @@ import type { LedgerUser, Transaction } from "../types";
 import type { Env } from "../types";
 import { updateUserAvatar, updateUserProfile } from "./auth";
 import { prepareImageForGoogleVision } from "./image-conversion";
-import { markFailed, submitOcrJob } from "./imports";
+import { markFailed, sha256Hex, submitOcrJob } from "./imports";
 import {
   assertImageImportFile,
   assertImageOcrQuota,
   imageImportFileType,
   maximumImageImportBatchFiles,
+  reserveImageOcrQuota,
 } from "./import-validation";
 
 export type AiActionRepository = D1LedgerRepository | MemoryLedgerStore;
@@ -1151,7 +1152,12 @@ async function createImportJobFromFile(
   const ocrInput = await prepareImageForGoogleVision({ fileType: resolvedFileType }, bytes);
   const displayFileName = options.metadata?.originalName?.trim() || file.name;
   const displayFileType = options.metadata?.originalType?.trim().toLowerCase() || resolvedFileType;
-  if (!options.skipQuotaCheck) await assertImageOcrQuota(runtime.repository, runtime.user.id);
+  const fileHash = await sha256Hex(ocrInput.bytes);
+  const duplicate = await runtime.repository.findDuplicateImportByFileHash({
+    bookId,
+    fileHash,
+  });
+  if (!duplicate && !options.skipQuotaCheck) await assertImageOcrQuota(runtime.repository, runtime.user.id);
   const suffix = displayFileName.replaceAll(/[^a-zA-Z0-9._-]/g, "_");
   const job = await runtime.repository.createImportJob({
     bookId,
@@ -1159,8 +1165,20 @@ async function createImportJobFromFile(
     fileName: displayFileName,
     fileType: displayFileType,
     r2Key: `imports/${bookId}/${crypto.randomUUID()}-${suffix}`,
+    fileHash,
+    duplicateOfImportJobId: duplicate?.id,
     autoConfirm,
   });
+  let quotaReserved = false;
+  if (!duplicate) {
+    try {
+      await reserveImageOcrQuota(runtime.repository, runtime.user.id, job.id);
+      quotaReserved = true;
+    } catch (error) {
+      await runtime.repository.hardDeleteImportJob(job.id);
+      throw error;
+    }
+  }
   try {
     await runtime.env.FILES.put(job.r2Key, ocrInput.bytes, {
       httpMetadata: { contentType: ocrInput.fileType },
@@ -1171,8 +1189,14 @@ async function createImportJobFromFile(
       fileType: ocrInput.fileType,
       converted: Boolean(options.metadata?.converted) || displayFileType !== ocrInput.fileType,
     });
+    if (duplicate) {
+      const reviewJob = await runtime.repository.markImportJobDuplicateReview(job.id, duplicate.id);
+      if (!reviewJob) throw new Error("重复任务创建失败");
+      return reviewJob;
+    }
     return await submitOcrJob(runtime.env, runtime.repository, job);
   } catch (error) {
+    if (quotaReserved) await runtime.repository.releaseImageOcrUsage(job.id);
     await markFailed(runtime.repository, job.id, error, "ocr");
     throw error;
   }

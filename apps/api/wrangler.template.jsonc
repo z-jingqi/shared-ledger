@@ -37,5 +37,6 @@
       },
     ],
   },
+  "triggers": { "crons": ["15 18 * * *"] },
   "routes": [{ "pattern": "__WEB_DOMAIN__/api/*", "zone_name": "__ZONE_NAME__" }],
 }

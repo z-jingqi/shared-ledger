@@ -10,7 +10,7 @@
     "dev": "pnpm --parallel --filter @shared-ledger/web --filter @shared-ledger/api dev",
     "build": "pnpm -r --if-present build",
     "test": "pnpm test:unit && pnpm test:integration",
-    "test:unit": "pnpm --filter @shared-ledger/shared test && pnpm --filter @shared-ledger/import test && pnpm --filter @shared-ledger/web test",
+    "test:unit": "pnpm --filter @shared-ledger/shared test && pnpm --filter @shared-ledger/import test && pnpm --filter @shared-ledger/ai test && pnpm --filter @shared-ledger/web test",
     "test:integration": "pnpm --filter @shared-ledger/api test",
     "test:e2e": "pnpm --filter @shared-ledger/web test:e2e",
     "test:coverage": "pnpm --filter @shared-ledger/web test:coverage && pnpm --filter @shared-ledger/api test:coverage",

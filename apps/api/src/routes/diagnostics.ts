@@ -12,7 +12,6 @@ export function registerDiagnosticRoutes(app: Hono<{ Bindings: Env }>, store?: M
     const user = await requireUser(context, store);
     if (user instanceof Response) return user;
     const importJobId = context.req.query("importJobId")?.trim();
-    const includeOcrRaw = context.req.query("includeOcrRaw") === "1";
     const payload: Record<string, unknown> = {
       ok: Boolean(context.env.GOOGLE_VISION_API_KEY),
       checks: {
@@ -31,24 +30,7 @@ export function registerDiagnosticRoutes(app: Hono<{ Bindings: Env }>, store?: M
         status: resolved.job.status,
         stage: resolved.job.ocrStage,
         ocrJobId: resolved.job.ocrJobId,
-        hasOcrResult: Boolean(resolved.ocrResult),
       };
-      if (includeOcrRaw && resolved.ocrResult) {
-        payload.sharedLedgerDebug = {
-          importJobId,
-          ocrJobId: resolved.job.ocrJobId,
-          capturedAt: new Date().toISOString(),
-          ocrRawResult: {
-            provider: resolved.ocrResult.provider,
-            engineVersion: resolved.ocrResult.engineVersion,
-            rawText: resolved.ocrResult.rawText,
-            rawJson: resolved.ocrResult.rawJson,
-            converted: resolved.ocrResult.converted,
-            sourceMimeType: resolved.ocrResult.sourceMimeType,
-            processedMimeType: resolved.ocrResult.processedMimeType,
-          },
-        };
-      }
     }
 
     return context.json(payload);
@@ -66,12 +48,12 @@ async function resolveImportJob(
     const job = await repository.getImportJob(importJobId);
     if (!job) return jsonErrorResponse("导入任务不存在", 404);
     if (job.userId !== user.id) return jsonErrorResponse("不能诊断其他用户的导入任务", 403);
-    return { job, ocrResult: await repository.getImportOcrResult(job.id) };
+    return { job };
   }
   const job = store?.imports.find((item) => item.id === importJobId && !item.deletedAt);
   if (!job) return jsonErrorResponse("导入任务不存在", 404);
   if (job.userId !== user.id) return jsonErrorResponse("不能诊断其他用户的导入任务", 403);
-  return { job, ocrResult: null };
+  return { job };
 }
 
 function jsonErrorResponse(error: string, status: number) {

@@ -1,7 +1,7 @@
-import { API, apiFetchWithRefresh } from "../../lib";
+import { API } from "../../lib";
 
 export const terminalImportStatuses = new Set(["completed", "pending_confirmation", "failed", "cancelled"]);
-const loggedOcrResultJobIds = new Set<string>();
+export const inactiveImportStatuses = new Set([...terminalImportStatuses, "duplicate_review"]);
 
 export type ImportJobStatus = {
   id: string;
@@ -45,9 +45,8 @@ export function watchImportJobs(
     if (lastSignatures.get(job.id) !== signature) {
       lastSignatures.set(job.id, signature);
       onJob(job);
-      void logOcrResultForDebug(job);
     }
-    if (terminalImportStatuses.has(job.status)) pending.delete(job.id);
+    if (inactiveImportStatuses.has(job.status)) pending.delete(job.id);
     if (pending.size === 0) options.onDone?.();
   };
 
@@ -114,42 +113,6 @@ export function watchImportJobs(
     if (reconnectTimer) clearTimeout(reconnectTimer);
     source?.close();
   };
-}
-
-async function logOcrResultForDebug(job: ImportJobStatus) {
-  if (!canLogOcrResult()) return;
-  if (loggedOcrResultJobIds.has(job.id)) return;
-  if (!hasCompletedOcr(job)) return;
-  loggedOcrResultJobIds.add(job.id);
-  try {
-    const response = await apiFetchWithRefresh(`/imports/${job.id}/ocr-result`);
-    if (!response.ok) return;
-    console.log("[shared-ledger:ocr]", await response.json());
-  } catch {
-    loggedOcrResultJobIds.delete(job.id);
-  }
-}
-
-function hasCompletedOcr(job: ImportJobStatus) {
-  return (
-    job.stage === "ready" ||
-    job.status === "ai_processing" ||
-    job.status === "pending_confirmation" ||
-    job.status === "completed" ||
-    (job.status === "failed" && job.errorStage === "ai")
-  );
-}
-
-function canLogOcrResult() {
-  if (typeof window === "undefined") return false;
-  const host = window.location.hostname;
-  return (
-    import.meta.env.DEV ||
-    host === "localhost" ||
-    host === "127.0.0.1" ||
-    host.startsWith("dev.") ||
-    host.includes("preview")
-  );
 }
 
 function jobSignature(job: ImportJobStatus) {

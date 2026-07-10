@@ -70,19 +70,6 @@ export type ImportedRecord = {
   confidence: number;
   warnings: string[];
 };
-export type ImportOcrResult = {
-  id: string;
-  importJobId: string;
-  provider: string;
-  engineVersion?: string;
-  rawText: string;
-  rawJson: Record<string, unknown>;
-  converted: boolean;
-  sourceMimeType?: string;
-  processedMimeType?: string;
-  createdAt: string;
-  updatedAt: string;
-};
 export type SimpleEntity = {
   id: string;
   userId: string;

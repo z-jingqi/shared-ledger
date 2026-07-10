@@ -55,4 +55,30 @@ describe("import upload cancellation", () => {
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("aborts an in-flight upload when its placeholder is cancelled", async () => {
+    const file = new File(["receipt"], "receipt.png", { type: "image/png" });
+    const [placeholder] = createUploadPlaceholders([file]);
+    let uploadStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      uploadStarted = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_url: RequestInfo | URL, init?: RequestInit) => {
+        uploadStarted();
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), {
+            once: true,
+          });
+        });
+      }),
+    );
+
+    const upload = uploadImportFiles("book_test", [file], { placeholders: [placeholder] });
+    await started;
+    expect(abortLocalImportUpload(placeholder.id)).toBe(true);
+
+    await expect(upload).rejects.toMatchObject({ name: "AbortError" });
+  });
 });

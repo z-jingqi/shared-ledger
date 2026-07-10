@@ -1,6 +1,6 @@
 import { createApp } from "./app";
 import { D1LedgerRepository } from "./repository";
-import { processImportPipelineBatch } from "./services/imports";
+import { cleanupExpiredImportArtifacts, processImportPipelineBatch } from "./services/imports";
 import type { Env, ImportPipelineMessage } from "./types";
 
 export { createApp } from "./app";
@@ -21,7 +21,7 @@ export default {
   },
   async scheduled(_controller: ScheduledController, env: Env, context: ExecutionContext) {
     if (!env.DB) return;
-    context.waitUntil(new D1LedgerRepository(env.DB).cleanupExpiredImportJobs());
+    context.waitUntil(cleanupExpiredImportArtifacts(env, new D1LedgerRepository(env.DB)));
   },
   async queue(batch, env) {
     await processImportPipelineBatch(env, batch as MessageBatch<ImportPipelineMessage>);

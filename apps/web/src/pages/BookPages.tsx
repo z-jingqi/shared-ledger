@@ -52,6 +52,7 @@ export function BookHomePage() {
   const todayExpense = sum(todayTransactions, "expense");
   const importJobs = mergeLocalImportPlaceholders(book?.id, user?.id, imports?.imports ?? []);
   const processing = importJobs.filter(isProcessingJob);
+  const duplicateReviews = importJobs.filter((job) => job.status === "duplicate_review");
   const pending = importJobs.filter((job) => job.status === "pending_confirmation");
   const failed = importJobs.filter((job) => job.status === "failed");
   const recent = [...transactions]
@@ -124,7 +125,10 @@ export function BookHomePage() {
           </button>
         </IosCard>
 
-        {(processing.length > 0 || pending.length > 0 || failed.length > 0) && (
+        {(processing.length > 0 ||
+          duplicateReviews.length > 0 ||
+          pending.length > 0 ||
+          failed.length > 0) && (
           <section className="ios-section">
             <h2>待处理</h2>
             <div className="ios-reminder-list">
@@ -140,6 +144,22 @@ export function BookHomePage() {
                   <span>
                     <b>{formatHomeImportTitle(processing)}</b>
                     <small>{formatHomeImportProgress(processing)} — 点击查看进度</small>
+                  </span>
+                  <CaretRightIcon size={18} />
+                </button>
+              )}
+              {duplicateReviews.length > 0 && (
+                <button
+                  className="ios-reminder-row"
+                  type="button"
+                  onClick={() => openSheet({ type: "imports" })}
+                >
+                  <IconTile tint="#fff4e8" color="#d96a13">
+                    {duplicateReviews.length}
+                  </IconTile>
+                  <span>
+                    <b>{duplicateReviews.length} 张图片可能重复</b>
+                    <small>核对后可取消或继续识别</small>
                   </span>
                   <CaretRightIcon size={18} />
                 </button>

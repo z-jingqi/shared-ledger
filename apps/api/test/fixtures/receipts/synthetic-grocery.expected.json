@@ -1,0 +1,18 @@
+{
+  "type": "expense",
+  "amount": 129.6,
+  "occurredAt": "2026-07-10T10:20:30",
+  "merchantIncludes": "测试超市",
+  "items": [
+    { "name": "测试大米5kg", "amount": 29.9 },
+    { "name": "演示牛奶1L", "amount": 12.5 },
+    { "name": "样例苹果1kg", "amount": 9.8 },
+    { "name": "测试牙膏120g", "amount": 8.9 },
+    { "name": "演示洗衣液1kg", "amount": 18.6 },
+    { "name": "样例鸡蛋10枚", "amount": 11.9 },
+    { "name": "测试面包500g", "amount": 7.6 },
+    { "name": "演示西红柿500g", "amount": 6.4 },
+    { "name": "样例矿泉水6瓶", "amount": 13.2 },
+    { "name": "测试纸巾3包", "amount": 10.8 }
+  ]
+}

@@ -35,6 +35,7 @@ export function runtimeAiProvider(env: Env, user: RuntimeAiUser): AiProvider {
       user,
       testClient,
       importTimeoutMs: runtimeImportTimeoutMs(env),
+      importPipelineTimeoutMs: runtimeImportPipelineTimeoutMs(env),
       importSummaryMaxTokens: runtimePositiveNumber(env.AI_IMPORT_SUMMARY_MAX_TOKENS),
       importItemsMaxTokens: runtimePositiveNumber(env.AI_IMPORT_ITEMS_MAX_TOKENS),
     });
@@ -46,9 +47,14 @@ export function runtimeAiProvider(env: Env, user: RuntimeAiUser): AiProvider {
     user,
     model: createLedgerLanguageModel(config),
     importTimeoutMs: runtimeImportTimeoutMs(env),
+    importPipelineTimeoutMs: runtimeImportPipelineTimeoutMs(env),
     importSummaryMaxTokens: runtimePositiveNumber(env.AI_IMPORT_SUMMARY_MAX_TOKENS),
     importItemsMaxTokens: runtimePositiveNumber(env.AI_IMPORT_ITEMS_MAX_TOKENS),
   });
+}
+
+function runtimeImportPipelineTimeoutMs(env: Env) {
+  return runtimePositiveNumber(env.AI_IMPORT_PIPELINE_TIMEOUT_MS) ?? 8 * 60_000;
 }
 
 export function runtimeLanguageModelConfig(env: Env): LedgerLanguageModelConfig {

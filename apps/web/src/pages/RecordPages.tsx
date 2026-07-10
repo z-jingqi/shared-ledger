@@ -2,7 +2,6 @@ import {
   CalendarBlankIcon,
   CaretRightIcon,
   CheckCircleIcon,
-  CircleNotchIcon,
   FunnelIcon,
   NotePencilIcon,
   PaperclipIcon,
@@ -377,14 +376,16 @@ function useRecordsPageController() {
     () => activeImports.map((job) => `${job.id}:${job.status}`).join(","),
     [activeImports],
   );
-  const { pendingCount, failedCount } = useMemo(() => {
+  const { pendingCount, failedCount, duplicateReviewCount } = useMemo(() => {
     let pending = 0;
     let failed = 0;
+    let duplicateReview = 0;
     for (const item of importJobs) {
       if (item.status === "pending_confirmation") pending += 1;
       if (item.status === "failed") failed += 1;
+      if (item.status === "duplicate_review") duplicateReview += 1;
     }
-    return { pendingCount: pending, failedCount: failed };
+    return { pendingCount: pending, failedCount: failed, duplicateReviewCount: duplicateReview };
   }, [importJobs]);
   const allTransactions = useMemo(() => data?.transactions ?? [], [data?.transactions]);
   const visibleTransactions = useMemo(
@@ -484,6 +485,7 @@ function useRecordsPageController() {
     closeBookSwitcher: () => dispatchPage({ type: "close-book-switcher" }),
     closeFilters: () => dispatchPage({ type: "close-filters" }),
     draftFilters,
+    duplicateReviewCount,
     failedCount,
     filterOpen,
     filters,
@@ -528,6 +530,7 @@ export function RecordsPage() {
     closeBookSwitcher,
     closeFilters,
     draftFilters,
+    duplicateReviewCount,
     failedCount,
     filterOpen,
     filters,
@@ -587,16 +590,13 @@ export function RecordsPage() {
           />
           {canUseAiSearch && (
             <button
-              className="ios-record-ai-search-button"
+              className={`ios-record-ai-search-button${aiSearching ? " loading" : ""}`}
               type="submit"
               disabled={aiSearching || !book || !searchText.trim()}
               aria-label="AI 搜索"
+              aria-busy={aiSearching}
             >
-              {aiSearching ? (
-                <CircleNotchIcon size={15} className="ios-spin" />
-              ) : (
-                <SparkleIcon size={15} weight="fill" />
-              )}
+              <SparkleIcon size={15} weight="fill" />
               <span>{aiSearching ? "搜索中" : "AI 搜索"}</span>
             </button>
           )}
@@ -619,7 +619,7 @@ export function RecordsPage() {
           <ActiveFilterResetBar source={filters.source} chips={activeFilterChips} onReset={resetFilters} />
         )}
 
-        {(activeImports.length > 0 || pendingCount > 0 || failedCount > 0) && (
+        {(activeImports.length > 0 || duplicateReviewCount > 0 || pendingCount > 0 || failedCount > 0) && (
           <section className="ios-section">
             <h2>待处理</h2>
             <div className="ios-reminder-list">
@@ -635,6 +635,22 @@ export function RecordsPage() {
                   <span>
                     <b>{activeImports.length} 张图片正在识别</b>
                     <small>{formatActiveImportSummary(activeImports)}</small>
+                  </span>
+                  <CaretRightIcon size={18} />
+                </button>
+              )}
+              {duplicateReviewCount > 0 && (
+                <button
+                  className="ios-reminder-row"
+                  type="button"
+                  onClick={() => openSheet({ type: "imports" })}
+                >
+                  <IconTile tint="#fff4e8" color="#d96a13">
+                    {duplicateReviewCount}
+                  </IconTile>
+                  <span>
+                    <b>{duplicateReviewCount} 张图片可能重复</b>
+                    <small>核对后可取消或继续识别</small>
                   </span>
                   <CaretRightIcon size={18} />
                 </button>
@@ -963,11 +979,15 @@ function TransactionFormEditor({
       pending.map((item) => item.file),
     );
     upsertImportJobsInCache(book.id, user?.id, jobs);
-    const jobMap = new Map(jobs.map((job, index) => [pending[index]?.id, job]));
+    const jobMap = new Map(
+      jobs.map((job, index) => [pending[typeof job.index === "number" ? job.index : index]?.id, job]),
+    );
     dispatchForm({ type: "sync-attachment-jobs", jobs: jobMap });
     stopWatchingRef.current?.();
+    const backendJobs = jobs.filter((job) => !job.localOnly);
+    if (!backendJobs.length) return;
     stopWatchingRef.current = watchImportJobs(
-      jobs.map((job) => job.id),
+      backendJobs.map((job) => job.id),
       (job) => {
         upsertImportJobsInCache(book.id, user?.id, [job]);
         dispatchForm({ type: "update-attachment-job", job });

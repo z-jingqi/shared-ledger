@@ -9,6 +9,7 @@ export type SubscriptionPlan = (typeof subscriptionPlans)[number];
 export const invitationStatuses = ["pending", "accepted", "declined", "expired", "revoked"] as const;
 export const importStatuses = [
   "uploaded",
+  "duplicate_review",
   "converting",
   "ocr_processing",
   "cancel_requested",

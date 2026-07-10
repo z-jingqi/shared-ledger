@@ -1,12 +1,5 @@
 import type { Book, LedgerUser, Member, Transaction } from "./types";
-import type {
-  AiConfirmation,
-  ImportedRecord,
-  ImportJob,
-  ImportOcrResult,
-  Invitation,
-  SimpleEntity,
-} from "./store";
+import type { AiConfirmation, ImportedRecord, ImportJob, Invitation, SimpleEntity } from "./store";
 
 type Row = Record<string, any>;
 const now = () => new Date().toISOString();
@@ -165,24 +158,8 @@ const mapImportJob = (row: Row): ImportJob => ({
   ...(row.deletedByUserId ? { deletedByUserId: row.deletedByUserId } : {}),
 });
 
-const mapImportOcrResult = (row: Row): ImportOcrResult => ({
-  id: row.id,
-  importJobId: row.importJobId,
-  provider: row.provider,
-  ...(row.engineVersion ? { engineVersion: row.engineVersion } : {}),
-  rawText: row.rawText,
-  rawJson: parseJson(row.rawJson) ?? {},
-  converted: Boolean(row.converted),
-  ...(row.sourceMimeType ? { sourceMimeType: row.sourceMimeType } : {}),
-  ...(row.processedMimeType ? { processedMimeType: row.processedMimeType } : {}),
-  createdAt: row.createdAt,
-  updatedAt: row.updatedAt,
-});
-
 const importJobColumns =
   "id,book_id AS bookId,user_id AS userId,file_name AS fileName,file_type AS fileType,r2_key AS r2Key,status,file_hash AS fileHash,ocr_text_hash AS ocrTextHash,duplicate_of_import_job_id AS duplicateOfImportJobId,auto_confirm AS autoConfirm,error_message AS errorMessage,error_code AS errorCode,error_stage AS errorStage,error_request_id AS errorRequestId,error_retryable AS errorRetryable,error_terminal AS errorTerminal,failed_external_job_id AS failedExternalJobId,cancelable,retryable,retry_count AS retryCount,ocr_job_id AS ocrJobId,ocr_provider AS ocrProvider,ocr_input_r2_key AS ocrInputR2Key,ocr_input_file_type AS ocrInputFileType,ocr_submitted_at AS ocrSubmittedAt,ocr_progress AS ocrProgress,ocr_stage AS ocrStage,ocr_current_page AS ocrCurrentPage,ocr_total_pages AS ocrTotalPages,ocr_completed_at AS ocrCompletedAt,ocr_event_sequence AS ocrEventSequence,created_at AS createdAt,updated_at AS updatedAt,deleted_at AS deletedAt,deleted_by_user_id AS deletedByUserId";
-const importOcrResultColumns =
-  "id,import_job_id AS importJobId,provider,engine_version AS engineVersion,raw_text AS rawText,raw_json AS rawJson,converted,source_mime_type AS sourceMimeType,processed_mime_type AS processedMimeType,created_at AS createdAt,updated_at AS updatedAt";
 const aiConfirmationColumns =
   "id,user_id AS userId,book_id AS bookId,action,status,payload,result,expires_at AS expiresAt,confirmed_at AS confirmedAt,cancelled_at AS cancelledAt,created_at AS createdAt,updated_at AS updatedAt";
 const aiSessionColumns =
@@ -1087,22 +1064,26 @@ export class D1LedgerRepository {
       .run();
     return job;
   }
-  async cleanupExpiredImportJobs() {
-    const timestamp = now();
-    await this.db
+  async hardDeleteImportJob(jobId: string) {
+    await this.db.prepare("DELETE FROM import_jobs WHERE id=?").bind(jobId).run();
+  }
+  async listExpiredImportJobs() {
+    const result = await this.db
       .prepare(
-        "UPDATE import_jobs SET deleted_at=?,deleted_by_user_id=?,updated_at=?,updated_by_user_id=? WHERE deleted_at IS NULL AND created_at < ?",
+        `SELECT ${importJobColumns} FROM import_jobs WHERE deleted_at IS NULL AND created_at < ? ORDER BY created_at ASC LIMIT 50`,
       )
-      .bind(timestamp, systemActorId, timestamp, systemActorId, importJobCutoff())
-      .run();
+      .bind(importJobCutoff())
+      .all<Row>();
+    return result.results.map(mapImportJob);
   }
   async listImportJobs(bookId: string, input: { status?: ImportJobStatusFilter } = {}) {
-    await this.cleanupExpiredImportJobs();
     const clauses = ["book_id=?", "deleted_at IS NULL", "created_at >= ?"];
     const values: unknown[] = [bookId, importJobCutoff()];
     const status = input.status ?? "all";
     if (status === "processing")
-      clauses.push("status NOT IN ('completed','pending_confirmation','failed','cancelled')");
+      clauses.push(
+        "status NOT IN ('completed','pending_confirmation','duplicate_review','failed','cancelled')",
+      );
     if (status === "success") clauses.push("status IN ('completed','pending_confirmation')");
     if (status === "failed") clauses.push("status = 'failed'");
     const result = await this.db
@@ -1114,7 +1095,6 @@ export class D1LedgerRepository {
     return result.results.map(mapImportJob);
   }
   async listImportJobsForUser(userId: string) {
-    await this.cleanupExpiredImportJobs();
     const result = await this.db
       .prepare(
         `SELECT ${importJobColumns} FROM import_jobs WHERE user_id=? AND deleted_at IS NULL AND created_at >= ? ORDER BY created_at DESC`,
@@ -1130,30 +1110,29 @@ export class D1LedgerRepository {
       .first<Row>();
     return row ? mapImportJob(row) : null;
   }
-  async findDuplicateImportByFileHash(input: { bookId: string; userId: string; fileHash: string }) {
+  async findDuplicateImportByFileHash(input: { bookId: string; fileHash: string }) {
     const row = await this.db
       .prepare(
         `SELECT ${importJobColumns} FROM import_jobs
-         WHERE book_id=? AND user_id=? AND file_hash=? AND deleted_at IS NULL AND created_at >= ?
+         WHERE book_id=? AND file_hash=? AND status NOT IN ('duplicate_review','cancelled')
          ORDER BY created_at DESC LIMIT 1`,
       )
-      .bind(input.bookId, input.userId, input.fileHash, importJobCutoff())
+      .bind(input.bookId, input.fileHash)
       .first<Row>();
     return row ? mapImportJob(row) : null;
   }
   async findDuplicateImportByOcrTextHash(input: {
     bookId: string;
-    userId: string;
     ocrTextHash: string;
     excludeJobId: string;
   }) {
     const row = await this.db
       .prepare(
         `SELECT ${importJobColumns} FROM import_jobs
-         WHERE book_id=? AND user_id=? AND ocr_text_hash=? AND id<>? AND deleted_at IS NULL AND created_at >= ?
+         WHERE book_id=? AND ocr_text_hash=? AND id<>? AND status NOT IN ('duplicate_review','cancelled')
          ORDER BY created_at DESC LIMIT 1`,
       )
-      .bind(input.bookId, input.userId, input.ocrTextHash, input.excludeJobId, importJobCutoff())
+      .bind(input.bookId, input.ocrTextHash, input.excludeJobId)
       .first<Row>();
     return row ? mapImportJob(row) : null;
   }
@@ -1165,13 +1144,43 @@ export class D1LedgerRepository {
       .run();
     return this.getImportJob(jobId);
   }
-  async markImportJobDuplicate(jobId: string, duplicateOfImportJobId: string) {
+  async markImportJobDuplicateReview(jobId: string, duplicateOfImportJobId: string) {
     const timestamp = now();
     await this.db
       .prepare(
-        "UPDATE import_jobs SET status='failed',error_message=?,error_code='DUPLICATE_IMPORT',error_stage='duplicate',error_retryable=0,error_terminal=1,cancelable=0,retryable=0,duplicate_of_import_job_id=?,updated_at=?,updated_by_user_id=? WHERE id=?",
+        "UPDATE import_jobs SET status='duplicate_review',error_message=NULL,error_code=NULL,error_stage=NULL,error_retryable=0,error_terminal=0,cancelable=1,retryable=0,duplicate_of_import_job_id=?,ocr_stage='duplicate_review',ocr_progress=0,updated_at=?,updated_by_user_id=? WHERE id=?",
       )
-      .bind("这张小票已识别过", duplicateOfImportJobId, timestamp, systemActorId, jobId)
+      .bind(duplicateOfImportJobId, timestamp, systemActorId, jobId)
+      .run();
+    return this.getImportJob(jobId);
+  }
+  async markImportJobDuplicateWarning(jobId: string, duplicateOfImportJobId: string) {
+    const timestamp = now();
+    await this.db
+      .prepare(
+        "UPDATE import_jobs SET duplicate_of_import_job_id=?,updated_at=?,updated_by_user_id=? WHERE id=?",
+      )
+      .bind(duplicateOfImportJobId, timestamp, systemActorId, jobId)
+      .run();
+    return this.getImportJob(jobId);
+  }
+  async claimDuplicateImportForOcr(jobId: string, actorId: string) {
+    const timestamp = now();
+    const result = await this.db
+      .prepare(
+        "UPDATE import_jobs SET status='uploaded',ocr_stage='upload_ready',cancelable=1,retryable=0,updated_at=?,updated_by_user_id=? WHERE id=? AND status='duplicate_review'",
+      )
+      .bind(timestamp, actorId, jobId)
+      .run();
+    return result.meta.changes === undefined || result.meta.changes > 0;
+  }
+  async restoreDuplicateImportReview(jobId: string, actorId: string) {
+    const timestamp = now();
+    await this.db
+      .prepare(
+        "UPDATE import_jobs SET status='duplicate_review',ocr_stage='duplicate_review',cancelable=1,retryable=0,updated_at=?,updated_by_user_id=? WHERE id=? AND status='uploaded'",
+      )
+      .bind(timestamp, actorId, jobId)
       .run();
     return this.getImportJob(jobId);
   }
@@ -1222,49 +1231,6 @@ export class D1LedgerRepository {
       .bind(stage, progress, timestamp, systemActorId, jobId)
       .run();
     return this.getImportJob(jobId);
-  }
-  async saveImportOcrResult(input: {
-    importJobId: string;
-    provider: string;
-    engineVersion?: string;
-    rawText: string;
-    rawJson: Record<string, unknown>;
-    converted: boolean;
-    sourceMimeType?: string;
-    processedMimeType?: string;
-    actorId?: string;
-  }) {
-    const timestamp = now();
-    await this.db
-      .prepare(
-        "INSERT INTO import_ocr_results (id,import_job_id,provider,engine_version,raw_text,raw_json,converted,source_mime_type,processed_mime_type,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(import_job_id) DO UPDATE SET provider=excluded.provider,engine_version=excluded.engine_version,raw_text=excluded.raw_text,raw_json=excluded.raw_json,converted=excluded.converted,source_mime_type=excluded.source_mime_type,processed_mime_type=excluded.processed_mime_type,updated_by_user_id=excluded.updated_by_user_id,updated_at=excluded.updated_at,deleted_at=NULL",
-      )
-      .bind(
-        id("import_ocr_result"),
-        input.importJobId,
-        input.provider,
-        input.engineVersion ?? null,
-        input.rawText,
-        JSON.stringify(input.rawJson),
-        input.converted ? 1 : 0,
-        input.sourceMimeType ?? null,
-        input.processedMimeType ?? null,
-        input.actorId ?? systemActorId,
-        input.actorId ?? systemActorId,
-        timestamp,
-        timestamp,
-      )
-      .run();
-    return this.getImportOcrResult(input.importJobId);
-  }
-  async getImportOcrResult(importJobId: string) {
-    const row = await this.db
-      .prepare(
-        `SELECT ${importOcrResultColumns} FROM import_ocr_results WHERE import_job_id=? AND deleted_at IS NULL`,
-      )
-      .bind(importJobId)
-      .first<Row>();
-    return row ? mapImportOcrResult(row) : null;
   }
   async markImportJobCancelRequested(jobId: string, actorId = systemActorId) {
     const timestamp = now();
@@ -1381,17 +1347,17 @@ export class D1LedgerRepository {
   async countActiveImageOcrJobs(userId: string, range: { start: string; end: string }) {
     const row = await this.db
       .prepare(
-        "SELECT COUNT(*) AS count FROM import_jobs WHERE user_id=? AND file_type LIKE 'image/%' AND deleted_at IS NULL AND created_at>=? AND created_at<? AND status NOT IN ('completed','pending_confirmation','failed','cancelled')",
+        "SELECT COUNT(*) AS count FROM import_jobs j WHERE j.user_id=? AND j.file_type LIKE 'image/%' AND j.deleted_at IS NULL AND j.created_at>=? AND j.created_at<? AND j.status IN ('uploaded','converting','ocr_processing','cancel_requested','ai_processing') AND NOT EXISTS (SELECT 1 FROM image_ocr_usage u WHERE u.import_job_id=j.id AND u.deleted_at IS NULL)",
       )
       .bind(userId, range.start, range.end)
       .first<Row>();
     return Number(row?.count ?? 0);
   }
-  async recordImageOcrUsage(importJobId: string, userId: string, usageDate: string) {
+  async reserveImageOcrUsage(importJobId: string, userId: string, usageDate: string, limit: number) {
     const timestamp = now();
     await this.db
       .prepare(
-        "INSERT OR IGNORE INTO image_ocr_usage (id,user_id,import_job_id,usage_date,counted_at,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO image_ocr_usage (id,user_id,import_job_id,usage_date,counted_at,created_by_user_id,updated_by_user_id,created_at,updated_at) SELECT ?,?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM image_ocr_usage WHERE import_job_id=? AND deleted_at IS NULL) AND (SELECT COUNT(*) FROM image_ocr_usage WHERE user_id=? AND usage_date=? AND deleted_at IS NULL) < ?",
       )
       .bind(
         id("image_ocr_usage"),
@@ -1403,8 +1369,20 @@ export class D1LedgerRepository {
         userId,
         timestamp,
         timestamp,
+        importJobId,
+        userId,
+        usageDate,
+        limit,
       )
       .run();
+    const row = await this.db
+      .prepare("SELECT COUNT(*) AS count FROM image_ocr_usage WHERE import_job_id=? AND deleted_at IS NULL")
+      .bind(importJobId)
+      .first<Row>();
+    return Number(row?.count ?? 0) > 0;
+  }
+  async releaseImageOcrUsage(importJobId: string) {
+    await this.db.prepare("DELETE FROM image_ocr_usage WHERE import_job_id=?").bind(importJobId).run();
   }
   async createImportedRecords(
     jobId: string,

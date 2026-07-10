@@ -1446,8 +1446,23 @@ a {
   color: #fff;
   font-weight: 800;
 }
-.import-card-overlay svg {
-  animation: import-spin 1s linear infinite;
+
+.import-card-shimmer {
+  width: 58%;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.import-card-shimmer::after {
+  content: "";
+  display: block;
+  width: 42%;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.72);
+  transform: translateX(-110%);
+  animation: import-card-shimmer 1.1s ease-in-out infinite;
 }
 .import-cancel-inline {
   min-height: 28px;
@@ -1570,9 +1585,9 @@ a {
 .import-card-status.failed {
   color: #d74035;
 }
-@keyframes import-spin {
+@keyframes import-card-shimmer {
   to {
-    transform: rotate(360deg);
+    transform: translateX(350%);
   }
 }
 .record-fields {
@@ -2941,12 +2956,18 @@ a {
 .ai-tool-status.failed svg {
   color: #b42318;
 }
-.ai-tool-status:not(.success):not(.failed) svg {
-  animation: spin 1s linear infinite;
+.ai-tool-status-shimmer {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: linear-gradient(100deg, #eef1f5 20%, #fff 45%, #eef1f5 70%);
+  background-size: 220% 100%;
+  animation: ai-tool-status-shimmer 1.2s ease-in-out infinite;
 }
-@keyframes spin {
+
+@keyframes ai-tool-status-shimmer {
   to {
-    transform: rotate(360deg);
+    background-position-x: -220%;
   }
 }
 .ai-card-list {

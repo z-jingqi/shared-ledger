@@ -757,13 +757,72 @@ describe("Hono REST API", () => {
     expect(responseFormatName(itemsRequest)).toBe("import_items_chunk");
     expect(summaryRequest?.maxOutputTokens).toBe(900);
     expect(itemsRequest?.maxOutputTokens).toBe(1800);
+    expect(requestPayload(itemsRequest).receiptContext).toMatchObject({
+      type: "expense",
+      amount: 12,
+      occurredAt: "2026-06-27",
+      note: "早餐",
+    });
     expect(requests.some((request) => request.maxOutputTokens === 5000)).toBe(false);
   });
 
-  it("uses OCR layout rows when AI summary output fails but receipt totals are clear", async () => {
+  it("fills deterministic receipt fields when the model omits the merchant note", async () => {
+    const { client } = recordingAiClient({
+      objectOutput: (request: TestObjectRequest) =>
+        responseFormatName(request) === "import_receipt_summary"
+          ? {
+              type: "expense",
+              amount: 99,
+              occurredAt: "2026-01-01",
+              confidence: 0.9,
+              warnings: [],
+            }
+          : { items: [], confidence: 0.9, warnings: [] },
+    });
+    const ai = runtimeAiProvider(
+      { APP_ENV: "test", AI_TEST_CLIENT: client },
+      { id: "user_demo", plan: "pro" },
+    );
+    const records = await structureForConfirmation({
+      bookId: "book_home",
+      userId: "user_demo",
+      normalized: {
+        rawText: ["测试超市(演示店)欢迎您", "交易时间 2026-07-10 10:20:30", "应收 12.00", "实收 12.00"].join(
+          "\n",
+        ),
+        warnings: [],
+      },
+      categories: [{ name: "购物", type: "expense" }],
+      ai,
+    });
+
+    expect(records[0]).toMatchObject({
+      amount: 12,
+      occurredAt: "2026-07-10T10:20:30",
+      note: "测试超市(演示店)",
+      categoryName: "购物",
+    });
+    expect(records[0]?.warnings).toEqual([
+      "AI 总金额与 OCR 实收金额不一致，已采用 OCR 实收金额",
+      "AI 日期与 OCR 交易日期不一致，已采用 OCR 交易日期",
+      "未提取到明确明细",
+    ]);
+  });
+
+  it("uses generic OCR visual rows after the deterministic summary fallback", async () => {
     const { client, requests } = recordingAiClient({
-      objectOutput: () => {
-        throw new LedgerAIError("provider_error", "No object generated");
+      objectOutput: (request: TestObjectRequest) => {
+        if (responseFormatName(request) === "import_receipt_summary") {
+          throw new LedgerAIError("provider_error", "No object generated");
+        }
+        return {
+          items: [
+            { name: "马铃薯", amount: 3.41, categoryName: "购物" },
+            { name: "乐而雅卫生巾", amount: 15, categoryName: "日用品" },
+          ],
+          confidence: 0.88,
+          warnings: [],
+        };
       },
     });
     const ai = runtimeAiProvider(
@@ -776,11 +835,9 @@ describe("Hono REST API", () => {
       normalized: {
         rawText: [
           "OCR markdown:",
-          "OCR layout rows derived from Google Vision bounding boxes.",
-          "| name | unitPrice | quantity | lineAmount |",
-          "| --- | --- | --- | --- |",
-          "| 马铃薯 | 3.77 | 0.904 | 3.41 |",
-          "| 乐而雅卫生巾 | 7.50 | 2 | 15.00 |",
+          "OCR visual rows derived from Google Vision bounding boxes.",
+          "[ROW 1] [x=100] 1234567890123 马铃薯 | [x=900] 3.77 | [x=1300] 0.904 | [x=1600] 3.41",
+          "[ROW 2] [x=100] 1234567890124 乐而雅卫生巾 | [x=900] 7.50 | [x=1300] 2 | [x=1600] 15.00",
           "",
           "OCR plain text:",
           "永辉欢迎您",
@@ -810,8 +867,10 @@ describe("Hono REST API", () => {
     });
     expect(records[0]?.warnings).toContain("AI 摘要解析失败，已使用 OCR 规则兜底");
     expect(requests.filter((request) => responseFormatName(request) === "import_items_chunk")).toHaveLength(
-      0,
+      1,
     );
+    expect(String(requestPayload(requests[1]).text)).toContain("[ROW 1]");
+    expect(String(requestPayload(requests[1]).text)).not.toContain("OCR plain text:");
   });
 
   it("splits long OCR imports into item chunks and deduplicates overlap", async () => {
@@ -846,7 +905,7 @@ describe("Hono REST API", () => {
       { APP_ENV: "test", AI_TEST_CLIENT: client },
       { id: "user_demo", plan: "pro" },
     );
-    const rawText = Array.from({ length: 120 }, (_, index) => `商品 ${index + 1} 1.00`).join("\n");
+    const rawText = Array.from({ length: 180 }, (_, index) => `商品 ${index + 1} 1.00`).join("\n");
     const records = await structureForConfirmation({
       bookId: "book_home",
       userId: "user_demo",

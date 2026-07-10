@@ -1,6 +1,6 @@
 import { detectImageMimeType, GoogleVisionOcrError, googleVisionSupportsImageBytes } from "./ocr";
 
-export const googleVisionInlineImageMaxBytes = 7 * 1024 * 1024;
+export const googleVisionInlineImageMaxBytes = 4 * 1024 * 1024;
 
 export type ImageConversionOutput = {
   bytes: ArrayBuffer;

@@ -106,7 +106,11 @@ export function SettingsPage() {
           icon: <FilesIcon size={23} weight="fill" />,
           title: "图片识别",
           count: imageTasks.length,
-          caption: imageTasks.some((job) => job.status === "failed") ? "有图片处理失败" : "图片识别中",
+          caption: imageTasks.some((job) => job.status === "failed")
+            ? "有图片处理失败"
+            : imageTasks.some((job) => job.status === "duplicate_review")
+              ? "有图片需要核对"
+              : "图片识别中",
           tone: "orange" as const,
         }
       : undefined,

@@ -3,7 +3,14 @@ import type { Context, Hono } from "hono";
 import { jsonError } from "../lib/http";
 import { D1LedgerRepository, importJobRetentionDays, type ImportJobStatusFilter } from "../repository";
 import { requireMember, requireUser } from "../services/access";
-import { cancelImportJob, markFailed, retryImportJob, sha256Hex, submitOcrJob } from "../services/imports";
+import {
+  cancelImportJob,
+  deleteStoredOcrText,
+  markFailed,
+  retryImportJob,
+  sha256Hex,
+  submitOcrJob,
+} from "../services/imports";
 import { prepareImageForGoogleVision } from "../services/image-conversion";
 import {
   assertImageImportFile,
@@ -12,6 +19,8 @@ import {
   imageOcrLimitForPlan,
   ImportUploadError,
   maximumImageImportBatchFiles,
+  maximumImageImportRequestBytes,
+  reserveImageOcrQuota,
   shanghaiDateRange,
   shanghaiUsageDate,
 } from "../services/import-validation";
@@ -20,20 +29,19 @@ import type { ImportJob, MemoryLedgerStore } from "../store";
 import type { Env } from "../types";
 
 const terminalImportStatuses = new Set(["completed", "pending_confirmation", "failed", "cancelled"]);
-const deletableImportStatuses = new Set(["completed", "pending_confirmation", "failed", "cancelled"]);
+const streamInactiveImportStatuses = new Set([...terminalImportStatuses, "duplicate_review"]);
+const deletableImportStatuses = new Set([
+  "completed",
+  "pending_confirmation",
+  "duplicate_review",
+  "failed",
+  "cancelled",
+]);
 type ImportRouteContext = Context<{ Bindings: Env }>;
 type UploadFileMetadata = {
   originalName?: string;
   originalType?: string;
   converted?: boolean;
-};
-type DuplicateImportPayload = {
-  index?: number;
-  error: string;
-  fileName: string;
-  duplicateOfJobId: string;
-  job: ReturnType<typeof importJobStatusPayload>;
-  message: string;
 };
 type PreparedImportUpload = {
   index?: number;
@@ -44,15 +52,6 @@ type PreparedImportUpload = {
   duplicateJob: ImportJob | null;
   autoConfirm?: boolean;
 };
-
-class DuplicateImportError extends Error {
-  constructor(
-    readonly duplicateJob: ImportJob,
-    readonly fileName: string,
-  ) {
-    super("这张小票已识别过");
-  }
-}
 
 export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryLedgerStore) {
   const prepareImportUpload = async (
@@ -76,7 +75,6 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     const fileHash = await sha256Hex(ocrInput.bytes);
     const duplicateJob = await input.repository.findDuplicateImportByFileHash({
       bookId: input.bookId,
-      userId: input.userId,
       fileHash,
     });
     return {
@@ -98,14 +96,10 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
       prepared: PreparedImportUpload;
       repository: D1LedgerRepository;
       autoConfirm?: boolean;
-      skipQuotaCheck?: boolean;
     },
   ) => {
     const files = context.env.FILES;
     if (!files) throw new Error("导入功能需要 R2 绑定");
-    if (input.prepared.duplicateJob)
-      throw new DuplicateImportError(input.prepared.duplicateJob, input.prepared.displayFileName);
-    if (!input.skipQuotaCheck) await assertImageOcrQuota(input.repository, input.userId);
     const suffix = input.prepared.displayFileName.replaceAll(/[^a-zA-Z0-9._-]/g, "_");
     const job = await input.repository.createImportJob({
       bookId: input.bookId,
@@ -114,8 +108,19 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
       fileType: input.prepared.displayFileType,
       r2Key: `imports/${input.bookId}/${crypto.randomUUID()}-${suffix}`,
       fileHash: input.prepared.fileHash,
+      duplicateOfImportJobId: input.prepared.duplicateJob?.id,
       autoConfirm: input.autoConfirm ?? input.prepared.autoConfirm,
     });
+    let quotaReserved = false;
+    if (!input.prepared.duplicateJob) {
+      try {
+        await reserveImageOcrQuota(input.repository, input.userId, job.id);
+        quotaReserved = true;
+      } catch (error) {
+        await input.repository.hardDeleteImportJob(job.id);
+        throw error;
+      }
+    }
     try {
       await files.put(job.r2Key, input.prepared.ocrInput.bytes, {
         httpMetadata: { contentType: input.prepared.ocrInput.fileType },
@@ -126,10 +131,19 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
         fileType: input.prepared.ocrInput.fileType,
         converted: input.prepared.displayFileType !== input.prepared.ocrInput.fileType,
       });
+      if (input.prepared.duplicateJob) {
+        const reviewJob = await input.repository.markImportJobDuplicateReview(
+          job.id,
+          input.prepared.duplicateJob.id,
+        );
+        if (!reviewJob) throw new Error("重复任务创建失败");
+        return reviewJob;
+      }
       const submitted = await submitOcrJob(context.env, input.repository, job);
       if (!submitted) throw new Error("导入任务创建失败");
       return submitted;
     } catch (error) {
+      if (quotaReserved) await input.repository.releaseImageOcrUsage(job.id);
       await markFailed(input.repository, job.id, error, "ocr");
       throw error;
     }
@@ -144,7 +158,6 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
       metadata?: UploadFileMetadata;
       repository: D1LedgerRepository;
       autoConfirm?: boolean;
-      skipQuotaCheck?: boolean;
     },
   ) => {
     const prepared = await prepareImportUpload(context, input);
@@ -154,7 +167,6 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
       prepared,
       repository: input.repository,
       autoConfirm: input.autoConfirm,
-      skipQuotaCheck: input.skipQuotaCheck,
     });
   };
 
@@ -187,6 +199,8 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     const denied = await requireMember(context, store, bookId, user);
     if (denied) return denied;
     if (!context.env.DB || !context.env.FILES) return jsonError(context, "导入功能需要 D1 与 R2 绑定", 503);
+    if (requestContentLength(context) > maximumImageImportRequestBytes)
+      return jsonError(context, "图片过大，请压缩后上传", 413);
     const form = await context.req.formData();
     const file = form.get("file");
     const metadata = parseSingleFileMetadata(form);
@@ -205,8 +219,6 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
       return context.json({ job: importJobStatusPayload(job) }, 202);
     } catch (error) {
       if (error instanceof ImportUploadError) return jsonError(context, error.message, error.status);
-      if (error instanceof DuplicateImportError)
-        return context.json(duplicateImportPayload(error.duplicateJob, error.fileName), 409);
       if (error instanceof GoogleVisionOcrError) return jsonError(context, error.message, 400);
       return jsonError(context, error instanceof Error ? error.message : "文件上传或任务提交失败", 502);
     }
@@ -219,6 +231,8 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     const denied = await requireMember(context, store, bookId, user);
     if (denied) return denied;
     if (!context.env.DB || !context.env.FILES) return jsonError(context, "导入功能需要 D1 与 R2 绑定", 503);
+    if (requestContentLength(context) > maximumImageImportRequestBytes)
+      return jsonError(context, "批量图片总大小过大，请分批上传", 413);
 
     const form = await context.req.formData();
     const autoConfirm = form.get("autoConfirm") === "true";
@@ -227,46 +241,39 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     if (!files.length) return jsonError(context, "请选择要导入的文件");
     if (files.length > maximumImageImportBatchFiles)
       return jsonError(context, `一次最多上传 ${maximumImageImportBatchFiles} 个文件`);
+    if (files.reduce((total, file) => total + file.size, 0) > maximumImageImportRequestBytes)
+      return jsonError(context, "批量图片总大小过大，请分批上传", 413);
 
     const repository = new D1LedgerRepository(context.env.DB);
     try {
       const fileMetadata = parseBatchFileMetadata(form, files.length);
       for (const file of files) assertImageImportFile(file);
       const preparedUploads: PreparedImportUpload[] = [];
-      const duplicates: DuplicateImportPayload[] = [];
       const duplicatePreparedUploads: Array<{
         prepared: PreparedImportUpload;
         duplicateOfPrepared: PreparedImportUpload;
       }> = [];
       const firstPreparedByHash = new Map<string, PreparedImportUpload>();
       for (const [index, file] of files.entries()) {
-        try {
-          const prepared = await prepareImportUpload(context, {
-            bookId,
-            userId: user.id,
-            file,
-            metadata: fileMetadata[index],
-            repository,
-            autoConfirm,
-            index,
+        const prepared = await prepareImportUpload(context, {
+          bookId,
+          userId: user.id,
+          file,
+          metadata: fileMetadata[index],
+          repository,
+          autoConfirm,
+          index,
+        });
+        if (prepared.duplicateJob) {
+          duplicatePreparedUploads.push({ prepared, duplicateOfPrepared: prepared });
+        } else if (firstPreparedByHash.has(prepared.fileHash)) {
+          duplicatePreparedUploads.push({
+            prepared,
+            duplicateOfPrepared: firstPreparedByHash.get(prepared.fileHash)!,
           });
-          if (prepared.duplicateJob) {
-            duplicates.push(duplicateImportPayload(prepared.duplicateJob, prepared.displayFileName, index));
-          } else if (firstPreparedByHash.has(prepared.fileHash)) {
-            duplicatePreparedUploads.push({
-              prepared,
-              duplicateOfPrepared: firstPreparedByHash.get(prepared.fileHash)!,
-            });
-          } else {
-            firstPreparedByHash.set(prepared.fileHash, prepared);
-            preparedUploads.push(prepared);
-          }
-        } catch (error) {
-          if (error instanceof DuplicateImportError) {
-            duplicates.push(duplicateImportPayload(error.duplicateJob, error.fileName, index));
-            continue;
-          }
-          throw error;
+        } else {
+          firstPreparedByHash.set(prepared.fileHash, prepared);
+          preparedUploads.push(prepared);
         }
       }
       if (preparedUploads.length) await assertImageOcrQuota(repository, user.id, preparedUploads.length);
@@ -279,7 +286,6 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
           prepared,
           repository,
           autoConfirm,
-          skipQuotaCheck: true,
         });
         createdJobByPrepared.set(prepared, job);
         jobs.push({
@@ -288,16 +294,17 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
         });
       }
       for (const duplicate of duplicatePreparedUploads) {
-        const duplicateJob = createdJobByPrepared.get(duplicate.duplicateOfPrepared);
-        if (duplicateJob) {
-          duplicates.push(
-            duplicateImportPayload(
-              duplicateJob,
-              duplicate.prepared.displayFileName,
-              duplicate.prepared.index,
-            ),
-          );
-        }
+        const duplicateJob =
+          duplicate.prepared.duplicateJob ?? createdJobByPrepared.get(duplicate.duplicateOfPrepared);
+        if (!duplicateJob) continue;
+        const reviewJob = await createPreparedJob(context, {
+          bookId,
+          userId: user.id,
+          prepared: { ...duplicate.prepared, duplicateJob },
+          repository,
+          autoConfirm,
+        });
+        jobs.push({ index: duplicate.prepared.index, job: reviewJob });
       }
       return context.json(
         {
@@ -305,7 +312,6 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
             ...importJobStatusPayload(item.job),
             ...(typeof item.index === "number" ? { index: item.index } : {}),
           })),
-          duplicates,
         },
         202,
       );
@@ -379,7 +385,7 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
           try {
             jobs.forEach((job) => job && sendJob(job));
             const activeJobs = jobs.filter(
-              (job): job is ImportJob => job !== null && !terminalImportStatuses.has(job.status),
+              (job): job is ImportJob => job !== null && !streamInactiveImportStatuses.has(job.status),
             );
             const hasActiveJobs = activeJobs.length
               ? await watchLocalImportJobs(context.env, repository, activeJobs, async (nextJob) => {
@@ -419,7 +425,6 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     if (user instanceof Response) return user;
     if (!context.env.DB || !context.env.FILES) return jsonError(context, "导入预览需要 D1 与 R2 绑定", 503);
     const repository = new D1LedgerRepository(context.env.DB);
-    await repository.cleanupExpiredImportJobs();
     const job = await repository.getImportJob(context.req.param("id"));
     if (!job) return jsonError(context, "导入任务不存在或已过期", 404);
     const denied = await requireMember(context, store, job.bookId, user);
@@ -432,32 +437,6 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
         "Content-Type": object.httpMetadata?.contentType ?? job.fileType,
         "Cache-Control": "private, max-age=3600",
         "Content-Disposition": `inline; filename="${encodeURIComponent(job.fileName)}"`,
-      },
-    });
-  });
-
-  app.get("/imports/:id/ocr-result", async (context) => {
-    if (!isImportOcrDebugEnabled(context.env)) return jsonError(context, "导入任务不存在", 404);
-    const user = await requireUser(context, store);
-    if (user instanceof Response) return user;
-    if (!context.env.DB) return jsonError(context, "D1 运行时不可用", 503);
-    const repository = new D1LedgerRepository(context.env.DB);
-    const job = await repository.getImportJob(context.req.param("id"));
-    if (!job) return jsonError(context, "导入任务不存在", 404);
-    const denied = await requireMember(context, store, job.bookId, user);
-    if (denied) return denied;
-    const result = await repository.getImportOcrResult(job.id);
-    if (!result) return jsonError(context, "OCR 结果不存在", 404);
-    return context.json({
-      job: importJobStatusPayload(job),
-      ocr: {
-        provider: result.provider,
-        engineVersion: result.engineVersion,
-        rawText: result.rawText,
-        rawJson: result.rawJson,
-        converted: result.converted,
-        sourceMimeType: result.sourceMimeType,
-        processedMimeType: result.processedMimeType,
       },
     });
   });
@@ -493,6 +472,31 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     }
   });
 
+  app.post("/imports/:id/continue-duplicate", async (context) => {
+    const user = await requireUser(context, store);
+    if (user instanceof Response) return user;
+    if (!context.env.DB) return jsonError(context, "D1 运行时不可用", 503);
+    const repository = new D1LedgerRepository(context.env.DB);
+    const job = await repository.getImportJob(context.req.param("id"));
+    if (!job) return jsonError(context, "导入任务不存在", 404);
+    const denied = await requireMember(context, store, job.bookId, user);
+    if (denied) return denied;
+    if (job.status !== "duplicate_review") return jsonError(context, "该任务不需要重复确认", 409);
+
+    const claimed = await repository.claimDuplicateImportForOcr(job.id, user.id);
+    if (!claimed) return jsonError(context, "任务状态已更新，请刷新后重试", 409);
+    try {
+      await reserveImageOcrQuota(repository, user.id, job.id);
+      const submitted = await submitOcrJob(context.env, repository, job);
+      return context.json({ job: importJobStatusPayload(submitted) });
+    } catch (error) {
+      await repository.releaseImageOcrUsage(job.id);
+      await repository.restoreDuplicateImportReview(job.id, user.id);
+      if (error instanceof ImportUploadError) return jsonError(context, error.message, error.status);
+      return jsonError(context, error instanceof Error ? error.message : "继续识别失败", 502);
+    }
+  });
+
   app.delete("/imports/:id", async (context) => {
     const user = await requireUser(context, store);
     if (user instanceof Response) return user;
@@ -512,6 +516,7 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
       job.ocrInputR2Key && job.ocrInputR2Key !== job.r2Key
         ? context.env.FILES?.delete(job.ocrInputR2Key).catch(() => undefined)
         : Promise.resolve(),
+      deleteStoredOcrText(context.env, job),
     ]);
     return new Response(null, { status: 204 });
   });
@@ -569,7 +574,7 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     });
   });
 
-  const confirm = async (context: any, recordId: string) => {
+  const confirm = async (context: any, recordId: string, allowDuplicate = false) => {
     const user = await requireUser(context, store);
     if (user instanceof Response) return { response: user };
     if (!context.env.DB) return { error: "D1 运行时不可用", status: 503 };
@@ -580,6 +585,14 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     if (!job) return { error: "导入任务不存在", status: 404 };
     const denied = await requireMember(context, store, job.bookId, user);
     if (denied) return { response: denied };
+    if (job.duplicateOfImportJobId && !allowDuplicate) {
+      return {
+        error: "这张小票可能已经入账，请确认后再保存",
+        status: 409,
+        code: "DUPLICATE_CONFIRMATION_REQUIRED",
+        details: { duplicateOfJobId: job.duplicateOfImportJobId },
+      };
+    }
     const suggested = aiImportRecordSchema.parse(record.suggestedTransaction);
     const categoryCache = new Map<string, Awaited<ReturnType<D1LedgerRepository["findOrCreateCategory"]>>>();
     const resolveCategory = async (name?: string) => {
@@ -624,11 +637,24 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
   };
 
   app.post("/imported-records/:id/confirm", async (context) => {
-    const result = await confirm(context, context.req.param("id"));
+    const body = await context.req.json().catch(() => ({}));
+    const allowDuplicate = Boolean((body as { allowDuplicate?: unknown }).allowDuplicate);
+    const result = await confirm(context, context.req.param("id"), allowDuplicate);
     if ("response" in result) return result.response;
-    return "error" in result
-      ? jsonError(context, result.error ?? "记录不可确认", result.status ?? 400)
-      : context.json(result);
+    if ("error" in result) {
+      if (result.code === "DUPLICATE_CONFIRMATION_REQUIRED") {
+        return context.json(
+          {
+            error: result.error ?? "记录不可确认",
+            code: result.code,
+            ...(result.details ? { details: result.details } : {}),
+          },
+          409,
+        );
+      }
+      return jsonError(context, result.error ?? "记录不可确认", result.status ?? 400);
+    }
+    return context.json(result);
   });
 
   app.post("/imported-records/:id/ignore", async (context) => {
@@ -661,10 +687,22 @@ export function registerImportRoutes(app: Hono<{ Bindings: Env }>, store?: Memor
     if (!job) return jsonError(context, "导入任务不存在", 404);
     const denied = await requireMember(context, store, job.bookId, user);
     if (denied) return denied;
+    const body = await context.req.json().catch(() => ({}));
+    const allowDuplicate = Boolean((body as { allowDuplicate?: unknown }).allowDuplicate);
+    if (job.duplicateOfImportJobId && !allowDuplicate) {
+      return context.json(
+        {
+          error: "这张小票可能已经入账，请确认后再保存",
+          code: "DUPLICATE_CONFIRMATION_REQUIRED",
+          details: { duplicateOfJobId: job.duplicateOfImportJobId },
+        },
+        409,
+      );
+    }
     const records = await repository.listImportedRecords(job.id);
     let confirmed = 0;
     for (const record of records.filter((item) => item.status === "pending")) {
-      const result = await confirm(context, record.id);
+      const result = await confirm(context, record.id, allowDuplicate);
       if (!("error" in result) && !("response" in result)) confirmed += 1;
     }
     const stillPending = (await repository.listImportedRecords(job.id)).some(
@@ -706,7 +744,7 @@ async function watchLocalImportJobs(
         lastSignatures.set(id, signature);
         await onJob(job);
       }
-      if (!terminalImportStatuses.has(job.status)) active = true;
+      if (!streamInactiveImportStatuses.has(job.status)) active = true;
     }
     hasActiveJobs = active;
     if (!active) return false;
@@ -773,26 +811,9 @@ function importJobStatusPayload(job: ImportJob) {
   };
 }
 
-function duplicateImportPayload(job: ImportJob, fileName: string, index?: number): DuplicateImportPayload {
-  return {
-    ...(typeof index === "number" ? { index } : {}),
-    error: "这张小票已识别过",
-    fileName,
-    duplicateOfJobId: job.id,
-    job: importJobStatusPayload(job),
-    message: "这张小票已识别过",
-  };
-}
-
-function isImportOcrDebugEnabled(env: Env) {
-  const appEnv = (env.APP_ENV ?? "").toLowerCase();
-  return (
-    appEnv === "local" ||
-    appEnv === "dev" ||
-    appEnv === "development" ||
-    appEnv === "preview" ||
-    appEnv === "test"
-  );
+function requestContentLength(context: ImportRouteContext) {
+  const value = Number(context.req.header("content-length") ?? 0);
+  return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 function importProgressText(job: ImportJob) {

@@ -78,6 +78,8 @@
 }
 
 .ios-record-search .ios-record-ai-search-button {
+  position: relative;
+  overflow: hidden;
   width: auto;
   min-width: 78px;
   gap: 4px;
@@ -86,6 +88,30 @@
   color: var(--ios-accent);
   font-size: 12px;
   font-weight: 900;
+}
+
+.ios-record-search .ios-record-ai-search-button.loading {
+  background: #fff5ef;
+}
+
+.ios-record-search .ios-record-ai-search-button.loading::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, 0.9) 48%, transparent 76%);
+  transform: translateX(-110%);
+  animation: ios-record-search-shimmer 1.05s ease-in-out infinite;
+}
+
+.ios-record-search .ios-record-ai-search-button > * {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes ios-record-search-shimmer {
+  to {
+    transform: translateX(110%);
+  }
 }
 
 .ios-record-search .ios-record-ai-search-button:disabled {
@@ -842,7 +868,7 @@
 
 .ios-import-stats {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 8px;
   margin-top: 14px;
 }
@@ -953,6 +979,11 @@
 .ios-import-preview.failed {
   background: #fdeceb;
   color: #d74035;
+}
+
+.ios-import-preview.warning {
+  background: #fff4e8;
+  color: #d96a13;
 }
 
 .ios-import-preview img {
@@ -1066,6 +1097,10 @@
   color: var(--ios-danger);
 }
 
+.ios-import-job.warning > div:last-child {
+  color: #d96a13;
+}
+
 .ios-import-job button {
   border: 1px solid #e4e8ee;
   border-radius: 9px;
@@ -1075,6 +1110,12 @@
   font: inherit;
   font-size: 12px;
   font-weight: 800;
+}
+
+.ios-import-job button.primary {
+  border-color: var(--ios-accent);
+  background: var(--ios-accent);
+  color: #fff;
 }
 
 .ios-pending-card {
@@ -1327,14 +1368,4 @@
   color: var(--ios-accent);
   font: inherit;
   font-weight: 900;
-}
-
-.ios-spin {
-  animation: iosSpin 0.8s linear infinite;
-}
-
-@keyframes iosSpin {
-  to {
-    transform: rotate(360deg);
-  }
 }

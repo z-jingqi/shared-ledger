@@ -3,7 +3,6 @@ import {
   ArrowUpIcon,
   ChartLineIcon,
   CheckCircleIcon,
-  CircleNotchIcon,
   FileTextIcon,
   MagnifyingGlassIcon,
   PlusIcon,
@@ -300,7 +299,7 @@ export function AiToolStatus({ part }: { part: AiToolStatusPart }) {
       ) : complete ? (
         <CheckCircleIcon weight="fill" />
       ) : (
-        <CircleNotchIcon weight="bold" />
+        <span className="ai-tool-status-shimmer" aria-hidden="true" />
       )}
       <div>
         <strong>{part.label ?? part.toolName ?? "正在处理"}</strong>

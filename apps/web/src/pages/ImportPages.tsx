@@ -1,8 +1,8 @@
 import {
   CheckCircleIcon,
-  CircleNotchIcon,
   ImageSquareIcon,
   ShoppingCartIcon,
+  WarningCircleIcon,
   XCircleIcon,
 } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
@@ -12,6 +12,7 @@ import {
   IconTile,
   IosButton,
   IosCard,
+  IosDialog,
   IosField,
   IosListSkeleton,
   IosSegment,
@@ -28,10 +29,16 @@ import {
 } from "../features/imports/cache";
 import { invalidateLedgerData } from "../features/data/invalidations";
 import { createPreviewThumbnail } from "../features/imports/preview-thumbnail";
-import { terminalImportStatuses, watchImportJobs, type ImportJobStatus } from "../features/imports/status";
+import {
+  inactiveImportStatuses,
+  terminalImportStatuses,
+  watchImportJobs,
+  type ImportJobStatus,
+} from "../features/imports/status";
 import {
   abortLocalImportUpload,
   cancelImportJob,
+  continueDuplicateImportJob,
   deleteImportJob,
   retryImportJob,
   revokeUploadPlaceholderUrls,
@@ -39,7 +46,7 @@ import {
 import { useAppSheetActions } from "../features/sheets/SheetContext";
 import { useActiveBook } from "../hooks/useActiveBook";
 import { useApi } from "../hooks/useApi";
-import { api, apiFetchWithRefresh } from "../lib";
+import { api, ApiError, apiFetchWithRefresh } from "../lib";
 
 type Job = ImportJobStatus & {
   fileType?: string;
@@ -47,7 +54,7 @@ type Job = ImportJobStatus & {
   updatedAt?: string;
 };
 type JobIcon = typeof ImageSquareIcon;
-type JobFilter = "all" | "processing" | "success" | "failed";
+type JobFilter = "all" | "review" | "processing" | "success" | "failed";
 type PendingRecord = {
   id: string;
   importJobId: string;
@@ -80,6 +87,7 @@ type PendingRecordsAction =
 
 const jobFilters: { value: JobFilter; label: string }[] = [
   { value: "all", label: "全部" },
+  { value: "review", label: "待核对" },
   { value: "processing", label: "处理中" },
   { value: "success", label: "成功" },
   { value: "failed", label: "失败" },
@@ -129,6 +137,7 @@ function usePendingRecords(jobId?: string) {
     () => imports.filter((job) => job.status === "pending_confirmation" && (!jobId || job.id === jobId)),
     [imports, jobId],
   );
+  const hasDuplicateRecords = pendingJobs.some((job) => Boolean(job.duplicateOfJobId));
 
   useEffect(() => {
     let cancelled = false;
@@ -159,7 +168,15 @@ function usePendingRecords(jobId?: string) {
     };
   }, [jobsLoading, pendingJobs]);
 
-  return { bookId: book?.id, records, error, loading, reload: reloadJobs, userId: user?.id };
+  return {
+    bookId: book?.id,
+    records,
+    error,
+    hasDuplicateRecords,
+    loading,
+    reload: reloadJobs,
+    userId: user?.id,
+  };
 }
 
 export function PendingImportsPage() {
@@ -167,9 +184,12 @@ export function PendingImportsPage() {
 }
 
 export function PendingImportsSheet({ jobId, onClose }: { jobId?: string; onClose: () => void }) {
-  const { bookId, records, error, loading, reload, userId } = usePendingRecords(jobId);
+  const { bookId, records, error, hasDuplicateRecords, loading, reload, userId } = usePendingRecords(jobId);
   const [busy, setBusy] = useState("");
   const [editing, setEditing] = useState<PendingRecord | undefined>();
+  const [duplicateConfirmation, setDuplicateConfirmation] = useState<
+    { type: "record"; recordId: string } | { type: "all" } | undefined
+  >();
   const close = onClose;
   const refreshAfterRecordChange = async (nextRecordsLength: number) => {
     invalidateLedgerData({
@@ -179,13 +199,21 @@ export function PendingImportsSheet({ jobId, onClose }: { jobId?: string; onClos
     await reload();
     if (nextRecordsLength <= 0) close();
   };
-  const confirm = async (recordId: string) => {
+  const confirm = async (recordId: string, allowDuplicate = false) => {
     setBusy(recordId);
     try {
-      const result = await api<{ job?: Job }>(`/imported-records/${recordId}/confirm`, { method: "POST" });
+      const result = await api<{ job?: Job }>(`/imported-records/${recordId}/confirm`, {
+        method: "POST",
+        body: JSON.stringify({ allowDuplicate }),
+      });
+      setDuplicateConfirmation(undefined);
       if (result.job) replaceImportJobInCache(bookId, userId, result.job);
       await refreshAfterRecordChange(records.filter((record) => record.id !== recordId).length);
     } catch (cause) {
+      if (cause instanceof ApiError && cause.code === "DUPLICATE_CONFIRMATION_REQUIRED") {
+        setDuplicateConfirmation({ type: "record", recordId });
+        return;
+      }
       toast.error(cause instanceof Error ? cause.message : "确认失败", { duration: 3000, closeButton: true });
     } finally {
       setBusy("");
@@ -203,18 +231,32 @@ export function PendingImportsSheet({ jobId, onClose }: { jobId?: string; onClos
       setBusy("");
     }
   };
-  const confirmAll = async () => {
+  const confirmAll = async (allowDuplicate = false) => {
+    if (hasDuplicateRecords && !allowDuplicate) {
+      setDuplicateConfirmation({ type: "all" });
+      return;
+    }
     setBusy("all");
     try {
       const jobIds = [...new Set(records.map((item) => item.importJobId))];
       const results = await Promise.all(
-        jobIds.map((jobId) => api<{ job?: Job }>(`/imports/${jobId}/confirm-all`, { method: "POST" })),
+        jobIds.map((jobId) =>
+          api<{ job?: Job }>(`/imports/${jobId}/confirm-all`, {
+            method: "POST",
+            body: JSON.stringify({ allowDuplicate }),
+          }),
+        ),
       );
+      setDuplicateConfirmation(undefined);
       results.forEach((result) => {
         if (result.job) replaceImportJobInCache(bookId, userId, result.job);
       });
       await refreshAfterRecordChange(0);
     } catch (cause) {
+      if (cause instanceof ApiError && cause.code === "DUPLICATE_CONFIRMATION_REQUIRED") {
+        setDuplicateConfirmation({ type: "all" });
+        return;
+      }
       toast.error(cause instanceof Error ? cause.message : "全部确认失败", {
         duration: 3000,
         closeButton: true,
@@ -314,6 +356,18 @@ export function PendingImportsSheet({ jobId, onClose }: { jobId?: string; onClos
           onSave={(draft) => void updateRecord(editing, draft)}
         />
       )}
+      {duplicateConfirmation && (
+        <IosDialog
+          title="可能是重复小票"
+          message="系统发现相同图片或相同票据内容。请先核对已有记录；确认不是重复后，仍可继续入账。"
+          confirmText="仍然入账"
+          onCancel={() => setDuplicateConfirmation(undefined)}
+          onConfirm={() => {
+            if (duplicateConfirmation.type === "all") void confirmAll(true);
+            else void confirm(duplicateConfirmation.recordId, true);
+          }}
+        />
+      )}
     </>
   );
 }
@@ -344,7 +398,7 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
     const keyParts: string[] = [];
     for (const job of imports) {
       if (job.localOnly) continue;
-      if (terminalImportStatuses.has(job.status)) continue;
+      if (inactiveImportStatuses.has(job.status)) continue;
       ids.push(job.id);
       keyParts.push(`${job.id}:${job.status}`);
     }
@@ -353,8 +407,9 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
   const activeImportIds = activeImports.ids;
   const activeImportKey = activeImports.key;
   const counts = useMemo(() => {
-    const next = { all: imports.length, processing: 0, success: 0, failed: 0 };
+    const next = { all: imports.length, review: 0, processing: 0, success: 0, failed: 0 };
     for (const job of imports) {
+      if (matchesJobFilter(job, "review")) next.review += 1;
       if (matchesJobFilter(job, "processing")) next.processing += 1;
       if (matchesJobFilter(job, "success")) next.success += 1;
       if (matchesJobFilter(job, "failed")) next.failed += 1;
@@ -392,6 +447,21 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
       await reload();
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : "重试失败", { duration: 3000, closeButton: true });
+    } finally {
+      setBusyJobId("");
+    }
+  };
+  const continueDuplicate = async (jobId: string) => {
+    setBusyJobId(jobId);
+    try {
+      const { job } = await continueDuplicateImportJob(jobId);
+      if (job) replaceImportJobInCache(book?.id, user?.id, job);
+      await reload();
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "继续识别失败", {
+        duration: 3000,
+        closeButton: true,
+      });
     } finally {
       setBusyJobId("");
     }
@@ -480,6 +550,10 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
               处理中
             </span>
             <span>
+              <b>{counts.review}</b>
+              待核对
+            </span>
+            <span>
               <b>{counts.success}</b>
               成功
             </span>
@@ -514,6 +588,7 @@ export function ImportHistorySheet({ onClose }: { onClose: () => void }) {
                   job={job}
                   busy={busyJobId === job.id}
                   onRetry={() => void retry(job.id)}
+                  onContinue={() => void continueDuplicate(job.id)}
                   onCancel={() => void cancel(job.id)}
                   onDelete={() => void remove(job.id)}
                   onConfirm={() => void openPendingJob(job.id)}
@@ -790,6 +865,7 @@ function ImportJobCard({
   job,
   busy,
   onRetry,
+  onContinue,
   onCancel,
   onDelete,
   onConfirm,
@@ -798,13 +874,20 @@ function ImportJobCard({
   job: Job;
   busy: boolean;
   onRetry: () => void;
+  onContinue: () => void;
   onCancel: () => void;
   onDelete: () => void;
   onConfirm: () => void;
   onMissing?: (jobId: string) => void;
 }) {
   const tone =
-    job.status === "failed" ? "failed" : terminalImportStatuses.has(job.status) ? "done" : "processing";
+    job.status === "duplicate_review"
+      ? "warning"
+      : job.status === "failed"
+        ? "failed"
+        : terminalImportStatuses.has(job.status)
+          ? "done"
+          : "processing";
   const Icon = getJobIcon();
   const statusText = formatJobStatus(job);
   return (
@@ -817,7 +900,7 @@ function ImportJobCard({
           <em className="ios-import-error-stage">{job.errorStage}</em>
         )}
         {job.status === "failed" && job.errorMessage && <p>{job.errorMessage}</p>}
-        {!terminalImportStatuses.has(job.status) && job.status !== "ai_processing" && (
+        {!inactiveImportStatuses.has(job.status) && job.status !== "ai_processing" && (
           <i>
             <em style={{ width: `${job.progress ?? 18}%` }} />
           </i>
@@ -826,7 +909,7 @@ function ImportJobCard({
       <div>
         {tone === "done" && <CheckCircleIcon size={22} weight="fill" />}
         {tone === "failed" && <XCircleIcon size={22} weight="fill" />}
-        {tone === "processing" && <CircleNotchIcon size={22} className="ios-spin" />}
+        {tone === "warning" && <WarningCircleIcon size={22} weight="fill" />}
         {job.status === "failed" && job.retryable && (
           <button type="button" disabled={busy} onClick={onRetry}>
             重试
@@ -837,7 +920,12 @@ function ImportJobCard({
             去确认
           </button>
         )}
-        {!job.localOnly && !terminalImportStatuses.has(job.status) && (
+        {job.status === "duplicate_review" && (
+          <button className="primary" type="button" disabled={busy} onClick={onContinue}>
+            仍然识别
+          </button>
+        )}
+        {!job.localOnly && !terminalImportStatuses.has(job.status) && job.status !== "duplicate_review" && (
           <button type="button" disabled={busy || job.status === "cancel_requested"} onClick={onCancel}>
             {job.status === "cancel_requested" ? "取消中" : "取消"}
           </button>
@@ -868,7 +956,7 @@ function ImportJobPreview({
   onMissing,
 }: {
   job: Job;
-  tone: "done" | "failed" | "processing";
+  tone: "done" | "failed" | "processing" | "warning";
   fallbackIcon: JobIcon;
   onMissing?: (jobId: string) => void;
 }) {
@@ -890,7 +978,7 @@ function ImageJobThumbnail({
   onMissing,
 }: {
   job: Job;
-  tone: "done" | "failed" | "processing";
+  tone: "done" | "failed" | "processing" | "warning";
   fallbackIcon: JobIcon;
   onMissing?: (jobId: string) => void;
 }) {
@@ -1001,6 +1089,7 @@ function getJobIcon() {
 function formatJobStatus(job: Job) {
   if (job.status === "pending_confirmation") return "已生成待确认记录";
   if (job.status === "completed") return "处理完成";
+  if (job.status === "duplicate_review") return "发现相同小票，确认后可继续识别";
   if (job.status === "failed") return "处理失败";
   if (job.status === "cancel_requested") return "取消中…";
   if (job.status === "cancelled") return "已取消";
@@ -1023,14 +1112,15 @@ function formatOcrProgress(job: Job) {
 }
 
 function canDeleteImportJob(job: Job) {
-  return terminalImportStatuses.has(job.status);
+  return terminalImportStatuses.has(job.status) || job.status === "duplicate_review";
 }
 
 function matchesJobFilter(job: Job, filter: JobFilter) {
   if (filter === "all") return true;
+  if (filter === "review") return job.status === "duplicate_review";
   if (filter === "success") return successStatuses.has(job.status);
   if (filter === "failed") return failedStatuses.has(job.status);
-  return !terminalImportStatuses.has(job.status);
+  return !inactiveImportStatuses.has(job.status);
 }
 
 function groupJobsByDay(jobs: Job[]) {

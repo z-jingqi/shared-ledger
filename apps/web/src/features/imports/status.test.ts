@@ -88,4 +88,21 @@ describe("watchImportJobs", () => {
     expect(MockEventSource.instances).toHaveLength(1);
     stop();
   });
+
+  it("stops watching jobs that are waiting for duplicate review", () => {
+    const onDone = vi.fn();
+    const stop = watchImportJobs(["import_1"], vi.fn(), { onDone });
+    const source = MockEventSource.instances[0];
+
+    source.emit("job", {
+      id: "import_1",
+      fileName: "receipt.jpg",
+      status: "duplicate_review",
+      duplicateOfJobId: "import_original",
+    });
+
+    expect(onDone).toHaveBeenCalledOnce();
+    expect(source.closed).toBe(true);
+    stop();
+  });
 });

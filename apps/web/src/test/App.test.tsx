@@ -41,9 +41,11 @@ let mockImportJobs: Array<{
   progressText?: string;
   stage?: string;
   cancelable?: boolean;
+  duplicateOfJobId?: string;
 }> = [];
 let pendingRecordsResponseOverride: (() => Promise<Response>) | undefined;
 let importCancelRequests: string[] = [];
+let importContinueRequests: string[] = [];
 let aiSearchRequests: Array<{
   bookId?: string;
   query?: string;
@@ -310,6 +312,7 @@ describe("shared ledger mobile UI", () => {
     mockImportJobs = [];
     pendingRecordsResponseOverride = undefined;
     importCancelRequests = [];
+    importContinueRequests = [];
     aiSearchRequests = [];
     aiChatRequests = [];
     aiConfirmationRequests = [];
@@ -968,6 +971,17 @@ describe("shared ledger mobile UI", () => {
         if (path.includes("/imports/job_new/cancel")) {
           importCancelRequests.push(path);
           return Promise.resolve(json({ ok: true }));
+        }
+        if (path.includes("/imports/job_duplicate/continue-duplicate")) {
+          importContinueRequests.push(path);
+          const job = {
+            id: "job_duplicate",
+            fileName: "receipt.png",
+            fileType: "image/png",
+            status: "uploaded",
+          };
+          mockImportJobs = [job];
+          return Promise.resolve(json({ job }));
         }
         if (path.includes("/imports/job_heic/file"))
           return Promise.resolve(
@@ -1930,6 +1944,31 @@ describe("shared ledger mobile UI", () => {
     await user.click(within(jobCard as HTMLElement).getByRole("button", { name: "取消" }));
 
     await waitFor(() => expect(importCancelRequests).toContain("/api/imports/job_new/cancel"));
+  });
+  it("shows a duplicate review card and continues only after the user chooses it", async () => {
+    const user = userEvent.setup();
+    plan = "pro";
+    mockImportJobs = [
+      {
+        id: "job_duplicate",
+        fileName: "receipt.png",
+        fileType: "image/png",
+        status: "duplicate_review",
+        duplicateOfJobId: "job_original",
+      },
+    ];
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: /1 张图片可能重复/ }));
+    const jobCard = (await screen.findByText("receipt.png")).closest(".ios-import-job");
+    expect(jobCard).toBeTruthy();
+    expect(within(jobCard as HTMLElement).getByText("发现相同小票，确认后可继续识别")).toBeInTheDocument();
+
+    await user.click(within(jobCard as HTMLElement).getByRole("button", { name: "仍然识别" }));
+
+    await waitFor(() =>
+      expect(importContinueRequests).toContain("/api/imports/job_duplicate/continue-duplicate"),
+    );
   });
   it("hides image upload entry from the add menu for free users", async () => {
     const user = userEvent.setup();

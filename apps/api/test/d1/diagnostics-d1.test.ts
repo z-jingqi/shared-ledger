@@ -43,7 +43,7 @@ describe("D1 OCR diagnostics", () => {
     expect(body.checks.googleVision).toMatchObject({ ok: true, configured: true });
   });
 
-  it("can include saved OCR raw result for non-production import diagnostics", async () => {
+  it("reports import status without exposing OCR contents", async () => {
     const context = createD1TestApp();
     const user = seedUser(context.db, { id: "user_diag", name: "Diag", plan: "pro" });
     const book = seedBook(context.db, user, { id: "book_diag" });
@@ -55,18 +55,6 @@ describe("D1 OCR diagnostics", () => {
       r2Key: "imports/receipt.jpg",
     });
     await context.repository.markImportJobOcrProcessing(job.id, "ocr_with_result", "google-vision");
-    await context.repository.saveImportOcrResult({
-      importJobId: job.id,
-      provider: "google-vision",
-      engineVersion: "v1",
-      rawText: "小票原文 12 元",
-      rawJson: { responses: [{ fullTextAnnotation: { text: "小票原文 12 元" } }] },
-      converted: false,
-      sourceMimeType: "image/jpeg",
-      processedMimeType: "image/jpeg",
-      actorId: user.id,
-    });
-
     const response = await context.app.request(
       `/diagnostics/ocr?importJobId=${job.id}&includeOcrRaw=1`,
       { headers: authHeaders(user) },
@@ -79,16 +67,8 @@ describe("D1 OCR diagnostics", () => {
       id: job.id,
       status: "ocr_processing",
       ocrJobId: "ocr_with_result",
-      hasOcrResult: true,
     });
-    expect(body.sharedLedgerDebug).toMatchObject({
-      importJobId: job.id,
-      ocrJobId: "ocr_with_result",
-      ocrRawResult: {
-        provider: "google-vision",
-        rawText: "小票原文 12 元",
-      },
-    });
+    expect(body.sharedLedgerDebug).toBeUndefined();
   });
 
   it("does not allow diagnosing another user's import job", async () => {

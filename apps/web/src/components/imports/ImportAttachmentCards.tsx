@@ -1,4 +1,4 @@
-import { CheckCircleIcon, CircleNotchIcon, FileIcon, WarningCircleIcon, XIcon } from "@phosphor-icons/react";
+import { CheckCircleIcon, FileIcon, WarningCircleIcon, XIcon } from "@phosphor-icons/react";
 import { useState } from "react";
 
 export type ImportAttachmentView = {
@@ -97,8 +97,8 @@ export function ImportAttachmentCards({
             )}
             {(attachment.status === "uploading" || attachment.status === "processing") && (
               <span className="import-card-overlay">
-                <CircleNotchIcon size={28} weight="bold" />
-                {importProgressLabel(attachment)}
+                <span className="import-card-shimmer" aria-hidden="true" />
+                <span>{importProgressLabel(attachment)}</span>
                 {attachment.status === "processing" && onCancel && (
                   <button
                     className="import-cancel-inline"

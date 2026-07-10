@@ -2,8 +2,9 @@ import { supportedFileTypes } from "@shared-ledger/import";
 import { imageOcrDailyLimits, supportedFileExtensions } from "@shared-ledger/shared";
 import type { D1LedgerRepository } from "../repository";
 
-export const maximumImageImportFileBytes = 10 * 1024 * 1024;
+export const maximumImageImportFileBytes = 5 * 1024 * 1024;
 export const maximumImageImportBatchFiles = 5;
+export const maximumImageImportRequestBytes = 6 * 1024 * 1024;
 
 export class ImportUploadError extends Error {
   constructor(
@@ -21,7 +22,7 @@ export function assertImageImportFile(value: unknown): asserts value is File {
     throw new ImportUploadError("当前只支持图片识别");
   }
   if (value.size <= 0 || value.size > maximumImageImportFileBytes) {
-    throw new ImportUploadError("文件大小必须在 1 B 到 10 MB 之间");
+    throw new ImportUploadError("文件大小必须在 1 B 到 5 MB 之间");
   }
   const resolvedType = imageImportFileType(value);
   if (!resolvedType.startsWith("image/") || !isSupportedImageMimeType(resolvedType)) {
@@ -57,6 +58,18 @@ export async function assertImageOcrQuota(repository: D1LedgerRepository, userId
     repository.countActiveImageOcrJobs(userId, shanghaiDateRange(date)),
   ]);
   if (used + active + requested > limit) throw new ImportUploadError("今日图片识别额度已用完", 429);
+}
+
+export async function reserveImageOcrQuota(
+  repository: D1LedgerRepository,
+  userId: string,
+  importJobId: string,
+) {
+  const plan = await repository.getUserPlan(userId);
+  const limit = imageOcrLimitForPlan(plan);
+  if (limit <= 0) throw new ImportUploadError("当前套餐不支持图片识别", 403);
+  const reserved = await repository.reserveImageOcrUsage(importJobId, userId, shanghaiUsageDate(), limit);
+  if (!reserved) throw new ImportUploadError("今日图片识别额度已用完", 429);
 }
 
 export function imageOcrLimitForPlan(plan: unknown) {

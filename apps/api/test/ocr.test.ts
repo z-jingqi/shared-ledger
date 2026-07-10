@@ -53,7 +53,8 @@ describe("Google Vision OCR client", () => {
       input: { converted: false, sourceMimeType: "image/png", processedMimeType: "image/png" },
     });
     expect(requests[0]?.url).toContain("https://vision.googleapis.com/v1/images:annotate");
-    expect(requests[0]?.url).toContain("key=secret");
+    expect(requests[0]?.url).not.toContain("key=");
+    expect(requests[0]?.headers.get("X-Goog-Api-Key")).toBe("secret");
     const body = (await requests[0]!.json()) as {
       requests: Array<{ features: unknown; image: { content?: string } }>;
     };
@@ -74,7 +75,7 @@ describe("Google Vision OCR client", () => {
                   {
                     confidence: 0.9,
                     blocks: [
-                      visionBlock("1234567890123 测试商品", 900, 100, 500, 40),
+                      visionBlock("1234567890123 测试商品", 100, 100, 700, 40),
                       visionBlock("9.90", 900, 150, 80, 30),
                       visionBlock("2", 1300, 150, 40, 30),
                       visionBlock("19.80", 1600, 150, 90, 30),
@@ -96,8 +97,48 @@ describe("Google Vision OCR client", () => {
       converted: false,
     });
 
-    expect(result.markdown).toContain("OCR layout rows derived from Google Vision bounding boxes");
-    expect(result.markdown).toContain("| 测试商品 | 9.90 | 2 | 19.80 |");
+    expect(result.markdown).toContain("OCR visual rows derived from Google Vision bounding boxes");
+    expect(result.markdown).toContain("[ROW 1] [x=100] 1234567890123 测试商品");
+    expect(result.markdown).toContain("[ROW 2] [x=900] 9.90 | [x=1300] 2 | [x=1600] 19.80");
+  });
+
+  it("keeps weighted quantities and uses the rightmost row value as line amount", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          responses: [
+            {
+              fullTextAnnotation: {
+                text: "1234567890123 马铃薯(称重)\n3.77\n0.904\n3.41\n应收 3.41",
+                pages: [
+                  {
+                    confidence: 0.9,
+                    blocks: [
+                      visionBlock("1234567890123 马铃薯(称重)", 100, 100, 700, 40),
+                      visionBlock("3.77", 900, 150, 80, 30),
+                      visionBlock("0.904", 1300, 150, 70, 30),
+                      visionBlock("3.41", 1600, 150, 90, 30),
+                      visionBlock("应收 3.41", 100, 250, 220, 30),
+                    ],
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      ),
+    );
+
+    const result = await new GoogleVisionOcrClient("secret").recognizeImage({
+      bytes: new TextEncoder().encode("image").buffer,
+      sourceMimeType: "image/png",
+      processedMimeType: "image/png",
+      converted: false,
+    });
+
+    expect(result.markdown).toContain("[ROW 1] [x=100] 1234567890123 马铃薯(称重)");
+    expect(result.markdown).toContain("[ROW 2] [x=900] 3.77 | [x=1300] 0.904 | [x=1600] 3.41");
   });
 
   it("preserves structured Google Vision error fields", async () => {
@@ -187,7 +228,7 @@ describe("Google Vision OCR client", () => {
       type: "image/jpeg",
     });
 
-    expect(() => assertImageImportFile(file)).toThrow("文件大小必须在 1 B 到 10 MB 之间");
+    expect(() => assertImageImportFile(file)).toThrow("文件大小必须在 1 B 到 5 MB 之间");
   });
 
   it("preflights batch OCR quota with the requested file count", async () => {
@@ -215,7 +256,6 @@ function ocrResult(input: Partial<GoogleVisionOcrResult> = {}): GoogleVisionOcrR
     plainText: "text",
     markdown: "text",
     pages: [{ text: "text" }],
-    raw: {},
     metadata: {
       input: {
         converted: false,

@@ -7,13 +7,6 @@ export const maximumAttachmentFiles = 5;
 export const supportedImportAccept = supportedFileAccept;
 
 export type ImportBatchJob = ImportJobStatus & { index?: number };
-type ImportBatchDuplicate = {
-  index?: number;
-  fileName: string;
-  duplicateOfJobId: string;
-  message?: string;
-  error?: string;
-};
 export type UploadPlaceholder = ImportJobStatus & {
   localOnly: true;
   status: "uploading";
@@ -40,7 +33,7 @@ export type PreparedImportFile = {
 };
 
 const googleVisionImageTypes = new Set<string>(googleVisionSupportedImageTypes);
-const ocrInputMaxBytes = 7 * 1024 * 1024;
+const ocrInputMaxBytes = 4 * 1024 * 1024;
 const nativePreviewImageTypes = new Set([
   "image/jpeg",
   "image/jpg",
@@ -96,19 +89,18 @@ export async function uploadImportFiles(
     onProgress?: (event: UploadProgressEvent) => void;
   },
 ) {
-  const body = new FormData();
   const requestSignal = options?.signal;
   const placeholderIds = (options?.placeholders ?? []).map((placeholder) => placeholder.id);
-  const preparedFiles: Array<PreparedImportFile & { sourceIndex: number; placeholderId?: string }> = [];
+  const jobs: ImportBatchJob[] = [];
   try {
     for (const [index, file] of files.entries()) {
       const placeholder = options?.placeholders?.[index];
       if (placeholder?.id && cancelledLocalUploadIds.has(placeholder.id)) continue;
-      const preparationController = requestSignal ? undefined : new AbortController();
-      const signal = requestSignal ?? preparationController?.signal;
-      if (placeholder?.id && preparationController) {
-        localUploadControllers.set(placeholder.id, preparationController);
-      }
+      const controller = new AbortController();
+      const abortFromRequest = () => controller.abort(requestSignal?.reason);
+      if (requestSignal?.aborted) abortFromRequest();
+      else requestSignal?.addEventListener("abort", abortFromRequest, { once: true });
+      if (placeholder?.id) localUploadControllers.set(placeholder.id, controller);
       const emit = (event: Omit<UploadProgressEvent, "index" | "fileName" | "placeholderId">) =>
         options?.onProgress?.({
           index,
@@ -118,98 +110,68 @@ export async function uploadImportFiles(
         });
       try {
         const prepared = await prepareImageFileForUpload(file, {
-          signal,
+          signal: controller.signal,
           onProgress: emit,
         });
         if (placeholder?.id && cancelledLocalUploadIds.has(placeholder.id)) {
           if (prepared.localPreviewUrl) URL.revokeObjectURL(prepared.localPreviewUrl);
           continue;
         }
-        preparedFiles.push({
-          ...prepared,
-          localPreviewUrl: prepared.localPreviewUrl ?? placeholder?.localPreviewUrl,
-          sourceIndex: index,
-          placeholderId: placeholder?.id,
-        });
+        const localPreviewUrl = prepared.localPreviewUrl ?? placeholder?.localPreviewUrl;
         emit({
           progress: 32,
           progressText: "准备上传…",
           fileType: prepared.file.type,
           ...(prepared.localPreviewUrl ? { localPreviewUrl: prepared.localPreviewUrl } : {}),
         });
+        assertNotAborted(controller.signal);
+        if (placeholder?.id && cancelledLocalUploadIds.has(placeholder.id)) {
+          if (prepared.localPreviewUrl) URL.revokeObjectURL(prepared.localPreviewUrl);
+          continue;
+        }
+
+        const body = new FormData();
+        body.append("files", prepared.file);
+        body.append("fileMetadata", JSON.stringify([prepared.metadata]));
+        if (options?.autoConfirm) body.append("autoConfirm", "true");
+        emit({
+          progress: 40,
+          progressText: "上传中…",
+          fileType: prepared.file.type,
+        });
+        const response = await api<{ jobs: ImportBatchJob[] }>(`/books/${bookId}/imports/batch`, {
+          method: "POST",
+          body,
+          signal: controller.signal,
+        });
+        if (placeholder?.id && cancelledLocalUploadIds.has(placeholder.id)) {
+          await Promise.allSettled(response.jobs.map((job) => cancelImportJob(job.id)));
+          if (prepared.localPreviewUrl) URL.revokeObjectURL(prepared.localPreviewUrl);
+          continue;
+        }
+        jobs.push(
+          ...response.jobs.map((job) => ({
+            ...job,
+            index,
+            ...(localPreviewUrl ? { localPreviewUrl } : {}),
+          })),
+        );
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") continue;
         throw error;
       } finally {
+        requestSignal?.removeEventListener("abort", abortFromRequest);
         if (placeholder?.id) localUploadControllers.delete(placeholder.id);
       }
     }
-    if (!preparedFiles.length) throw new DOMException("Aborted", "AbortError");
-    preparedFiles.forEach((prepared) => body.append("files", prepared.file));
-    body.append("fileMetadata", JSON.stringify(preparedFiles.map((prepared) => prepared.metadata)));
-    if (options?.autoConfirm) body.append("autoConfirm", "true");
-    assertNotAborted(requestSignal);
-    preparedFiles.forEach((prepared) => {
-      const placeholder = options?.placeholders?.[prepared.sourceIndex];
-      options?.onProgress?.({
-        index: prepared.sourceIndex,
-        placeholderId: prepared.placeholderId ?? placeholder?.id,
-        fileName: files[prepared.sourceIndex]?.name ?? prepared.file.name,
-        fileType: prepared.file.type,
-        progress: 40,
-        progressText: "上传中…",
-      });
-    });
-    const response = await api<{ jobs: ImportBatchJob[]; duplicates?: ImportBatchDuplicate[] }>(
-      `/books/${bookId}/imports/batch`,
-      {
-        method: "POST",
-        body,
-        signal: requestSignal,
-      },
-    );
-    return {
-      ...response,
-      jobs: [
-        ...response.jobs.map((job, index) => {
-          const prepared = typeof job.index === "number" ? preparedFiles[job.index] : preparedFiles[index];
-          return {
-            ...job,
-            ...(prepared?.localPreviewUrl ? { localPreviewUrl: prepared.localPreviewUrl } : {}),
-          };
-        }),
-        ...(response.duplicates ?? []).map((duplicate) => duplicateImportJob(duplicate, preparedFiles)),
-      ],
-    };
+    if (!jobs.length) throw new DOMException("Aborted", "AbortError");
+    return { jobs };
   } finally {
     for (const placeholderId of placeholderIds) {
       localUploadControllers.delete(placeholderId);
       cancelledLocalUploadIds.delete(placeholderId);
     }
   }
-}
-
-function duplicateImportJob(
-  duplicate: ImportBatchDuplicate,
-  preparedFiles: Array<PreparedImportFile & { sourceIndex: number; placeholderId?: string }>,
-): ImportBatchJob {
-  const prepared = typeof duplicate.index === "number" ? preparedFiles[duplicate.index] : undefined;
-  const timestamp = new Date().toISOString();
-  return {
-    id: prepared?.placeholderId ?? `duplicate_${duplicate.duplicateOfJobId}_${duplicate.index ?? "unknown"}`,
-    fileName: duplicate.fileName,
-    fileType: prepared?.metadata.originalType || prepared?.file.type,
-    status: "failed",
-    localOnly: true,
-    errorCode: "DUPLICATE_IMPORT",
-    errorMessage: duplicate.message || duplicate.error || "这张小票已识别过",
-    duplicateOfJobId: duplicate.duplicateOfJobId,
-    progress: 100,
-    progressText: "这张小票已识别过",
-    localPreviewUrl: prepared?.localPreviewUrl,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  };
 }
 
 export async function prepareImageFileForUpload(
@@ -423,4 +385,8 @@ export async function deleteImportJob(jobId: string) {
 
 export async function retryImportJob(jobId: string) {
   return api<{ job: ImportBatchJob }>(`/imports/${jobId}/retry`, { method: "POST" });
+}
+
+export async function continueDuplicateImportJob(jobId: string) {
+  return api<{ job: ImportBatchJob }>(`/imports/${jobId}/continue-duplicate`, { method: "POST" });
 }

@@ -117,6 +117,7 @@ export type LedgerAiRuntime = {
   modelId?: string;
   user: LedgerAiUser;
   importTimeoutMs?: number;
+  importPipelineTimeoutMs?: number;
   importSummaryMaxTokens?: number;
   importItemsMaxTokens?: number;
   testClient?: LedgerAiTestClient;
@@ -124,11 +125,13 @@ export type LedgerAiRuntime = {
 
 const importSummaryMaxChars = 12_000;
 const importChunkMaxChars = 2_500;
-const importChunkMaxLines = 80;
+const importChunkMaxLines = 120;
 const importChunkOverlapLines = 2;
-const importChunkMaxCount = 25;
+const importChunkMaxCount = 12;
+const importStructuredCallBudget = 40;
 const defaultImportSummaryMaxTokens = 900;
 const defaultImportItemsMaxTokens = 1800;
+const defaultImportPipelineTimeoutMs = 8 * 60_000;
 const defaultChatMaxTokens = 1400;
 const defaultSkillMaxTokens = 900;
 const defaultToolStepMaxTokens = 1800;
@@ -137,7 +140,7 @@ const importSummarySystemPrompt = [
   "You extract the receipt-level bookkeeping summary from OCR text.",
   "Return only JSON matching the supplied schema.",
   "Do not include reasoning, explanations, Markdown, or text outside the JSON object.",
-  "If OCR layout rows are present, use them as the primary evidence for receipt item rows and totals.",
+  "If OCR visual rows are present, use their row grouping and x positions as primary evidence while inferring column meanings from the receipt headers.",
   "Use the merchant/receipt purpose as note, the transaction date, the final paid/received total, transaction type, and a likely category.",
   "Prefer category names from the provided existing categories. If none fits and the text clearly implies a category, return a concise new categoryName.",
   "Do not extract product/service line items in this step.",
@@ -148,8 +151,9 @@ const importItemsSystemPrompt = [
   "You extract receipt line items from one OCR text chunk.",
   "Return only JSON matching the supplied schema.",
   "Do not include reasoning, explanations, Markdown, or text outside the JSON object.",
-  "If an OCR layout rows table is present, treat each row in that table as the primary item source.",
-  "For table rows, use lineAmount as the item amount. Do not use unitPrice or quantity as amount when lineAmount is present.",
+  "If OCR visual rows are present, blocks on the same ROW share a visual line and smaller x values are farther left.",
+  "Infer column meanings from headers for each receipt; never assume a fixed column order across receipts.",
+  "Use receiptContext only to understand the merchant, date, and final receipt total. Never emit the receipt total as a line item.",
   "Only include explicit product/service lines that have a supported paid line amount in this chunk.",
   "Do not include merchant names, addresses, dates, receipt numbers, tax/subtotal/total/payment/change/discount summary lines, or card/payment lines as items.",
   "Never create placeholder items such as 其他商品, unknown item, or miscellaneous.",
@@ -209,6 +213,7 @@ export function createLedgerLanguageModel(config: LedgerLanguageModelConfig): La
       appName: config.appName ?? "shared-ledger",
       appUrl: config.appUrl,
     }).chat(config.model, {
+      plugins: [{ id: "response-healing" }],
       provider: { require_parameters: true },
       reasoning: { enabled: false, exclude: true, effort: "none" },
       structuredOutputs: { strict: true },
@@ -234,18 +239,24 @@ export function createLedgerAiProvider(runtime: LedgerAiRuntime): AiProvider {
     payload: unknown;
     temperature?: number;
     maxOutputTokens?: number;
+    deadlineAt?: number;
+    budget?: { remaining: number };
   }): Promise<TOutput> {
     const prompt = JSON.stringify(input.payload, null, 2);
     try {
+      consumeStructuredCallBudget(input.budget);
       if (runtime.testClient) {
         return input.schema.parse(
-          await runtime.testClient.generateObject<TOutput>({
-            schemaName: input.schemaName,
-            system: input.system,
-            prompt,
-            temperature: input.temperature,
-            maxOutputTokens: input.maxOutputTokens,
-          }),
+          await withTimeout(
+            runtime.testClient.generateObject<TOutput>({
+              schemaName: input.schemaName,
+              system: input.system,
+              prompt,
+              temperature: input.temperature,
+              maxOutputTokens: input.maxOutputTokens,
+            }),
+            structuredCallTimeout(runtime, input.deadlineAt),
+          ),
         );
       }
       const result = await withTimeout(
@@ -259,15 +270,16 @@ export function createLedgerAiProvider(runtime: LedgerAiRuntime): AiProvider {
           temperature: input.temperature,
           maxOutputTokens: input.maxOutputTokens,
           reasoning: "none",
-          maxRetries: 1,
+          maxRetries: input.budget ? 0 : 1,
         }),
-        runtime.importTimeoutMs ?? 45_000,
+        structuredCallTimeout(runtime, input.deadlineAt),
       );
       return result.object;
     } catch (error) {
       const normalized = normalizeAiError(error);
       if (!runtime.testClient && shouldFallbackToJsonText(normalized)) {
         try {
+          consumeStructuredCallBudget(input.budget);
           const result = await withTimeout(
             generateText({
               model: requireModel(runtime),
@@ -280,9 +292,9 @@ export function createLedgerAiProvider(runtime: LedgerAiRuntime): AiProvider {
               temperature: input.temperature,
               maxOutputTokens: input.maxOutputTokens,
               reasoning: "none",
-              maxRetries: 1,
+              maxRetries: input.budget ? 0 : 1,
             }),
-            runtime.importTimeoutMs ?? 45_000,
+            structuredCallTimeout(runtime, input.deadlineAt),
           );
           return input.schema.parse(parseJsonObjectFromText(result.text));
         } catch (fallbackError) {
@@ -379,8 +391,9 @@ export function createLedgerAiProvider(runtime: LedgerAiRuntime): AiProvider {
       return step;
     },
     async structureImport(input: AiContext): Promise<z.infer<typeof aiImportRecordSchema>[]> {
-      const layoutRows = parseOcrLayoutRows(input.text, input.categories ?? []);
-      const chunks = chunkOcrText(input.text);
+      const deadlineAt = Date.now() + (runtime.importPipelineTimeoutMs ?? defaultImportPipelineTimeoutMs);
+      const budget = { remaining: importStructuredCallBudget };
+      const chunks = chunkOcrText(importItemsSourceText(input.text));
       if (chunks.length > importChunkMaxCount) {
         throw new LedgerAIError(
           "input_too_large",
@@ -405,25 +418,14 @@ export function createLedgerAiProvider(runtime: LedgerAiRuntime): AiProvider {
             },
             temperature: 0,
             maxOutputTokens: runtime.importSummaryMaxTokens ?? defaultImportSummaryMaxTokens,
+            deadlineAt,
+            budget,
           }),
         );
       } catch (error) {
         summary = fallbackImportReceiptSummary(input.text, input.categories ?? [], error);
       }
-      if (layoutRows.length && layoutRowsMatchTotal(layoutRows, summary.amount)) {
-        await notifyImportProgress(input, { stage: "ai_merging", text: "合并识别结果" });
-        return [
-          aiImportRecordSchema.parse({
-            ...summary,
-            items: layoutRows.map((row) => ({
-              name: row.name,
-              amount: row.amount,
-              ...(row.categoryName ? { categoryName: row.categoryName } : {}),
-            })),
-            warnings: uniqueWarnings(summary.warnings),
-          }),
-        ];
-      }
+      summary = reconcileImportReceiptSummary(summary, input.text, input.categories ?? []);
       const chunkResults: ImportChunkResult[] = [];
 
       for (const [index, chunk] of chunks.entries()) {
@@ -442,8 +444,11 @@ export function createLedgerAiProvider(runtime: LedgerAiRuntime): AiProvider {
             chunkIndex: index,
             chunkNumber,
             chunkTotal: chunks.length,
+            receiptSummary: summary,
             depth: 0,
             maxOutputTokens: runtime.importItemsMaxTokens ?? defaultImportItemsMaxTokens,
+            deadlineAt,
+            budget,
           }),
         );
       }
@@ -470,11 +475,29 @@ type GenerateStructured = <TOutput>(input: {
   payload: unknown;
   temperature?: number;
   maxOutputTokens?: number;
+  deadlineAt?: number;
+  budget?: { remaining: number };
 }) => Promise<TOutput>;
 
 function requireModel(runtime: LedgerAiRuntime): LanguageModel {
   if (!runtime.model) throw new LedgerAIError("validation_failed", "AI provider 未配置");
   return runtime.model;
+}
+
+function structuredCallTimeout(runtime: LedgerAiRuntime, deadlineAt?: number) {
+  const callTimeout = runtime.importTimeoutMs ?? 45_000;
+  if (!deadlineAt) return callTimeout;
+  const remaining = deadlineAt - Date.now();
+  if (remaining <= 0) throw new LedgerAIError("provider_unavailable", "AI 分析超时");
+  return Math.min(callTimeout, remaining);
+}
+
+function consumeStructuredCallBudget(budget?: { remaining: number }) {
+  if (!budget) return;
+  if (budget.remaining <= 0) {
+    throw new LedgerAIError("input_too_large", "票据内容过长，请拆分图片后重试");
+  }
+  budget.remaining -= 1;
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
@@ -545,39 +568,6 @@ function splitOcrLines(text: string) {
     .filter(Boolean);
 }
 
-function parseOcrLayoutRows(
-  text: string,
-  categories: Array<{ name: string; type: TransactionType }>,
-): Array<z.infer<typeof aiImportItemSchema>> {
-  const rows: Array<z.infer<typeof aiImportItemSchema>> = [];
-  for (const line of splitOcrLines(text)) {
-    if (!line.startsWith("|") || !line.endsWith("|")) continue;
-    const cells = line
-      .slice(1, -1)
-      .split("|")
-      .map((cell) => cell.trim());
-    if (cells.length < 4 || cells[0]?.toLowerCase() === "name" || cells.every((cell) => /^-+$/.test(cell))) {
-      continue;
-    }
-    const [name, , , amountText] = cells;
-    const amount = parseImportMoney(amountText ?? "");
-    if (!name || amount === undefined) continue;
-    const categoryName = inferItemCategoryName(name, categories);
-    rows.push({
-      name,
-      amount,
-      ...(categoryName ? { categoryName } : {}),
-    });
-  }
-  return rows;
-}
-
-function layoutRowsMatchTotal(rows: Array<z.infer<typeof aiImportItemSchema>>, amount: number) {
-  if (!rows.length) return false;
-  const itemSum = rows.reduce((total, item) => total + item.amount, 0);
-  return Math.abs(itemSum - amount) <= 0.01;
-}
-
 function fallbackImportReceiptSummary(
   text: string,
   categories: Array<{ name: string; type: TransactionType }>,
@@ -594,6 +584,31 @@ function fallbackImportReceiptSummary(
     categoryName: inferOverallCategoryName(text, categories),
     confidence: 0.72,
     warnings: ["AI 摘要解析失败，已使用 OCR 规则兜底"],
+  };
+}
+
+function reconcileImportReceiptSummary(
+  summary: ImportReceiptSummary,
+  text: string,
+  categories: Array<{ name: string; type: TransactionType }>,
+): ImportReceiptSummary {
+  const amount = extractReceiptAmount(text);
+  const occurredAt = extractReceiptOccurredAt(text);
+  const note = extractReceiptNote(text);
+  const warnings = [...summary.warnings];
+  if (amount !== undefined && Math.abs(amount - summary.amount) > 0.01) {
+    warnings.push("AI 总金额与 OCR 实收金额不一致，已采用 OCR 实收金额");
+  }
+  if (occurredAt && occurredAt.slice(0, 10) !== summary.occurredAt.slice(0, 10)) {
+    warnings.push("AI 日期与 OCR 交易日期不一致，已采用 OCR 交易日期");
+  }
+  return {
+    ...summary,
+    amount: amount ?? summary.amount,
+    occurredAt: occurredAt ?? summary.occurredAt,
+    note: summary.note?.trim() || (note === "图片识别" ? undefined : note),
+    categoryName: summary.categoryName ?? inferOverallCategoryName(text, categories),
+    warnings: uniqueWarnings(warnings),
   };
 }
 
@@ -645,17 +660,6 @@ function inferOverallCategoryName(text: string, categories: Array<{ name: string
   return findExistingExpenseCategory(categories, ["购物", "食品", "餐饮", "日用品"]) ?? "购物";
 }
 
-function inferItemCategoryName(name: string, categories: Array<{ name: string; type: TransactionType }>) {
-  const compact = name.replace(/\s+/g, "");
-  if (/卫生巾|纸|巾|洗|牙|皂|清洁|日用/.test(compact)) {
-    return findExistingExpenseCategory(categories, ["日用品", "购物"]) ?? "日用品";
-  }
-  if (/虾|蒜|肋排|娃娃菜|小葱|丝瓜|鸡|牛腱|鸭|西瓜|蓝莓|菜椒|番茄|鸡蛋|马铃薯|土豆|水果|蔬菜/.test(compact)) {
-    return findExistingExpenseCategory(categories, ["食材", "食品", "餐饮", "购物"]) ?? "食材";
-  }
-  return findExistingExpenseCategory(categories, ["购物", "日用品"]) ?? "购物";
-}
-
 function findExistingExpenseCategory(
   categories: Array<{ name: string; type: TransactionType }>,
   names: string[],
@@ -670,6 +674,20 @@ function plainOcrText(text: string) {
   return markerIndex >= 0 ? text.slice(markerIndex + marker.length).trim() : text;
 }
 
+function importItemsSourceText(text: string) {
+  const markdownMarker = "OCR markdown:";
+  const plainMarker = "OCR plain text:";
+  const markdownIndex = text.indexOf(markdownMarker);
+  const plainIndex = text.indexOf(plainMarker);
+  if (markdownIndex >= 0 && plainIndex > markdownIndex) {
+    const visualText = text.slice(markdownIndex + markdownMarker.length, plainIndex).trim();
+    if (visualText.includes("OCR visual rows derived from Google Vision bounding boxes.")) {
+      return visualText;
+    }
+  }
+  return plainOcrText(text);
+}
+
 function pad2(value: string) {
   return value.padStart(2, "0");
 }
@@ -681,8 +699,11 @@ async function extractImportItemsChunk(input: {
   chunkIndex: number;
   chunkNumber: number;
   chunkTotal: number;
+  receiptSummary: ImportReceiptSummary;
   depth: number;
   maxOutputTokens: number;
+  deadlineAt: number;
+  budget: { remaining: number };
 }): Promise<ImportChunkResult> {
   try {
     const parsed = importItemsChunkOutputSchema.parse(
@@ -695,12 +716,20 @@ async function extractImportItemsChunk(input: {
           userId: input.input.userId,
           page: input.input.page ?? "导入",
           existingCategories: input.input.categories ?? [],
+          receiptContext: {
+            type: input.receiptSummary.type,
+            amount: input.receiptSummary.amount,
+            occurredAt: input.receiptSummary.occurredAt,
+            note: input.receiptSummary.note,
+          },
           chunkIndex: input.chunkNumber,
           chunkTotal: input.chunkTotal,
           text: input.chunk,
         },
         temperature: 0,
         maxOutputTokens: input.maxOutputTokens,
+        deadlineAt: input.deadlineAt,
+        budget: input.budget,
       }),
     );
     return {

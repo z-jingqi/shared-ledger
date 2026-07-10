@@ -35,7 +35,6 @@ export type GoogleVisionOcrResult = {
   plainText: string;
   markdown?: string;
   pages: Array<{ text: string; confidence?: number | null }>;
-  raw: Record<string, unknown>;
   metadata: {
     input: {
       converted: boolean;
@@ -101,9 +100,12 @@ export class GoogleVisionOcrClient {
     processedMimeType: string;
     converted: boolean;
   }): Promise<GoogleVisionOcrResult> {
-    const response = await fetch(`${visionEndpoint}?key=${encodeURIComponent(this.apiKey)}`, {
+    const response = await fetch(visionEndpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json; charset=utf-8" },
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "X-Goog-Api-Key": this.apiKey,
+      },
       body: JSON.stringify({
         requests: [
           {
@@ -148,7 +150,6 @@ export class GoogleVisionOcrClient {
           confidence: averageConfidence(result?.fullTextAnnotation?.pages),
         },
       ],
-      raw: (raw ?? {}) as Record<string, unknown>,
       metadata: {
         input: {
           converted: input.converted,
@@ -236,17 +237,18 @@ function averageConfidence(pages: Array<{ confidence?: number }> | undefined) {
 
 function buildVisionLayoutMarkdown(result: VisionAnnotateResult | undefined) {
   const blocks = extractLayoutBlocks(result?.fullTextAnnotation?.pages);
-  const rows = extractReceiptItemRows(blocks);
+  const rows = groupVisionBlocksIntoRows(blocks);
   if (!rows.length) return undefined;
   const lines = [
-    "OCR layout rows derived from Google Vision bounding boxes.",
-    "Use lineAmount as the paid amount for each item; unitPrice and quantity are only context.",
+    "OCR visual rows derived from Google Vision bounding boxes.",
+    "Each ROW preserves visual grouping only. Smaller x values are farther left; infer column meanings from the receipt headers.",
+    "No unit price, quantity, or line amount semantics have been assigned in advance.",
     "",
-    "| name | unitPrice | quantity | lineAmount |",
-    "| --- | --- | --- | --- |",
     ...rows.map(
-      (row) =>
-        `| ${escapeMarkdownTable(row.name)} | ${row.unitPrice ?? ""} | ${row.quantity ?? ""} | ${row.lineAmount ?? ""} |`,
+      (row, index) =>
+        `[ROW ${index + 1}] ${row.blocks
+          .map((block) => `[x=${Math.round(block.x)}] ${normalizeLayoutText(block.text)}`)
+          .join(" | ")}`,
     ),
   ];
   return lines.join("\n");
@@ -265,51 +267,35 @@ function extractLayoutBlocks(pages: Array<{ blocks?: VisionBlock[] }> | undefine
   return blocks.sort((left, right) => left.y - right.y || left.x - right.x);
 }
 
-function extractReceiptItemRows(blocks: OcrLayoutBlock[]) {
-  const products = mergeReceiptProductContinuations(blocks);
-  if (!products.length) return [];
-  const numericBlocks = blocks.filter((block) => isReceiptNumber(block.text));
-  const columns = receiptColumnRanges([...products, ...numericBlocks]);
-
-  return products.map((product, index) => {
-    const rowNumbers = numericBlocks.filter((block) => isInProductRow(product, block));
-    const unitPrice = nearestColumnValue(product, rowNumbers, columns.unit);
-    const quantity = nearestColumnValue(product, rowNumbers, columns.quantity);
-    const amount = nearestColumnValue(product, rowNumbers, columns.amount);
-    const embedded = parseEmbeddedProductNumbers(product.text);
-    return {
-      name: cleanReceiptProductName(product.text),
-      unitPrice: unitPrice ?? embedded.unitPrice,
-      quantity: quantity ?? embedded.quantity,
-      lineAmount:
-        amount ?? inferredSingleItemAmount(unitPrice ?? embedded.unitPrice, quantity ?? embedded.quantity),
-      sourceIndex: index,
-    };
-  });
-}
-
-function mergeReceiptProductContinuations(blocks: OcrLayoutBlock[]) {
-  const productBlocks = blocks.filter((block) => isReceiptProductBlock(block.text));
-  return productBlocks.map((product, index) => {
-    const nextProductY = productBlocks[index + 1]?.y ?? Number.POSITIVE_INFINITY;
-    const continuations = blocks.filter((block) => {
-      if (block === product || isReceiptProductBlock(block.text) || isReceiptNumber(block.text)) return false;
-      if (isReceiptNonItemText(block.text)) return false;
-      return (
-        block.y > product.y &&
-        block.y < nextProductY &&
-        block.y < product.y + 200 &&
-        Math.abs(block.x - product.x) < 80
-      );
-    });
-    if (!continuations.length) return product;
-    const text = [product.text, ...continuations.map((block) => block.text)].join(" ");
-    const bottom = Math.max(
-      product.y + product.height,
-      ...continuations.map((block) => block.y + block.height),
-    );
-    return { ...product, text, height: bottom - product.y };
-  });
+function groupVisionBlocksIntoRows(blocks: OcrLayoutBlock[]) {
+  const rows: Array<{
+    centerY: number;
+    height: number;
+    blocks: OcrLayoutBlock[];
+  }> = [];
+  for (const block of blocks) {
+    const centerY = block.y + block.height / 2;
+    const row = rows
+      .filter(
+        (candidate) =>
+          Math.abs(candidate.centerY - centerY) <= Math.max(candidate.height, block.height) * 0.65,
+      )
+      .sort((left, right) => Math.abs(left.centerY - centerY) - Math.abs(right.centerY - centerY))[0];
+    if (!row) {
+      rows.push({ centerY, height: block.height, blocks: [block] });
+      continue;
+    }
+    row.blocks.push(block);
+    const rowTop = Math.min(...row.blocks.map((item) => item.y));
+    const rowBottom = Math.max(...row.blocks.map((item) => item.y + item.height));
+    row.centerY = (rowTop + rowBottom) / 2;
+    row.height = rowBottom - rowTop;
+  }
+  return rows
+    .sort((left, right) => left.centerY - right.centerY)
+    .map((row) => ({
+      blocks: row.blocks.sort((left, right) => left.x - right.x),
+    }));
 }
 
 function boundingBox(box: VisionBoundingBox | undefined) {
@@ -337,92 +323,14 @@ function blockText(block: VisionBlock) {
     .join(" ");
 }
 
-function isReceiptProductBlock(text: string) {
-  const compact = text.replace(/\s+/g, "");
-  if (!/^\d{8,}\*?/.test(compact)) return false;
-  if (isReceiptNonItemText(compact)) return false;
-  return /[\p{Script=Han}A-Za-z]/u.test(compact.replace(/^\d{8,}\*?/, ""));
-}
-
-function isReceiptNonItemText(text: string) {
-  return /流水号|订单号|会员|积分|应收|实收|找零|优惠|合计|总计|收银员|机台号|交易时间|发票|反馈/.test(
-    text.replace(/\s+/g, ""),
-  );
-}
-
-function isReceiptNumber(text: string) {
-  return /^-?\d+(?:\.\d{1,2})?$/.test(text.trim());
-}
-
-function isInProductRow(product: OcrLayoutBlock, candidate: OcrLayoutBlock) {
-  const candidateCenterY = candidate.y + candidate.height / 2;
-  const rowTop = product.y - 12;
-  const rowBottom = product.y + product.height + 70;
-  return candidateCenterY >= rowTop && candidateCenterY <= rowBottom;
-}
-
-function receiptColumnRanges(blocks: OcrLayoutBlock[]) {
-  const minX = Math.min(...blocks.map((block) => block.x));
-  const maxX = Math.max(...blocks.map((block) => block.x + block.width));
-  const width = Math.max(maxX - minX, 1);
-  const unitMax = minX + width * 0.28;
-  const quantityMax = minX + width * 0.52;
-  return {
-    unit: [minX, unitMax] as const,
-    quantity: [unitMax, quantityMax] as const,
-    amount: [quantityMax, Number.POSITIVE_INFINITY] as const,
-  };
-}
-
-function nearestColumnValue(
-  product: OcrLayoutBlock,
-  candidates: OcrLayoutBlock[],
-  range: readonly [number, number],
-) {
-  const [minX, maxX] = range;
-  const filtered = candidates.filter((candidate) => candidate.x >= minX && candidate.x < maxX);
-  if (!filtered.length) return undefined;
-  const rowAnchor = product.y + product.height;
-  const nearest = filtered.sort((left, right) => {
-    const leftDistance = Math.abs(left.y + left.height / 2 - rowAnchor);
-    const rightDistance = Math.abs(right.y + right.height / 2 - rowAnchor);
-    return leftDistance - rightDistance;
-  })[0];
-  return nearest.text.trim();
-}
-
-function parseEmbeddedProductNumbers(text: string): { unitPrice?: string; quantity?: string } {
-  const values = text
-    .trim()
-    .match(/-?\d+(?:\.\d{1,2})?/g)
-    ?.filter((value) => value.includes("."));
-  const trailing = values?.at(-1);
-  return trailing ? { unitPrice: trailing } : {};
-}
-
-function inferredSingleItemAmount(unitPrice: string | undefined, quantity: string | undefined) {
-  if (!unitPrice) return undefined;
-  const parsedQuantity = quantity ? Number.parseFloat(quantity) : 1;
-  if (!Number.isFinite(parsedQuantity) || Math.abs(parsedQuantity - 1) > 0.001) return undefined;
-  return unitPrice;
-}
-
-function cleanReceiptProductName(text: string) {
-  return text
-    .trim()
-    .replace(/^\d{8,}\s*\*?\s*/, "")
-    .replace(/\s+\d+(?:\.\d{1,2})\s+\d+(?:\.\d+)?$/, "")
-    .replace(/\s+/g, " ")
-    .replace(/\s+([）)])$/, "$1")
-    .trim();
-}
-
-function escapeMarkdownTable(value: string) {
-  return value.replace(/\|/g, "\\|");
+function normalizeLayoutText(value: string) {
+  return value.replace(/\s+/g, " ").replace(/\|/g, "\\|").trim();
 }
 
 function arrayBufferToBase64(bytes: ArrayBuffer) {
   const view = new Uint8Array(bytes);
+  const nativeView = view as Uint8Array & { toBase64?: () => string };
+  if (typeof nativeView.toBase64 === "function") return nativeView.toBase64();
   let binary = "";
   const chunkSize = 0x8000;
   for (let index = 0; index < view.length; index += chunkSize) {

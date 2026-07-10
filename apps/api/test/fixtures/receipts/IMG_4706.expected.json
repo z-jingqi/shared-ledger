@@ -1,0 +1,25 @@
+{
+  "type": "expense",
+  "amount": 234.49,
+  "occurredAt": "2026-06-24T19:36:01",
+  "merchantIncludes": "永辉",
+  "items": [
+    { "name": "马铃薯(称重)", "amount": 3.41 },
+    { "name": "乐而雅零触感超丝薄17cm迷你日用卫生巾16片", "amount": 8.9 },
+    { "name": "乐而雅零触感丝薄25cm护翼型日用卫生巾8片", "amount": 15 },
+    { "name": "永辉农场泰国活冻黑虎虾250g", "amount": 39.8 },
+    { "name": "独头蒜200g", "amount": 6.39 },
+    { "name": "精品软骨肋排", "amount": 30.13 },
+    { "name": "高原甜心小娃娃菜400g", "amount": 6.99 },
+    { "name": "小葱100g", "amount": 1.99 },
+    { "name": "肉丝瓜", "amount": 3.97 },
+    { "name": "YH藤椒香拌鸡(折价)", "amount": 15.92 },
+    { "name": "九多肉多招牌牛腱(红色)", "amount": 22.61 },
+    { "name": "乐山甜皮鸭", "amount": 12.88 },
+    { "name": "西瓜果切(大)", "amount": 9.9 },
+    { "name": "Driscoll's怡颗莓云南蓝莓125g(14mm+)", "amount": 14.9 },
+    { "name": "大红菜椒400g", "amount": 10.9 },
+    { "name": "青口蜜小番茄250g", "amount": 8.9 },
+    { "name": "DHA初生土鸡蛋15枚600g", "amount": 21.9 }
+  ]
+}
