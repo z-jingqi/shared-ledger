@@ -873,6 +873,90 @@ describe("Hono REST API", () => {
     expect(String(requestPayload(requests[1]).text)).not.toContain("OCR plain text:");
   });
 
+  it("retries low-coverage visual item extraction with the plain OCR reading order", async () => {
+    const { client, requests } = recordingAiClient({
+      objectOutput: (request: TestObjectRequest) => {
+        if (responseFormatName(request) === "import_receipt_summary") {
+          return {
+            type: "expense",
+            amount: 18.41,
+            occurredAt: "2026-06-24T19:36:01",
+            note: "永辉",
+            categoryName: "购物",
+            confidence: 0.9,
+            warnings: [],
+          };
+        }
+        const payload = requestPayload(request);
+        if (payload.evidenceMode === "visual_layout") {
+          return {
+            items: [{ name: "马铃薯(称重)", amount: 3.41, categoryName: "购物" }],
+            confidence: 0.7,
+            warnings: ["部分视觉坐标不足以确认明细"],
+          };
+        }
+        return {
+          items: [
+            { name: "马铃薯(称重)", amount: 3.41, categoryName: "购物" },
+            { name: "乐而雅卫生巾", amount: 15, categoryName: "日用品" },
+          ],
+          confidence: 0.86,
+          warnings: [],
+        };
+      },
+    });
+    const ai = runtimeAiProvider(
+      { APP_ENV: "test", AI_TEST_CLIENT: client },
+      { id: "user_demo", plan: "pro" },
+    );
+    const records = await structureForConfirmation({
+      bookId: "book_home",
+      userId: "user_demo",
+      normalized: {
+        rawText: [
+          "OCR markdown:",
+          "OCR visual rows derived from Google Vision bounding boxes.",
+          "[ROW 1] [x=100] 1234567890123 马铃薯(称重)",
+          "[ROW 2] [x=900] 3.77 | [x=1300] 0.904 | [x=1600] 3.41",
+          "",
+          "OCR plain text:",
+          "永辉欢迎您",
+          "品名/单价",
+          "数量",
+          "成交价",
+          "1234567890123 马铃薯(称重)",
+          "3.77",
+          "0.904",
+          "3.41",
+          "乐而雅卫生巾",
+          "7.50",
+          "2",
+          "15.00",
+          "应收 18.41",
+          "实收 18.41",
+        ].join("\n"),
+        warnings: [],
+      },
+      categories: [
+        { name: "购物", type: "expense" },
+        { name: "日用品", type: "expense" },
+      ],
+      ai,
+    });
+
+    expect(records[0]?.items).toEqual([
+      { name: "马铃薯(称重)", amount: 3.41, categoryName: "购物" },
+      { name: "乐而雅卫生巾", amount: 15, categoryName: "日用品" },
+    ]);
+    expect(records[0]?.warnings).not.toContain("部分视觉坐标不足以确认明细");
+    const itemRequests = requests.filter((request) => responseFormatName(request) === "import_items_chunk");
+    expect(itemRequests.map((request) => requestPayload(request).evidenceMode)).toEqual([
+      "visual_layout",
+      "plain_reading_order",
+    ]);
+    expect(String(requestPayload(itemRequests[1]).text)).toContain("马铃薯(称重)");
+  });
+
   it("splits long OCR imports into item chunks and deduplicates overlap", async () => {
     const { client, requests } = recordingAiClient({
       objectOutput: (request: TestObjectRequest) => {

@@ -152,14 +152,17 @@ const importItemsSystemPrompt = [
   "Return only JSON matching the supplied schema.",
   "Do not include reasoning, explanations, Markdown, or text outside the JSON object.",
   "If OCR visual rows are present, blocks on the same ROW share a visual line and smaller x values are farther left.",
+  "Receipt perspective can place a product name and its numeric columns on nearby ROWs. Associate neighboring rows until the next product line instead of requiring every value to share one ROW.",
   "Infer column meanings from headers for each receipt; never assume a fixed column order across receipts.",
+  "If evidenceMode is plain_reading_order, use the receipt headers and surrounding sequence to pair product names with their paid line amounts even when OCR emits each column on a separate line.",
   "Use receiptContext only to understand the merchant, date, and final receipt total. Never emit the receipt total as a line item.",
   "Only include explicit product/service lines that have a supported paid line amount in this chunk.",
   "Do not include merchant names, addresses, dates, receipt numbers, tax/subtotal/total/payment/change/discount summary lines, or card/payment lines as items.",
   "Never create placeholder items such as 其他商品, unknown item, or miscellaneous.",
   "Never use unmatched numeric columns, unit prices, quantities, summary totals, payment amounts, or discounts as item amounts.",
   "Prefer category names from the provided existing categories. If none fits and the item clearly implies a category, return a concise categoryName.",
-  "If the chunk contains product/service lines but line amounts are unreadable, omit only those uncertain lines and add a short warning.",
+  "Missing unit price or quantity does not invalidate an item when its paid line amount is otherwise clear from the amount column or surrounding sequence.",
+  "If the chunk contains product/service lines but line amounts are unreadable, omit only those uncertain lines and add a short Chinese warning.",
   "Do not invent unsupported records or unsupported amounts. Leave only truly unknowable fields empty and explain them in warnings.",
 ].join("\n");
 const chatSystemPrompt = [
@@ -393,13 +396,8 @@ export function createLedgerAiProvider(runtime: LedgerAiRuntime): AiProvider {
     async structureImport(input: AiContext): Promise<z.infer<typeof aiImportRecordSchema>[]> {
       const deadlineAt = Date.now() + (runtime.importPipelineTimeoutMs ?? defaultImportPipelineTimeoutMs);
       const budget = { remaining: importStructuredCallBudget };
-      const chunks = chunkOcrText(importItemsSourceText(input.text));
-      if (chunks.length > importChunkMaxCount) {
-        throw new LedgerAIError(
-          "input_too_large",
-          `OCR 文本过长，请拆分图片后重试。当前需要 ${chunks.length} 段，最多支持 ${importChunkMaxCount} 段。`,
-        );
-      }
+      const itemEvidence = importItemEvidence(input.text);
+      const chunks = checkedImportChunks(itemEvidence.primary.text);
 
       await notifyImportProgress(input, { stage: "ai_summary", text: "分析票据信息" });
       let summary: ImportReceiptSummary;
@@ -426,31 +424,32 @@ export function createLedgerAiProvider(runtime: LedgerAiRuntime): AiProvider {
         summary = fallbackImportReceiptSummary(input.text, input.categories ?? [], error);
       }
       summary = reconcileImportReceiptSummary(summary, input.text, input.categories ?? []);
-      const chunkResults: ImportChunkResult[] = [];
+      let chunkResults = await extractImportItemChunks({
+        generateStructured,
+        input,
+        chunks,
+        evidenceMode: itemEvidence.primary.mode,
+        receiptSummary: summary,
+        maxOutputTokens: runtime.importItemsMaxTokens ?? defaultImportItemsMaxTokens,
+        deadlineAt,
+        budget,
+        progressLabel: "提取明细",
+      });
 
-      for (const [index, chunk] of chunks.entries()) {
-        const chunkNumber = index + 1;
-        await notifyImportProgress(input, {
-          stage: "ai_items",
-          text: `提取明细 ${chunkNumber}/${chunks.length}`,
-          chunkIndex: chunkNumber,
-          chunkTotal: chunks.length,
+      if (shouldRetryImportItemExtraction(summary, chunkResults) && itemEvidence.fallback) {
+        const fallbackChunks = checkedImportChunks(itemEvidence.fallback.text);
+        const fallbackResults = await extractImportItemChunks({
+          generateStructured,
+          input,
+          chunks: fallbackChunks,
+          evidenceMode: itemEvidence.fallback.mode,
+          receiptSummary: summary,
+          maxOutputTokens: runtime.importItemsMaxTokens ?? defaultImportItemsMaxTokens,
+          deadlineAt,
+          budget,
+          progressLabel: "核对明细",
         });
-        chunkResults.push(
-          await extractImportItemsChunk({
-            generateStructured,
-            input,
-            chunk,
-            chunkIndex: index,
-            chunkNumber,
-            chunkTotal: chunks.length,
-            receiptSummary: summary,
-            depth: 0,
-            maxOutputTokens: runtime.importItemsMaxTokens ?? defaultImportItemsMaxTokens,
-            deadlineAt,
-            budget,
-          }),
-        );
+        chunkResults = selectBetterImportItemResults(summary, chunkResults, fallbackResults);
       }
 
       await notifyImportProgress(input, { stage: "ai_merging", text: "合并识别结果" });
@@ -468,6 +467,7 @@ type ImportChunkResult = {
   warnings: string[];
   items: ImportChunkItem[];
 };
+type ImportItemEvidenceMode = "visual_layout" | "plain_reading_order";
 type GenerateStructured = <TOutput>(input: {
   schemaName: string;
   schema: z.ZodType<TOutput>;
@@ -558,6 +558,17 @@ function chunkOcrText(text: string) {
     currentLength += line.length + (current.length > 1 ? 1 : 0);
   }
   if (current.length) chunks.push(current.join("\n"));
+  return chunks;
+}
+
+function checkedImportChunks(text: string) {
+  const chunks = chunkOcrText(text);
+  if (chunks.length > importChunkMaxCount) {
+    throw new LedgerAIError(
+      "input_too_large",
+      `OCR 文本过长，请拆分图片后重试。当前需要 ${chunks.length} 段，最多支持 ${importChunkMaxCount} 段。`,
+    );
+  }
   return chunks;
 }
 
@@ -674,7 +685,10 @@ function plainOcrText(text: string) {
   return markerIndex >= 0 ? text.slice(markerIndex + marker.length).trim() : text;
 }
 
-function importItemsSourceText(text: string) {
+function importItemEvidence(text: string): {
+  primary: { mode: ImportItemEvidenceMode; text: string };
+  fallback?: { mode: ImportItemEvidenceMode; text: string };
+} {
   const markdownMarker = "OCR markdown:";
   const plainMarker = "OCR plain text:";
   const markdownIndex = text.indexOf(markdownMarker);
@@ -682,10 +696,13 @@ function importItemsSourceText(text: string) {
   if (markdownIndex >= 0 && plainIndex > markdownIndex) {
     const visualText = text.slice(markdownIndex + markdownMarker.length, plainIndex).trim();
     if (visualText.includes("OCR visual rows derived from Google Vision bounding boxes.")) {
-      return visualText;
+      return {
+        primary: { mode: "visual_layout", text: visualText },
+        fallback: { mode: "plain_reading_order", text: plainOcrText(text) },
+      };
     }
   }
-  return plainOcrText(text);
+  return { primary: { mode: "plain_reading_order", text: plainOcrText(text) } };
 }
 
 function pad2(value: string) {
@@ -699,6 +716,7 @@ async function extractImportItemsChunk(input: {
   chunkIndex: number;
   chunkNumber: number;
   chunkTotal: number;
+  evidenceMode: ImportItemEvidenceMode;
   receiptSummary: ImportReceiptSummary;
   depth: number;
   maxOutputTokens: number;
@@ -724,6 +742,7 @@ async function extractImportItemsChunk(input: {
           },
           chunkIndex: input.chunkNumber,
           chunkTotal: input.chunkTotal,
+          evidenceMode: input.evidenceMode,
           text: input.chunk,
         },
         temperature: 0,
@@ -759,6 +778,46 @@ async function extractImportItemsChunk(input: {
     }
     throw normalizeImportChunkError(error);
   }
+}
+
+async function extractImportItemChunks(input: {
+  generateStructured: GenerateStructured;
+  input: AiContext;
+  chunks: string[];
+  evidenceMode: ImportItemEvidenceMode;
+  receiptSummary: ImportReceiptSummary;
+  maxOutputTokens: number;
+  deadlineAt: number;
+  budget: { remaining: number };
+  progressLabel: string;
+}) {
+  const results: ImportChunkResult[] = [];
+  for (const [index, chunk] of input.chunks.entries()) {
+    const chunkNumber = index + 1;
+    await notifyImportProgress(input.input, {
+      stage: "ai_items",
+      text: `${input.progressLabel} ${chunkNumber}/${input.chunks.length}`,
+      chunkIndex: chunkNumber,
+      chunkTotal: input.chunks.length,
+    });
+    results.push(
+      await extractImportItemsChunk({
+        generateStructured: input.generateStructured,
+        input: input.input,
+        chunk,
+        chunkIndex: index,
+        chunkNumber,
+        chunkTotal: input.chunks.length,
+        evidenceMode: input.evidenceMode,
+        receiptSummary: input.receiptSummary,
+        depth: 0,
+        maxOutputTokens: input.maxOutputTokens,
+        deadlineAt: input.deadlineAt,
+        budget: input.budget,
+      }),
+    );
+  }
+  return results;
 }
 
 function shouldSplitImportChunkError(error: unknown) {
@@ -828,6 +887,33 @@ function mergeImportChunks(summary: ImportReceiptSummary, chunks: ImportChunkRes
     items,
     confidence: Math.min(summary.confidence, ...chunks.map((chunk) => chunk.confidence)),
     warnings: uniqueWarnings(warnings),
+  };
+}
+
+function shouldRetryImportItemExtraction(summary: ImportReceiptSummary, chunks: ImportChunkResult[]) {
+  return importItemExtractionQuality(summary, chunks).amountCoverage < 0.8;
+}
+
+function selectBetterImportItemResults(
+  summary: ImportReceiptSummary,
+  primary: ImportChunkResult[],
+  fallback: ImportChunkResult[],
+) {
+  const primaryQuality = importItemExtractionQuality(summary, primary);
+  const fallbackQuality = importItemExtractionQuality(summary, fallback);
+  if (fallbackQuality.amountCoverage !== primaryQuality.amountCoverage) {
+    return fallbackQuality.amountCoverage > primaryQuality.amountCoverage ? fallback : primary;
+  }
+  return fallbackQuality.itemCount > primaryQuality.itemCount ? fallback : primary;
+}
+
+function importItemExtractionQuality(summary: ImportReceiptSummary, chunks: ImportChunkResult[]) {
+  const items = mergeImportChunks(summary, chunks).items;
+  const itemSum = items.reduce((total, item) => total + item.amount, 0);
+  const differenceRatio = summary.amount > 0 ? Math.abs(itemSum - summary.amount) / summary.amount : 1;
+  return {
+    amountCoverage: Math.max(0, 1 - Math.min(1, differenceRatio)),
+    itemCount: items.length,
   };
 }
 
