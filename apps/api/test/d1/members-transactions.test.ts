@@ -76,7 +76,7 @@ describe("D1 members and transaction integrity", () => {
     const admin = seedUser(context.db, { id: "user_admin", name: "Admin", plan: "pro" });
     const normal = seedUser(context.db, { id: "user_normal", name: "Normal", plan: "pro" });
     const book = seedBook(context.db, creator, { id: "book_shared" });
-    seedMember(context.db, book.id, admin, "admin");
+    const adminMembership = seedMember(context.db, book.id, admin, "admin");
     const normalMembership = seedMember(context.db, book.id, normal, "member");
 
     const creatorExit = await context.app.request(
@@ -96,6 +96,14 @@ describe("D1 members and transaction integrity", () => {
     );
     expect(removeCreator.status).toBe(404);
 
+    const removeSelfAsManager = await context.app.request(
+      `/books/${book.id}/members/${adminMembership.id}`,
+      { method: "DELETE", headers: authHeaders(admin) },
+      context.env,
+    );
+    expect(removeSelfAsManager.status).toBe(400);
+    expect(context.db.rows.book_members.find((row) => row.id === adminMembership.id)?.deleted_at).toBeFalsy();
+
     const removeNormal = await context.app.request(
       `/books/${book.id}/members/${normalMembership.id}`,
       { method: "DELETE", headers: authHeaders(admin) },
@@ -105,6 +113,61 @@ describe("D1 members and transaction integrity", () => {
     expect(
       context.db.rows.book_members.find((row) => row.id === normalMembership.id)?.deleted_by_user_id,
     ).toBe(admin.id);
+  });
+
+  it("allows managers to change normal member roles without allowing peers or the creator role to be changed", async () => {
+    const context = createD1TestApp();
+    const creator = seedUser(context.db, { id: "user_creator", name: "Creator", plan: "pro" });
+    const admin = seedUser(context.db, { id: "user_admin", name: "Admin", plan: "pro" });
+    const normal = seedUser(context.db, { id: "user_normal", name: "Normal", plan: "pro" });
+    const peer = seedUser(context.db, { id: "user_peer", name: "Peer", plan: "pro" });
+    const book = seedBook(context.db, creator, { id: "book_shared" });
+    seedMember(context.db, book.id, admin, "admin");
+    const normalMembership = seedMember(context.db, book.id, normal, "member");
+    seedMember(context.db, book.id, peer, "member");
+    const creatorMembership = context.db.rows.book_members.find(
+      (row) => row.book_id === book.id && row.user_id === creator.id,
+    );
+
+    const peerPromotion = await context.app.request(
+      `/books/${book.id}/members/${normalMembership.id}/role`,
+      {
+        method: "PATCH",
+        headers: { ...jsonHeaders, ...authHeaders(peer) },
+        body: JSON.stringify({ role: "admin" }),
+      },
+      context.env,
+    );
+    expect(peerPromotion.status).toBe(403);
+
+    const promote = await context.app.request(
+      `/books/${book.id}/members/${normalMembership.id}/role`,
+      {
+        method: "PATCH",
+        headers: { ...jsonHeaders, ...authHeaders(admin) },
+        body: JSON.stringify({ role: "admin" }),
+      },
+      context.env,
+    );
+    expect(promote.status).toBe(200);
+    expect(await promote.json<any>()).toMatchObject({ member: { id: normalMembership.id, role: "admin" } });
+    expect(
+      context.db.rows.book_members.find((row) => row.id === normalMembership.id)?.updated_by_user_id,
+    ).toBe(admin.id);
+
+    const changeCreator = await context.app.request(
+      `/books/${book.id}/members/${creatorMembership?.id}/role`,
+      {
+        method: "PATCH",
+        headers: { ...jsonHeaders, ...authHeaders(admin) },
+        body: JSON.stringify({ role: "member" }),
+      },
+      context.env,
+    );
+    expect(changeCreator.status).toBe(404);
+    expect(context.db.rows.book_members.find((row) => row.id === creatorMembership?.id)?.role).toBe(
+      "creator",
+    );
   });
 
   it("soft-deletes transactions with actor audit fields and hides them from normal lists", async () => {

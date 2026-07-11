@@ -13,6 +13,8 @@ type TableName =
   | "transaction_items"
   | "categories"
   | "invitations"
+  | "invitation_hidden_by"
+  | "user_invite_blocks"
   | "import_jobs"
   | "imported_records"
   | "image_ocr_usage"
@@ -35,6 +37,8 @@ const tableNames: TableName[] = [
   "transaction_items",
   "categories",
   "invitations",
+  "invitation_hidden_by",
+  "user_invite_blocks",
   "import_jobs",
   "imported_records",
   "image_ocr_usage",
@@ -198,6 +202,8 @@ function insertRow(db: TestD1Database, sql: string, values: unknown[]) {
     });
   }
   if (table === "books") row.income_enabled ??= 0;
+  if (table === "book_members") row.allow_admin_edit ??= 0;
+  if (table === "invitations") row.allow_admin_edit ??= null;
   if (/or ignore/i.test(sql)) {
     if (
       table === "book_members" &&
@@ -209,6 +215,24 @@ function insertRow(db: TestD1Database, sql: string, values: unknown[]) {
     if (
       table === "image_ocr_usage" &&
       db.rows.image_ocr_usage.some((item) => item.import_job_id === row.import_job_id)
+    )
+      return;
+    if (
+      table === "invitation_hidden_by" &&
+      db.rows.invitation_hidden_by.some(
+        (item) =>
+          !item.deleted_at && item.invitation_id === row.invitation_id && item.user_id === row.user_id,
+      )
+    )
+      return;
+    if (
+      table === "user_invite_blocks" &&
+      db.rows.user_invite_blocks.some(
+        (item) =>
+          !item.deleted_at &&
+          item.blocker_user_id === row.blocker_user_id &&
+          item.blocked_user_id === row.blocked_user_id,
+      )
     )
       return;
   }
@@ -252,6 +276,18 @@ function updateRows(db: TestD1Database, sql: string, values: unknown[]) {
     rows
       .filter((row) => row.id === values[3])
       .forEach((row) => set(row, { role: values[0], updated_at: values[1], updated_by_user_id: values[2] }));
+    return;
+  }
+  if (table === "book_members" && sql.includes("SET allow_admin_edit=?")) {
+    rows
+      .filter((row) => row.book_id === values[3] && row.user_id === values[4] && !row.deleted_at)
+      .forEach((row) =>
+        set(row, {
+          allow_admin_edit: values[0],
+          updated_at: values[1],
+          updated_by_user_id: values[2],
+        }),
+      );
     return;
   }
   if (table === "book_members" && sql.includes("WHERE id = ? AND book_id = ?")) {
@@ -342,15 +378,16 @@ function updateRows(db: TestD1Database, sql: string, values: unknown[]) {
   }
   if (table === "categories" && sql.includes("SET name=?")) {
     rows
-      .filter((row) => row.id === values[6])
+      .filter((row) => row.id === values[7])
       .forEach((row) =>
         set(row, {
           name: values[0],
           type: values[1],
           icon: values[2],
-          sort_order: values[3],
-          updated_at: values[4],
-          updated_by_user_id: values[5],
+          color: values[3],
+          sort_order: values[4],
+          updated_at: values[5],
+          updated_by_user_id: values[6],
         }),
       );
     return;
@@ -369,15 +406,53 @@ function updateRows(db: TestD1Database, sql: string, values: unknown[]) {
     return;
   }
   if (table === "invitations") {
+    if (sql.includes("SET status='expired'")) {
+      rows
+        .filter((row) => row.status === "pending" && row.expires_at < String(values[2]) && !row.deleted_at)
+        .forEach((row) =>
+          set(row, { status: "expired", updated_at: values[0], updated_by_user_id: values[1] }),
+        );
+      return;
+    }
+    if (sql.includes("SET status='accepted'")) {
+      rows
+        .filter((row) => row.id === values[4] && row.status === "pending" && !row.deleted_at)
+        .forEach((row) =>
+          set(row, {
+            status: "accepted",
+            invitee_user_id: values[0],
+            allow_admin_edit: values[1],
+            updated_at: values[2],
+            updated_by_user_id: values[3],
+          }),
+        );
+      return;
+    }
     rows
-      .filter((row) => row.id === values[5])
+      .filter((row) => row.id === values[6])
       .forEach((row) =>
         set(row, {
           status: values[0],
           invitee_user_id: values[1],
-          last_reminded_at: values[2],
-          updated_at: values[3],
-          updated_by_user_id: values[4],
+          allow_admin_edit: values[2],
+          last_reminded_at: values[3],
+          updated_at: values[4],
+          updated_by_user_id: values[5],
+        }),
+      );
+    return;
+  }
+  if (table === "user_invite_blocks" && sql.includes("SET deleted_at=?")) {
+    rows
+      .filter(
+        (row) => row.blocker_user_id === values[4] && row.blocked_user_id === values[5] && !row.deleted_at,
+      )
+      .forEach((row) =>
+        set(row, {
+          deleted_at: values[0],
+          deleted_by_user_id: values[1],
+          updated_at: values[2],
+          updated_by_user_id: values[3],
         }),
       );
     return;
@@ -764,11 +839,12 @@ function executeSelect(db: TestD1Database, sql: string, values: unknown[]) {
       }));
   if (lower.includes("from categories")) return selectSimple(db.rows.categories, lower, values, true);
   if (lower.includes("from invitations")) return selectInvitations(db, lower, values);
+  if (lower.includes("from users u")) return selectUsersWithPlan(db, lower, values);
+  if (lower.includes("from user_invite_blocks")) return selectInviteBlocks(db, lower, values);
   if (lower === "select email,phone from users where id = ?")
     return db.rows.users
       .filter((row) => row.id === values[0])
       .map((row) => ({ email: row.email, phone: row.phone }));
-  if (lower.includes("from users u")) return selectUsersWithPlan(db, lower, values);
   if (lower.includes("from users where id"))
     return db.rows.users
       .filter((row) => row.id === values[0])
@@ -873,6 +949,7 @@ function selectMembers(db: TestD1Database, lower: string, values: unknown[]) {
       userId: member.user_id,
       name: user?.name ?? member.user_id,
       role: member.role,
+      allowAdminEdit: Boolean(member.allow_admin_edit),
       joinedAt: member.joined_at,
     };
   });
@@ -934,12 +1011,22 @@ function selectInvitations(db: TestD1Database, lower: string, values: unknown[])
       (row) =>
         row.book_id === values[0] &&
         row.status === "pending" &&
-        ((values[1] !== "" && row.invitee_email === values[2]) ||
-          (values[3] !== "" && row.invitee_phone === values[4]) ||
-          (values[5] !== "" && row.invitee_user_id === values[6])),
+        row.expires_at > String(values[1]) &&
+        ((values[2] !== "" && row.invitee_email === values[3]) ||
+          (values[4] !== "" && row.invitee_phone === values[5]) ||
+          (values[6] !== "" && row.invitee_user_id === values[7])),
     );
-  } else if (lower.includes("where book_id=?")) rows = rows.filter((row) => row.book_id === values[0]);
+  } else if (lower.includes("where book_id=?") || lower.includes("where i.book_id=?"))
+    rows = rows.filter((row) => row.book_id === values[0]);
   else if (lower.includes("where id=?")) rows = rows.filter((row) => row.id === values[0]);
+  else if (lower.includes("i.inviter_user_id=?"))
+    rows = rows.filter(
+      (row) =>
+        row.inviter_user_id === values[0] ||
+        row.invitee_user_id === values[1] ||
+        (row.invitee_email && row.invitee_email === values[2]) ||
+        (row.invitee_phone && row.invitee_phone === values[3]),
+    );
   else if (lower.includes("invitee_user_id=?"))
     rows = rows.filter(
       (row) =>
@@ -947,10 +1034,78 @@ function selectInvitations(db: TestD1Database, lower: string, values: unknown[])
         (row.invitee_email && row.invitee_email === values[1]) ||
         (row.invitee_phone && row.invitee_phone === values[2]),
     );
-  return rows.map(invitationRow);
+  if (lower.includes("invitation_hidden_by")) {
+    const viewerUserId = values[values.length - 1];
+    const hidden = new Set(
+      db.rows.invitation_hidden_by
+        .filter((row) => row.user_id === viewerUserId && !row.deleted_at)
+        .map((row) => row.invitation_id),
+    );
+    rows = rows.filter((row) => !hidden.has(row.id));
+  }
+  return rows.map((row) => {
+    const result = invitationRow(row);
+    if (!lower.includes("join books")) return result;
+    const book = db.rows.books.find((item) => item.id === row.book_id);
+    const inviter = db.rows.users.find((item) => item.id === row.inviter_user_id);
+    const invitee = db.rows.users.find((item) => item.id === row.invitee_user_id);
+    return {
+      ...result,
+      bookName: book?.name,
+      bookCurrency: book?.currency,
+      inviterId: inviter?.id,
+      inviterName: inviter?.name,
+      inviterEmail: inviter?.email,
+      inviterAvatarUrl: inviter?.avatar_url,
+      inviterPlan: subscriptionPlan(db, inviter?.id),
+      inviteeId: invitee?.id,
+      inviteeName: invitee?.name,
+      inviteeEmailDisplay: invitee?.email,
+      inviteeAvatarUrl: invitee?.avatar_url,
+      inviteePlan: subscriptionPlan(db, invitee?.id),
+    };
+  });
+}
+
+function subscriptionPlan(db: TestD1Database, userId?: string) {
+  return db.rows.subscriptions.find(
+    (row) => row.user_id === userId && row.status === "active" && !row.deleted_at,
+  )?.plan;
 }
 
 function selectUsersWithPlan(db: TestD1Database, lower: string, values: unknown[]) {
+  if (lower.includes("u.id != ?")) {
+    const viewerUserId = values[0];
+    const normalized = String(values[1] ?? "");
+    return db.rows.users
+      .filter((user) => !user.deleted_at && user.id !== viewerUserId)
+      .filter(
+        (user) =>
+          String(user.name).toLowerCase() === normalized ||
+          String(user.email ?? "").toLowerCase() === normalized ||
+          String(user.phone ?? "").toLowerCase() === normalized,
+      )
+      .filter(
+        (user) =>
+          !db.rows.user_invite_blocks.some(
+            (block) =>
+              !block.deleted_at &&
+              block.blocker_user_id === user.id &&
+              block.blocked_user_id === viewerUserId,
+          ),
+      )
+      .slice(0, 1)
+      .map((user) => ({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        avatarUrl: user.avatar_url,
+        plan:
+          db.rows.subscriptions.find(
+            (row) => row.user_id === user.id && row.status === "active" && !row.deleted_at,
+          )?.plan ?? "free",
+      }));
+  }
   const value = values[0];
   const users = db.rows.users.filter((user) => !user.deleted_at);
   const matched =
@@ -975,6 +1130,33 @@ function selectUsersWithPlan(db: TestD1Database, lower: string, values: unknown[
     plan:
       db.rows.subscriptions.find((row) => row.user_id === user.id && row.status === "active")?.plan ?? "free",
   }));
+}
+
+function selectInviteBlocks(db: TestD1Database, lower: string, values: unknown[]) {
+  const rows = db.rows.user_invite_blocks.filter((row) => !row.deleted_at);
+  if (!lower.includes("join users")) {
+    return rows
+      .filter((row) => row.blocker_user_id === values[0] && row.blocked_user_id === values[1])
+      .slice(0, 1)
+      .map((row) => ({ id: row.id }));
+  }
+  return rows
+    .filter((row) => row.blocker_user_id === values[0])
+    .map((row) => {
+      const user = db.rows.users.find((item) => item.id === row.blocked_user_id && !item.deleted_at);
+      return {
+        id: row.id,
+        createdAt: row.created_at,
+        userId: user?.id,
+        name: user?.name,
+        email: user?.email,
+        avatarUrl: user?.avatar_url,
+        plan:
+          db.rows.subscriptions.find(
+            (item) => item.user_id === user?.id && item.status === "active" && !item.deleted_at,
+          )?.plan ?? "free",
+      };
+    });
 }
 
 function selectImportJobs(db: TestD1Database, lower: string, values: unknown[]) {
@@ -1135,6 +1317,10 @@ function invitationRow(row: Row) {
     inviteePhone: row.invitee_phone,
     inviteeUserId: row.invitee_user_id,
     role: row.role,
+    allowAdminEdit:
+      row.allow_admin_edit === null || row.allow_admin_edit === undefined
+        ? undefined
+        : Boolean(row.allow_admin_edit),
     status: row.status,
     expiresAt: row.expires_at,
     lastRemindedAt: row.last_reminded_at,
@@ -1335,14 +1521,24 @@ export function seedMember(
   bookId: string,
   user: LedgerUser,
   role: "creator" | "admin" | "member" = "member",
+  allowAdminEdit = false,
 ) {
   const timestamp = now();
-  const member = { id: id("member"), bookId, userId: user.id, name: user.name, role, joinedAt: timestamp };
+  const member = {
+    id: id("member"),
+    bookId,
+    userId: user.id,
+    name: user.name,
+    role,
+    allowAdminEdit,
+    joinedAt: timestamp,
+  };
   db.rows.book_members.push({
     id: member.id,
     book_id: bookId,
     user_id: user.id,
     role,
+    allow_admin_edit: allowAdminEdit ? 1 : 0,
     joined_at: timestamp,
     created_at: timestamp,
     updated_at: timestamp,

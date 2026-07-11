@@ -16,7 +16,13 @@ describe("D1 user categories", () => {
       {
         method: "POST",
         headers: { ...jsonHeaders, ...authHeaders(owner) },
-        body: JSON.stringify({ name: "餐饮", type: "expense", icon: "utensils", sortOrder: 0 }),
+        body: JSON.stringify({
+          name: "餐饮",
+          type: "expense",
+          icon: "utensils",
+          color: "#3B82F6",
+          sortOrder: 0,
+        }),
       },
       context.env,
     );
@@ -34,6 +40,25 @@ describe("D1 user categories", () => {
     expect(ownerCategory.status).toBe(201);
     expect(memberCategory.status).toBe(201);
     expect(ownerCategoryBody.category.id).not.toBe(memberCategoryBody.category.id);
+    expect(ownerCategoryBody.category.color).toBe("#3B82F6");
+
+    const recoloredCategory = await context.app.request(
+      `/categories/${ownerCategoryBody.category.id}`,
+      {
+        method: "PATCH",
+        headers: { ...jsonHeaders, ...authHeaders(owner) },
+        body: JSON.stringify({
+          name: "餐饮",
+          type: "expense",
+          icon: "utensils",
+          color: "#22A06B",
+          sortOrder: 0,
+        }),
+      },
+      context.env,
+    );
+    expect(recoloredCategory.status).toBe(200);
+    expect((await recoloredCategory.json<any>()).category.color).toBe("#22A06B");
 
     const secondBook = seedBook(context.db, owner, { id: "book_second" });
     const categoriesAfterSecondBook = await context.app.request(

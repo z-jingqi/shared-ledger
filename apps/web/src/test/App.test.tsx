@@ -13,8 +13,14 @@ let authMeCalls = 0;
 let loginError = "";
 let bookList: Array<{ id: string; name: string; currency: string; incomeEnabled: boolean }> = [];
 let transactionsByBook: Record<string, LedgerTransaction[]> = {};
-let categories: Array<{ id: string; name: string; type: "expense" | "income" }> = [];
+let categories: Array<{
+  id: string;
+  name: string;
+  type: "expense" | "income";
+  color?: string;
+}> = [];
 let transactionError = "";
+let transactionDetailPermissions = { canEdit: true, canDelete: true };
 let transactionRequests: Array<{
   path: string;
   method: string;
@@ -80,6 +86,7 @@ let mockInvitations: Array<{
   inviterUserId: string;
   inviteeUserId?: string;
   role: "admin" | "member";
+  allowAdminEdit?: boolean;
   status: string;
   expiresAt: string;
   createdAt: string;
@@ -88,6 +95,13 @@ let mockInvitations: Array<{
   book: { id: string; name: string; currency: string };
   inviter: { id: string; name: string; email?: string; plan?: "free" | "pro" };
   invitee?: { id: string; name: string; email?: string; plan?: "free" | "pro" };
+}> = [];
+let mockMembers: Array<{
+  id: string;
+  userId: string;
+  name: string;
+  role: "creator" | "admin" | "member";
+  allowAdminEdit: boolean;
 }> = [];
 let mockInviteBlocks: Array<{
   id: string;
@@ -312,6 +326,7 @@ describe("shared ledger mobile UI", () => {
       { id: "cat_hotel", name: "住宿", type: "expense" },
     ];
     transactionError = "";
+    transactionDetailPermissions = { canEdit: true, canDelete: true };
     transactionRequests = [];
     bookMutationRequests = [];
     importBatchRequests = [];
@@ -331,6 +346,15 @@ describe("shared ledger mobile UI", () => {
       { id: "user_inviter", name: "邀请人", email: "inviter@example.com", plan: "pro" },
     ];
     mockInvitations = [];
+    mockMembers = [
+      {
+        id: "member_test",
+        userId: "user_test",
+        name: "测试用户",
+        role: "creator",
+        allowAdminEdit: false,
+      },
+    ];
     mockInviteBlocks = [];
     userSearchRequests = [];
     window.history.pushState({}, "", "/");
@@ -783,11 +807,16 @@ describe("shared ledger mobile UI", () => {
         }
         if (path.includes("/me/categories")) {
           if (method === "POST") {
-            const body = JSON.parse(bodyText ?? "{}") as { name?: string; type?: "expense" | "income" };
+            const body = JSON.parse(bodyText ?? "{}") as {
+              name?: string;
+              type?: "expense" | "income";
+              color?: string;
+            };
             const category = {
               id: `cat_${categories.length + 1}`,
               name: body.name ?? "",
               type: body.type ?? "expense",
+              color: body.color,
             };
             categories = [...categories, category];
             return Promise.resolve(json({ category }));
@@ -797,7 +826,11 @@ describe("shared ledger mobile UI", () => {
         if (path.startsWith("/categories/")) {
           const categoryId = path.split("/").pop();
           if (method === "PATCH") {
-            const body = JSON.parse(bodyText ?? "{}") as { name?: string; type?: "expense" | "income" };
+            const body = JSON.parse(bodyText ?? "{}") as {
+              name?: string;
+              type?: "expense" | "income";
+              color?: string;
+            };
             categories = categories.map((category) =>
               category.id === categoryId ? { ...category, ...body } : category,
             );
@@ -852,10 +885,27 @@ describe("shared ledger mobile UI", () => {
         );
         if (invitationActionMatch) {
           const [, invitationId, action] = invitationActionMatch;
-          const body = JSON.parse(bodyText ?? "{}") as { blockInviter?: boolean };
+          const body = JSON.parse(bodyText ?? "{}") as {
+            blockInviter?: boolean;
+            allowAdminEdit?: boolean;
+          };
           const invitation = mockInvitations.find((item) => item.id === invitationId);
           if (!invitation) return Promise.resolve(errorJson(404, "邀请不存在"));
-          if (action === "accept") invitation.status = "accepted";
+          if (action === "accept") {
+            invitation.status = "accepted";
+            invitation.allowAdminEdit = body.allowAdminEdit ?? false;
+            if (invitation.book && !bookList.some((book) => book.id === invitation.bookId)) {
+              bookList = [
+                ...bookList,
+                {
+                  id: invitation.book.id,
+                  name: invitation.book.name,
+                  currency: invitation.book.currency,
+                  incomeEnabled: true,
+                },
+              ];
+            }
+          }
           if (action === "decline") {
             invitation.status = "declined";
             if (body.blockInviter && invitation.inviter)
@@ -882,10 +932,18 @@ describe("shared ledger mobile UI", () => {
         }
         const bookMembersMatch = pathname.match(/^\/books\/([^/]+)\/members$/);
         if (bookMembersMatch && method === "GET") {
+          return Promise.resolve(json({ members: mockMembers }));
+        }
+        const memberPreferencesMatch = pathname.match(/^\/books\/([^/]+)\/members\/me\/preferences$/);
+        if (memberPreferencesMatch && method === "PATCH") {
+          const body = JSON.parse(bodyText ?? "{}") as { allowAdminEdit?: boolean };
+          mockMembers = mockMembers.map((member) =>
+            member.userId === "user_test"
+              ? { ...member, allowAdminEdit: body.allowAdminEdit ?? false }
+              : member,
+          );
           return Promise.resolve(
-            json({
-              members: [{ id: "member_test", userId: "user_test", name: "测试用户", role: "creator" }],
-            }),
+            json({ member: mockMembers.find((member) => member.userId === "user_test") }),
           );
         }
         const bookInvitationsMatch = pathname.match(/^\/books\/([^/]+)\/invitations$/);
@@ -951,8 +1009,10 @@ describe("shared ledger mobile UI", () => {
                 note: "餐饮",
                 occurredAt: "2026-06-01",
                 categoryId: "cat_food",
+                createdByUserId: "user_test",
                 items: [{ id: "item_milk", name: "牛奶", amount: 100 }],
               },
+              permissions: transactionDetailPermissions,
             }),
           );
         if (path.includes("/books/book_test/imports/batch")) {
@@ -1622,6 +1682,34 @@ describe("shared ledger mobile UI", () => {
     expect(screen.queryByText("导入与识别")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /切换 \/ 管理账本/ })).not.toBeInTheDocument();
   });
+  it("manages categories with names and colors without category icons or personal tips", async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, "", "/settings/categories?bookId=book_test");
+    const { container } = render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "分类管理" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "支出" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByText("共 2 个")).toBeInTheDocument();
+    expect(screen.queryByText(/个人分类/)).not.toBeInTheDocument();
+    expect(container.querySelector(".ios-category-row svg")).toBeNull();
+    expect(container.querySelector(".ios-category-page-footer svg")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "新增支出分类" }));
+    const editor = await screen.findByRole("dialog", { name: "新增分类" });
+    expect(within(editor).queryByText(/图标/)).not.toBeInTheDocument();
+    expect(within(editor).getAllByRole("button", { name: /选择颜色/ })).toHaveLength(8);
+    await user.type(within(editor).getByLabelText("分类名称"), "医疗");
+    await user.click(within(editor).getByRole("button", { name: "选择颜色 #3B82F6" }));
+    await user.click(within(editor).getByRole("button", { name: "保存分类" }));
+
+    expect(await screen.findByText("医疗")).toBeInTheDocument();
+    expect(screen.getByText("共 3 个")).toBeInTheDocument();
+    expect(categories.find((category) => category.name === "医疗")?.color).toBe("#3B82F6");
+
+    await user.click(screen.getByRole("tab", { name: "收入" }));
+    expect(screen.getByText("工资")).toBeInTheDocument();
+    expect(screen.getByText("共 1 个")).toBeInTheDocument();
+  });
   it("searches users explicitly before sending an invitation and never renders user ids", async () => {
     const user = userEvent.setup();
     window.history.pushState({}, "", "/members?bookId=book_test");
@@ -1687,6 +1775,88 @@ describe("shared ledger mobile UI", () => {
     await user.click(screen.getByRole("button", { name: "屏蔽" }));
     expect(await screen.findByText("对方无法搜索到你或邀请你")).toBeInTheDocument();
   });
+  it("asks for record editing consent before accepting an invitation", async () => {
+    const user = userEvent.setup();
+    bookList = bookList.filter((book) => book.id !== "book_b");
+    mockInvitations = [
+      {
+        id: "invite_accept",
+        bookId: "book_b",
+        inviterUserId: "user_inviter",
+        inviteeUserId: "user_test",
+        role: "member",
+        status: "pending",
+        expiresAt: "2026-07-18T00:00:00.000Z",
+        createdAt: "2026-07-11T00:00:00.000Z",
+        updatedAt: "2026-07-11T00:00:00.000Z",
+        direction: "received",
+        book: mockBookSummary("book_b"),
+        inviter: mockUserSummary("user_inviter"),
+        invitee: mockUserSummary("user_test"),
+      },
+    ];
+    window.history.pushState({}, "", "/invitations?bookId=book_test");
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "接受" }));
+    const sheet = await screen.findByRole("dialog", { name: "接受邀请" });
+    const privateChoice = within(sheet).getByRole("button", { name: /仅我可以编辑/ });
+    const managerChoice = within(sheet).getByRole("button", { name: /允许管理员协助编辑/ });
+    expect(privateChoice).toHaveAttribute("aria-pressed", "true");
+    expect(managerChoice).toHaveAttribute("aria-pressed", "false");
+    expect(mockInvitations[0].status).toBe("pending");
+
+    await user.click(managerChoice);
+    expect(managerChoice).toHaveAttribute("aria-pressed", "true");
+    await user.click(within(sheet).getByRole("button", { name: "接受并加入" }));
+
+    await waitFor(() => expect(mockInvitations[0].status).toBe("accepted"));
+    expect(mockInvitations[0].allowAdminEdit).toBe(true);
+    await waitFor(() => expect(window.location.pathname).toBe("/home"));
+    expect(window.location.search).toContain("bookId=book_b");
+  });
+  it("lets members change consent while preventing managers from removing themselves", async () => {
+    const user = userEvent.setup();
+    mockMembers = [
+      {
+        id: "member_creator",
+        userId: "user_inviter",
+        name: "邀请人",
+        role: "creator",
+        allowAdminEdit: false,
+      },
+      {
+        id: "member_test",
+        userId: "user_test",
+        name: "测试用户",
+        role: "admin",
+        allowAdminEdit: false,
+      },
+      {
+        id: "member_friend",
+        userId: "user_friend",
+        name: "Friend",
+        role: "member",
+        allowAdminEdit: false,
+      },
+    ];
+    window.history.pushState({}, "", "/members?bookId=book_test");
+    render(<App />);
+
+    const consent = await screen.findByRole("switch", { name: "允许管理员协助编辑" });
+    expect(consent).toHaveAttribute("aria-checked", "false");
+    expect(screen.getAllByRole("button", { name: "移除成员" })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "退出该账本" })).toBeInTheDocument();
+
+    await user.click(consent);
+    await waitFor(() => expect(consent).toHaveAttribute("aria-checked", "true"));
+    expect(mockMembers.find((member) => member.userId === "user_test")?.allowAdminEdit).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: "退出该账本" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "退出账本" });
+    expect(dialog).toHaveTextContent("历史记录会保留并变为只读");
+    expect(dialog).toHaveTextContent("管理员也不能再修改");
+  });
   it("counts sent pending or declined invitations as badge items until the invitation page is viewed", async () => {
     const user = userEvent.setup();
     mockInvitations = [
@@ -1720,6 +1890,9 @@ describe("shared ledger mobile UI", () => {
 
     await user.click(screen.getByRole("link", { name: /邀请记录/ }));
     expect(await screen.findByRole("heading", { name: "邀请记录" })).toBeInTheDocument();
+    expect(screen.getByText("暂无收到的邀请")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "历史" }));
+    expect(await screen.findByText("Friend")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "返回" }));
     expect(await screen.findByRole("heading", { name: "成员管理" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "返回" }));
@@ -2629,6 +2802,20 @@ describe("shared ledger mobile UI", () => {
     expect(await screen.findByText("保存失败")).toBeInTheDocument();
     expect(screen.getByText("45")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("添加备注…")).toHaveValue("不能丢");
+  });
+  it("renders another member's transaction as read-only when editing is not authorized", async () => {
+    const user = userEvent.setup();
+    transactionDetailPermissions = { canEdit: false, canDelete: false };
+    window.history.pushState({}, "", "/records?bookId=book_test");
+    const { container } = render(<App />);
+
+    await waitFor(() => expect(recordRow(container, "tx_home")).toBeInTheDocument());
+    await user.click(recordRow(container, "tx_home")!);
+    const detail = await screen.findByRole("dialog", { name: "交易详情" });
+
+    expect(within(detail).getByText("此记录由其他成员创建，你可以查看但不能编辑。")).toBeInTheDocument();
+    expect(within(detail).queryByRole("button", { name: "编辑" })).not.toBeInTheDocument();
+    expect(within(detail).queryByRole("button", { name: "删除记录" })).not.toBeInTheDocument();
   });
   it("does not show save and continue when editing a record", async () => {
     const user = userEvent.setup();

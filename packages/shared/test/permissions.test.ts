@@ -21,6 +21,10 @@ describe("permissions and transaction constraints", () => {
   it("limits transaction mutation and allows AI for all plans", () => {
     expect(canMutateTransaction("u1", "u1")).toBe(true);
     expect(canMutateTransaction("u2", "u1")).toBe(false);
+    expect(canMutateTransaction("creator", "member", "creator", true)).toBe(true);
+    expect(canMutateTransaction("admin", "member", "admin", true)).toBe(true);
+    expect(canMutateTransaction("peer", "member", "member", true)).toBe(false);
+    expect(canMutateTransaction("admin", "member", "admin", false)).toBe(false);
     expect(canUseAi("free")).toBe(true);
     expect(canUseAi("pro")).toBe(true);
   });

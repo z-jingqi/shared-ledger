@@ -1,8 +1,8 @@
-import { canInvite, inviteSchema } from "@shared-ledger/shared";
+import { acceptInvitationSchema, canInvite, inviteSchema } from "@shared-ledger/shared";
 import type { Hono } from "hono";
 import { jsonError, parseJson } from "../lib/http";
 import { D1LedgerRepository, type InvitationDetail } from "../repository";
-import { bookRole, requireMember, requireUser } from "../services/access";
+import { bookRole, requireBookManager, requireUser } from "../services/access";
 import type { Invitation, MemoryLedgerStore } from "../store";
 import type { Env, LedgerUser } from "../types";
 
@@ -10,6 +10,7 @@ export function registerInvitationRoutes(app: Hono<{ Bindings: Env }>, store?: M
   app.get("/invitations", async (context) => {
     const user = await requireUser(context, store);
     if (user instanceof Response) return user;
+    await expireInvitations(context.env.DB, store);
     const invitations = context.env.DB
       ? await new D1LedgerRepository(context.env.DB).listInvitationDetailsForUser(user.id)
       : listMemoryInvitationDetailsForUser(store, user);
@@ -19,6 +20,7 @@ export function registerInvitationRoutes(app: Hono<{ Bindings: Env }>, store?: M
   app.get("/invitations/received", async (context) => {
     const user = await requireUser(context, store);
     if (user instanceof Response) return user;
+    await expireInvitations(context.env.DB, store);
     const invitations = context.env.DB
       ? (await new D1LedgerRepository(context.env.DB).listInvitationDetailsForUser(user.id)).filter(
           (item) => item.direction === "received",
@@ -31,8 +33,9 @@ export function registerInvitationRoutes(app: Hono<{ Bindings: Env }>, store?: M
     const bookId = context.req.param("bookId");
     const user = await requireUser(context, store);
     if (user instanceof Response) return user;
-    const denied = await requireMember(context, store, bookId, user);
+    const denied = await requireBookManager(context, store, bookId, user);
     if (denied) return denied;
+    await expireInvitations(context.env.DB, store);
     const invitations = context.env.DB
       ? await new D1LedgerRepository(context.env.DB).listInvitationDetailsForBook(bookId, user.id)
       : listMemoryInvitationDetailsForBook(store, bookId, user);
@@ -45,6 +48,7 @@ export function registerInvitationRoutes(app: Hono<{ Bindings: Env }>, store?: M
     if (user instanceof Response) return user;
     if (!canInvite((await bookRole(context, store, bookId, user)) ?? "member"))
       return jsonError(context, "没有邀请成员的权限", 403);
+    await expireInvitations(context.env.DB, store);
     const body = await parseJson(context, inviteSchema);
     if (!body) return jsonError(context, "请先搜索并选择要邀请的用户", 400);
 
@@ -94,33 +98,40 @@ export function registerInvitationRoutes(app: Hono<{ Bindings: Env }>, store?: M
     const user = await requireUser(context, store);
     if (user instanceof Response) return user;
     const repository = context.env.DB ? new D1LedgerRepository(context.env.DB) : undefined;
+    await expireInvitations(context.env.DB, store);
     const invitation = repository
       ? await repository.getInvitation(context.req.param("id"))
       : store?.invitations.find(
           (item) => item.id === context.req.param("id") && !isMemoryInvitationDeleted(item),
         );
-    if (!invitation || invitation.status !== "pending" || new Date(invitation.expiresAt) < new Date())
-      return jsonError(context, "邀请不可接受", 400);
+    if (!invitation || invitation.status !== "pending") return jsonError(context, "邀请不可接受", 400);
     if (!invitationBelongsToUser(invitation, user)) return jsonError(context, "这不是发给你的邀请", 403);
+    const acceptanceResult = acceptInvitationSchema.safeParse(
+      await optionalJson<Record<string, unknown>>(context),
+    );
+    if (!acceptanceResult.success) return jsonError(context, "记录编辑权限设置不合法", 400);
+    const acceptance = acceptanceResult.data;
+    const existingRole = repository
+      ? await repository.role(invitation.bookId, user.id)
+      : store?.role(invitation.bookId, user.id);
+    if (existingRole) return jsonError(context, "你已经是该账本成员", 409);
     const updated = repository
-      ? await repository.updateInvitation(
-          invitation.id,
-          { status: "accepted", inviteeUserId: user.id },
-          user.id,
-        )
+      ? await repository.acceptInvitation(invitation.id, user.id, acceptance.allowAdminEdit, user.id)
       : Object.assign(invitation, {
           status: "accepted" as const,
           inviteeUserId: user.id,
+          allowAdminEdit: acceptance.allowAdminEdit,
           updatedAt: new Date().toISOString(),
         });
-    if (repository) await repository.addMember(invitation.bookId, user.id, invitation.role, user.id);
-    else if (store && !store.role(invitation.bookId, user.id))
+    if (!updated) return jsonError(context, "邀请不可接受", 400);
+    if (!repository && store && !store.role(invitation.bookId, user.id))
       store.members.push({
         id: crypto.randomUUID(),
         bookId: invitation.bookId,
         userId: user.id,
         name: user.name,
         role: invitation.role,
+        allowAdminEdit: acceptance.allowAdminEdit,
         joinedAt: new Date().toISOString(),
       });
     return context.json({ invitation: updated });
@@ -130,6 +141,7 @@ export function registerInvitationRoutes(app: Hono<{ Bindings: Env }>, store?: M
     const user = await requireUser(context, store);
     if (user instanceof Response) return user;
     const repository = context.env.DB ? new D1LedgerRepository(context.env.DB) : undefined;
+    await expireInvitations(context.env.DB, store);
     const invitation = repository
       ? await repository.getInvitation(context.req.param("id"))
       : store?.invitations.find(
@@ -152,6 +164,7 @@ export function registerInvitationRoutes(app: Hono<{ Bindings: Env }>, store?: M
     const user = await requireUser(context, store);
     if (user instanceof Response) return user;
     const repository = context.env.DB ? new D1LedgerRepository(context.env.DB) : undefined;
+    await expireInvitations(context.env.DB, store);
     const invitation = repository
       ? await repository.getInvitation(context.req.param("id"))
       : store?.invitations.find(
@@ -169,6 +182,7 @@ export function registerInvitationRoutes(app: Hono<{ Bindings: Env }>, store?: M
     const user = await requireUser(context, store);
     if (user instanceof Response) return user;
     const repository = context.env.DB ? new D1LedgerRepository(context.env.DB) : undefined;
+    await expireInvitations(context.env.DB, store);
     const invitation = repository
       ? await repository.getInvitation(context.req.param("id"))
       : store?.invitations.find(
@@ -178,9 +192,11 @@ export function registerInvitationRoutes(app: Hono<{ Bindings: Env }>, store?: M
     const canDelete = invitation.inviterUserId === user.id || invitationBelongsToUser(invitation, user);
     if (!canDelete) return jsonError(context, "没有删除该邀请的权限", 403);
     if (invitation.status === "pending") return jsonError(context, "进行中的邀请不能删除", 400);
-    if (repository) await repository.deleteInvitation(invitation.id, user.id);
-    else
-      Object.assign(invitation, { deletedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    if (repository) await repository.hideInvitationForUser(invitation.id, user.id);
+    else {
+      invitation.hiddenByUserIds ??= [];
+      if (!invitation.hiddenByUserIds.includes(user.id)) invitation.hiddenByUserIds.push(user.id);
+    }
     return context.body(null, 204);
   });
 
@@ -188,6 +204,7 @@ export function registerInvitationRoutes(app: Hono<{ Bindings: Env }>, store?: M
     const user = await requireUser(context, store);
     if (user instanceof Response) return user;
     const repository = context.env.DB ? new D1LedgerRepository(context.env.DB) : undefined;
+    await expireInvitations(context.env.DB, store);
     const invitation = repository
       ? await repository.getInvitation(context.req.param("id"))
       : store?.invitations.find(
@@ -226,6 +243,7 @@ function listMemoryInvitationDetailsForUser(store: MemoryLedgerStore | undefined
   return (
     store?.invitations
       .filter((item) => !isMemoryInvitationDeleted(item))
+      .filter((item) => !item.hiddenByUserIds?.includes(user.id))
       .filter((item) => item.inviterUserId === user.id || invitationBelongsToUser(item, user))
       .map((item) => mapMemoryInvitationDetail(store, item, user.id))
       .filter((item): item is InvitationDetail => Boolean(item)) ?? []
@@ -240,6 +258,7 @@ function listMemoryInvitationDetailsForBook(
   return (
     store?.invitations
       .filter((item) => item.bookId === bookId && !isMemoryInvitationDeleted(item))
+      .filter((item) => !item.hiddenByUserIds?.includes(user.id))
       .map((item) => mapMemoryInvitationDetail(store, item, user.id))
       .filter((item): item is InvitationDetail => Boolean(item)) ?? []
   );
@@ -335,4 +354,18 @@ function sameValue(left?: string, right?: string) {
 
 function normalizePhone(value?: string) {
   return value?.trim().replace(/[\s-]/g, "") || undefined;
+}
+
+async function expireInvitations(db: D1Database | undefined, store?: MemoryLedgerStore) {
+  if (db) {
+    await new D1LedgerRepository(db).expirePendingInvitations();
+    return;
+  }
+  const timestamp = new Date().toISOString();
+  for (const invitation of store?.invitations ?? []) {
+    if (invitation.status === "pending" && invitation.expiresAt < timestamp) {
+      invitation.status = "expired";
+      invitation.updatedAt = timestamp;
+    }
+  }
 }

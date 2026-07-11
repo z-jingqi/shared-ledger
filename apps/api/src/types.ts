@@ -54,6 +54,7 @@ export type Member = {
   userId: string;
   name: string;
   role: "creator" | "admin" | "member";
+  allowAdminEdit: boolean;
   joinedAt: string;
 };
 export type Transaction = {

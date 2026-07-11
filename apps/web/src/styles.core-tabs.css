@@ -2084,3 +2084,219 @@
   display: flex;
   gap: 10px;
 }
+
+/* Category management */
+.ios-category-page-scroll {
+  flex: 1;
+  min-height: 0;
+  padding: 8px 16px 24px;
+}
+
+.ios-category-type-tabs {
+  min-height: 44px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border-radius: 15px;
+  background: #e9edf2;
+}
+
+.ios-category-type-tabs.compact {
+  min-height: 40px;
+  margin-bottom: 20px;
+}
+
+.ios-category-type-tabs button {
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: #778294;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 800;
+  transition:
+    background 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.ios-category-type-tabs button.active {
+  background: #fff;
+  color: var(--ios-accent);
+  box-shadow: 0 2px 9px rgba(29, 38, 54, 0.08);
+}
+
+.ios-category-section-heading {
+  min-height: 48px;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  padding: 0 4px 10px;
+}
+
+.ios-category-section-heading h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 850;
+}
+
+.ios-category-section-heading span {
+  color: var(--ios-muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.ios-category-surface {
+  overflow: visible;
+  border: 1px solid #e8ebf0;
+  border-radius: 20px;
+  background: #fff;
+}
+
+.ios-category-row {
+  position: relative;
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  margin: 0 14px;
+  border-bottom: 1px solid #eef1f5;
+}
+
+.ios-category-row:last-child {
+  border-bottom: 0;
+}
+
+.ios-category-color-mark {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 4px #f0f2f5;
+}
+
+.ios-category-row b {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ios-text);
+  font-size: 15px;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ios-category-text-action {
+  flex: 0 0 auto;
+  border: 0;
+  padding: 8px 4px;
+  background: transparent;
+  color: #667286;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.ios-category-text-action.danger {
+  color: var(--ios-danger);
+}
+
+.ios-category-text-action:focus-visible {
+  border-radius: 8px;
+  outline: 2px solid color-mix(in srgb, var(--ios-accent) 45%, transparent);
+  outline-offset: 1px;
+}
+
+.ios-category-empty {
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  color: var(--ios-text);
+  text-align: center;
+}
+
+.ios-category-empty b {
+  font-size: 15px;
+}
+
+.ios-category-empty small {
+  margin-top: 6px;
+  color: var(--ios-muted);
+  font-size: 12px;
+}
+
+.ios-category-page-footer {
+  flex: 0 0 auto;
+  padding: 10px 16px calc(16px + env(safe-area-inset-bottom));
+  border-top: 1px solid #e6eaf0;
+  background: var(--ios-bg);
+}
+
+.ios-category-page-footer .ios-button {
+  gap: 8px;
+  box-shadow: none;
+}
+
+.ios-category-editor {
+  padding-top: 2px;
+}
+
+.ios-category-editor .ios-field {
+  margin-bottom: 22px;
+}
+
+.ios-category-color-fieldset {
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.ios-category-color-fieldset legend {
+  margin-bottom: 12px;
+  color: var(--ios-text);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.ios-category-color-fieldset > div {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.ios-category-color-fieldset button {
+  width: 100%;
+  aspect-ratio: 1;
+  min-width: 0;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: #fff;
+  box-shadow: 0 0 0 1px #dfe4eb;
+}
+
+.ios-category-color-fieldset button.selected {
+  box-shadow:
+    0 0 0 2px var(--ios-bg-2),
+    0 0 0 4px var(--ios-text);
+}
+
+.ios-category-sheet-actions {
+  display: grid;
+  grid-template-columns: 0.82fr 1.18fr;
+  gap: 10px;
+}
+
+@media (max-width: 360px) {
+  .ios-category-color-fieldset > div {
+    gap: 6px;
+  }
+}

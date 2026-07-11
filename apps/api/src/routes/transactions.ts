@@ -1,8 +1,9 @@
-import { canMutateTransaction, createTransactionSchema } from "@shared-ledger/shared";
+import { createTransactionSchema } from "@shared-ledger/shared";
 import type { Hono } from "hono";
 import { jsonError, parseJson } from "../lib/http";
 import { D1LedgerRepository } from "../repository";
-import { currentUser, requireMember, requireUser } from "../services/access";
+import { requireMember, requireUser } from "../services/access";
+import { canUserMutateTransaction } from "../services/transaction-permissions";
 import type { MemoryLedgerStore } from "../store";
 import type { Env } from "../types";
 
@@ -64,10 +65,19 @@ export function registerTransactionRoutes(app: Hono<{ Bindings: Env }>, store?: 
       ? await repository.getTransaction(context.req.param("id"))
       : store?.transactions.find((item) => item.id === context.req.param("id"));
     if (!transaction) return jsonError(context, "记录不存在", 404);
-    const denied = await requireMember(context, store, transaction.bookId);
+    const user = await requireUser(context, store);
+    if (user instanceof Response) return user;
+    const denied = await requireMember(context, store, transaction.bookId, user);
     if (denied) return denied;
     if (!(await incomeVisible(context, store, transaction))) return jsonError(context, "记录不存在", 404);
-    return context.json({ transaction });
+    const canEdit = await canUserMutateTransaction({
+      repository,
+      store,
+      bookId: transaction.bookId,
+      actorId: user.id,
+      createdByUserId: transaction.createdByUserId,
+    });
+    return context.json({ transaction, permissions: { canEdit, canDelete: canEdit } });
   });
 
   app.patch("/transactions/:id", async (context) => {
@@ -76,17 +86,31 @@ export function registerTransactionRoutes(app: Hono<{ Bindings: Env }>, store?: 
       ? await repository.getTransaction(context.req.param("id"))
       : store?.transactions.find((item) => item.id === context.req.param("id"));
     if (!transaction) return jsonError(context, "记录不存在", 404);
-    const user = await currentUser(context, store);
-    if (!user) return jsonError(context, "请先登录", 401);
-    if (!canMutateTransaction(user.id, transaction.createdByUserId))
-      return jsonError(context, "只能修改自己创建的记录", 403);
+    const user = await requireUser(context, store);
+    if (user instanceof Response) return user;
+    const denied = await requireMember(context, store, transaction.bookId, user);
+    if (denied) return denied;
+    if (
+      !(await canUserMutateTransaction({
+        repository,
+        store,
+        bookId: transaction.bookId,
+        actorId: user.id,
+        createdByUserId: transaction.createdByUserId,
+      }))
+    )
+      return jsonError(context, "没有权限修改这条记录", 403);
     const body = await context.req.json<Record<string, unknown>>();
     const candidate = createTransactionSchema.safeParse({ ...transaction, ...body });
     if (!candidate.success) return jsonError(context, "记录数据不合法，检查金额与明细总额");
     if (!(await incomeVisible(context, store, { ...transaction, type: candidate.data.type }))) {
       return jsonError(context, "当前账本未启用收入记录", 400);
     }
-    if (!repository && store && !memoryCategoriesBelongToUser(store, user.id, candidate.data as any)) {
+    if (
+      !repository &&
+      store &&
+      !memoryCategoriesBelongToUser(store, transaction.createdByUserId, candidate.data as any)
+    ) {
       return jsonError(context, "分类不存在或不属于当前用户", 400);
     }
     let updated;
@@ -109,10 +133,20 @@ export function registerTransactionRoutes(app: Hono<{ Bindings: Env }>, store?: 
       : store?.transactions.find((item) => item.id === context.req.param("id"));
     if (!transaction) return jsonError(context, "记录不存在", 404);
     if (!(await incomeVisible(context, store, transaction))) return jsonError(context, "记录不存在", 404);
-    const user = await currentUser(context, store);
-    if (!user) return jsonError(context, "请先登录", 401);
-    if (!canMutateTransaction(user.id, transaction.createdByUserId))
-      return jsonError(context, "只能删除自己创建的记录", 403);
+    const user = await requireUser(context, store);
+    if (user instanceof Response) return user;
+    const denied = await requireMember(context, store, transaction.bookId, user);
+    if (denied) return denied;
+    if (
+      !(await canUserMutateTransaction({
+        repository,
+        store,
+        bookId: transaction.bookId,
+        actorId: user.id,
+        createdByUserId: transaction.createdByUserId,
+      }))
+    )
+      return jsonError(context, "没有权限删除这条记录", 403);
     if (repository) await repository.deleteTransaction(transaction.id, user.id);
     else if (store) store.transactions = store.transactions.filter((item) => item.id !== transaction.id);
     return context.body(null, 204);

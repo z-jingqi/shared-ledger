@@ -1364,6 +1364,72 @@
   margin-top: -2px;
 }
 
+.ios-member-consent-card {
+  min-height: 78px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+}
+
+.ios-member-consent-card > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.ios-member-consent-card b,
+.ios-member-consent-card small {
+  display: block;
+}
+
+.ios-member-consent-card b {
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.ios-member-consent-card small {
+  margin-top: 4px;
+  color: var(--ios-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ios-member-consent-card > button {
+  position: relative;
+  width: 48px;
+  height: 29px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 999px;
+  padding: 0;
+  background: #dfe4ea;
+  transition: background 160ms ease;
+}
+
+.ios-member-consent-card > button i {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 23px;
+  height: 23px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 7px rgba(23, 32, 50, 0.2);
+  transition: transform 160ms ease;
+}
+
+.ios-member-consent-card > button[aria-checked="true"] {
+  background: var(--ios-accent);
+}
+
+.ios-member-consent-card > button[aria-checked="true"] i {
+  transform: translateX(19px);
+}
+
+.ios-member-consent-card > button:disabled {
+  opacity: 0.6;
+}
+
 .ios-invite-sheet {
   min-height: 0;
 }
@@ -1424,6 +1490,86 @@
 
 .ios-invite-submit-button {
   margin-top: 4px;
+}
+
+.ios-accept-invitation-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.ios-accept-invitation-summary {
+  padding: 16px;
+  border-color: #ffd9c6 !important;
+  background: #fff6f0 !important;
+}
+
+.ios-accept-invitation-summary b,
+.ios-accept-invitation-summary small {
+  display: block;
+}
+
+.ios-accept-invitation-summary b {
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.ios-accept-invitation-summary small {
+  margin-top: 5px;
+  color: #796575;
+  font-size: 12px;
+}
+
+.ios-accept-invitation-sheet section > h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.ios-accept-invitation-sheet section > p {
+  margin: 5px 0 12px;
+  color: var(--ios-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ios-invite-consent-options {
+  display: grid;
+  gap: 10px;
+}
+
+.ios-invite-consent-options button {
+  min-height: 70px;
+  border: 1px solid #e3e7ed;
+  border-radius: 16px;
+  padding: 13px 14px;
+  background: #fff;
+  color: var(--ios-text);
+  font: inherit;
+  text-align: left;
+}
+
+.ios-invite-consent-options button.active {
+  border-color: var(--ios-accent);
+  background: #fff6f0;
+  box-shadow: 0 0 0 2px rgba(255, 104, 28, 0.08);
+}
+
+.ios-invite-consent-options b,
+.ios-invite-consent-options small {
+  display: block;
+}
+
+.ios-invite-consent-options b {
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.ios-invite-consent-options small {
+  margin-top: 4px;
+  color: var(--ios-muted);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .ios-role-cards {

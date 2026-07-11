@@ -8,7 +8,6 @@ import {
   canDeleteBook,
   canInvite,
   canManageMembers,
-  canMutateTransaction,
   categorySchema,
   createBookSchema,
   createTransactionSchema,
@@ -25,6 +24,7 @@ import type { Env } from "../types";
 import { updateUserAvatar, updateUserProfile } from "./auth";
 import { prepareImageForGoogleVision } from "./image-conversion";
 import { markFailed, sha256Hex, submitOcrJob } from "./imports";
+import { canUserMutateTransaction } from "./transaction-permissions";
 import {
   assertImageImportFile,
   assertImageOcrQuota,
@@ -144,6 +144,10 @@ const categoryArgsSchema = z.object({
   newName: z.string().trim().min(1).max(30).optional(),
   type: z.enum(["income", "expense"]).optional(),
   icon: z.string().trim().max(40).optional(),
+  color: z
+    .string()
+    .regex(/^#[0-9A-Fa-f]{6}$/)
+    .optional(),
   sortOrder: z.coerce.number().int().min(0).optional(),
 });
 
@@ -505,11 +509,19 @@ async function updateRecord(runtime: AiActionRuntime, bookId: string, rawArgs: R
   const args = updateRecordArgsSchema.parse(rawArgs);
   const transaction = await resolveTransaction(runtime.repository, runtime.user.id, bookId, args);
   if (!transaction) return textResult("我没有找到要修改的那笔记录。");
-  if (!canMutateTransaction(runtime.user.id, transaction.createdByUserId))
-    return textResult("只能修改你自己创建的记录。");
+  if (
+    !(await canUserMutateTransaction({
+      repository: runtime.repository instanceof D1LedgerRepository ? runtime.repository : undefined,
+      store: runtime.repository instanceof D1LedgerRepository ? undefined : runtime.repository,
+      bookId,
+      actorId: runtime.user.id,
+      createdByUserId: transaction.createdByUserId,
+    }))
+  )
+    return textResult("你没有权限修改这笔记录。");
   const patch = await transactionInput(
     runtime.repository,
-    runtime.user.id,
+    transaction.createdByUserId,
     { ...transaction, ...args } as any,
     runtime.today,
     transaction,
@@ -541,10 +553,18 @@ async function deleteRecord(runtime: AiActionRuntime, bookId: string, rawArgs: R
   const args = targetRecordArgsSchema.parse(rawArgs);
   const transactions = await resolveTransactionsForDelete(runtime.repository, runtime.user.id, bookId, args);
   if (!transactions.length) return textResult("我没有找到要删除的记录。");
-  const forbidden = transactions.find(
-    (transaction) => !canMutateTransaction(runtime.user.id, transaction.createdByUserId),
+  const permissions = await Promise.all(
+    transactions.map((transaction) =>
+      canUserMutateTransaction({
+        repository: runtime.repository instanceof D1LedgerRepository ? runtime.repository : undefined,
+        store: runtime.repository instanceof D1LedgerRepository ? undefined : runtime.repository,
+        bookId,
+        actorId: runtime.user.id,
+        createdByUserId: transaction.createdByUserId,
+      }),
+    ),
   );
-  if (forbidden) return textResult("只能删除你自己创建的记录。");
+  if (permissions.some((allowed) => !allowed)) return textResult("你没有权限删除其中的记录。");
   if (runtime.repository instanceof D1LedgerRepository) {
     for (const transaction of transactions)
       await runtime.repository.deleteTransaction(transaction.id, runtime.user.id);
@@ -576,6 +596,7 @@ async function createCategory(runtime: AiActionRuntime, bookId: string, rawArgs:
     name: args.name,
     type: args.type ?? "expense",
     icon: args.icon ?? (args.type === "income" ? "wallet" : "tag"),
+    color: args.color ?? (args.type === "income" ? "#22A06B" : "#FF681C"),
     sortOrder: args.sortOrder ?? 0,
   });
   const existing = await findCategory(runtime.repository, runtime.user.id, parsed.name, parsed.type);
@@ -606,6 +627,7 @@ async function updateCategory(runtime: AiActionRuntime, bookId: string, rawArgs:
     name: args.newName ?? args.name ?? category.name,
     type: args.type ?? (category.type === "income" ? "income" : "expense"),
     icon: args.icon ?? category.icon ?? "tag",
+    color: args.color ?? category.color ?? "#FF681C",
     sortOrder: args.sortOrder ?? category.sortOrder ?? 0,
   });
   const updated = await updateCategoryEntity(runtime.repository, category.id, parsed, runtime.user.id);

@@ -49,8 +49,14 @@ function AppFrameInner({ children }: { children: ReactNode }) {
   const isAuthPage = ["/login", "/register"].includes(routerLocation.pathname);
   const isCreateBookPage = routerLocation.pathname === "/books/new";
   const bottomNavTab = getBottomNavTab(shellPathname);
+  const isStandaloneSettingsPage = shellPathname === "/settings/categories";
   const showBottomNav = Boolean(
-    user && bottomNavTab && !isAuthPage && !isCreateBookPage && shellPathname !== "/ai",
+    user &&
+    bottomNavTab &&
+    !isAuthPage &&
+    !isCreateBookPage &&
+    !isStandaloneSettingsPage &&
+    shellPathname !== "/ai",
   );
   const canUseImageRecognition = user?.plan === "pro";
   const bookQuery = book?.id ? `?bookId=${encodeURIComponent(book.id)}` : "";
@@ -77,7 +83,7 @@ function AppFrameInner({ children }: { children: ReactNode }) {
 
   return (
     <main
-      className={`phone ios-app-shell${showBottomNav ? " has-bottom-nav" : ""}${isCreateBookPage ? " create-book-shell" : ""}`}
+      className={`phone ios-app-shell${showBottomNav ? " has-bottom-nav" : ""}${isCreateBookPage ? " create-book-shell" : ""}${isStandaloneSettingsPage ? " standalone-settings-shell" : ""}`}
     >
       <div className="content ios-app-content">{children}</div>
       {showBottomNav && (

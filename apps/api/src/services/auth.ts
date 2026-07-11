@@ -7,23 +7,23 @@ const passwordHashIterations = 100_000;
 const maxWorkerPbkdf2Iterations = 100_000;
 const id = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 const defaultCategories = [
-  { name: "餐饮", type: "expense", icon: "fork-knife" },
-  { name: "交通", type: "expense", icon: "car" },
-  { name: "购物", type: "expense", icon: "shopping-bag" },
-  { name: "水电燃气", type: "expense", icon: "lightning" },
-  { name: "医疗健康", type: "expense", icon: "first-aid" },
-  { name: "娱乐休闲", type: "expense", icon: "game-controller" },
-  { name: "教育学习", type: "expense", icon: "book-open" },
-  { name: "旅行出差", type: "expense", icon: "airplane" },
-  { name: "宠物", type: "expense", icon: "paw-print" },
-  { name: "其他支出", type: "expense", icon: "dots-three" },
-  { name: "工资", type: "income", icon: "wallet" },
-  { name: "奖金", type: "income", icon: "trophy" },
-  { name: "兼职副业", type: "income", icon: "briefcase" },
-  { name: "投资理财", type: "income", icon: "trend-up" },
-  { name: "报销", type: "income", icon: "receipt" },
-  { name: "红包转账", type: "income", icon: "gift" },
-  { name: "其他收入", type: "income", icon: "plus-circle" },
+  { name: "餐饮", type: "expense", icon: "fork-knife", color: "#FF681C" },
+  { name: "交通", type: "expense", icon: "car", color: "#3B82F6" },
+  { name: "购物", type: "expense", icon: "shopping-bag", color: "#F59E0B" },
+  { name: "水电燃气", type: "expense", icon: "lightning", color: "#14B8A6" },
+  { name: "医疗健康", type: "expense", icon: "first-aid", color: "#7C5CFC" },
+  { name: "娱乐休闲", type: "expense", icon: "game-controller", color: "#EC4899" },
+  { name: "教育学习", type: "expense", icon: "book-open", color: "#0EA5E9" },
+  { name: "旅行出差", type: "expense", icon: "airplane", color: "#06B6D4" },
+  { name: "宠物", type: "expense", icon: "paw-print", color: "#D97706" },
+  { name: "其他支出", type: "expense", icon: "dots-three", color: "#64748B" },
+  { name: "工资", type: "income", icon: "wallet", color: "#22A06B" },
+  { name: "奖金", type: "income", icon: "trophy", color: "#10B981" },
+  { name: "兼职副业", type: "income", icon: "briefcase", color: "#3B82F6" },
+  { name: "投资理财", type: "income", icon: "trend-up", color: "#8B5CF6" },
+  { name: "报销", type: "income", icon: "receipt", color: "#14B8A6" },
+  { name: "红包转账", type: "income", icon: "gift", color: "#F59E0B" },
+  { name: "其他收入", type: "income", icon: "plus-circle", color: "#64748B" },
 ] as const;
 
 type UserRow = {
@@ -174,7 +174,7 @@ export async function createPasswordAccount(db: D1Database, input: { name: strin
     statements.push(
       db
         .prepare(
-          "INSERT INTO categories (id,user_id,name,type,icon,sort_order,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+          "INSERT INTO categories (id,user_id,name,type,icon,color,sort_order,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         )
         .bind(
           `category_${crypto.randomUUID()}`,
@@ -182,6 +182,7 @@ export async function createPasswordAccount(db: D1Database, input: { name: strin
           category.name,
           category.type,
           category.icon,
+          category.color,
           index + 1,
           userId,
           userId,

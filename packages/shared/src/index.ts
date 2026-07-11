@@ -143,10 +143,20 @@ export const inviteSchema = z
     role: z.enum(["admin", "member"]).default("member"),
   })
   .refine((data) => Boolean(data.userId), "请先搜索并选择要邀请的用户");
+export const acceptInvitationSchema = z.object({
+  allowAdminEdit: z.boolean().default(false),
+});
+export const memberEditConsentSchema = z.object({
+  allowAdminEdit: z.boolean(),
+});
 export const categorySchema = z.object({
   name: z.string().trim().min(1).max(30),
   type: z.enum(transactionTypes),
   icon: z.string().max(40).default("tag"),
+  color: z
+    .string()
+    .regex(/^#[0-9A-Fa-f]{6}$/, "分类颜色格式不正确")
+    .default("#FF681C"),
   sortOrder: z.number().int().min(0).default(0),
 });
 export const aiImportItemSchema = z.object({
@@ -397,8 +407,14 @@ export function canInvite(role: Role) {
 export function canManageMembers(role: Role) {
   return role === "creator" || role === "admin";
 }
-export function canMutateTransaction(actorId: string, createdByUserId: string) {
-  return actorId === createdByUserId;
+export function canMutateTransaction(
+  actorId: string,
+  createdByUserId: string,
+  actorRole?: Role,
+  creatorAllowsAdminEdit = false,
+) {
+  if (actorId === createdByUserId) return true;
+  return creatorAllowsAdminEdit && (actorRole === "creator" || actorRole === "admin");
 }
 export function canUseAi(plan: SubscriptionPlan) {
   return plan === "free" || plan === "pro";

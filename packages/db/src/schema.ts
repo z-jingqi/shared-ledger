@@ -36,11 +36,14 @@ export const bookMembers = sqliteTable(
     bookId: text("book_id").notNull(),
     userId: text("user_id").notNull(),
     role: text("role", { enum: ["creator", "admin", "member"] }).notNull(),
+    allowAdminEdit: integer("allow_admin_edit", { mode: "boolean" }).notNull().default(false),
     joinedAt: text("joined_at").notNull(),
     ...fullAudit,
   },
   (t) => [
-    uniqueIndex("book_members_book_user").on(t.bookId, t.userId),
+    uniqueIndex("book_members_book_user_active")
+      .on(t.bookId, t.userId)
+      .where(sql`${t.deletedAt} IS NULL`),
     index("book_members_user").on(t.userId),
   ],
 );
@@ -52,11 +55,27 @@ export const invitations = sqliteTable("invitations", {
   inviteePhone: text("invitee_phone"),
   inviteeUserId: text("invitee_user_id"),
   role: text("role").notNull(),
+  allowAdminEdit: integer("allow_admin_edit", { mode: "boolean" }),
   status: text("status").notNull(),
   expiresAt: text("expires_at").notNull(),
   lastRemindedAt: text("last_reminded_at"),
   ...fullAudit,
 });
+export const invitationHiddenBy = sqliteTable(
+  "invitation_hidden_by",
+  {
+    id: text("id").primaryKey(),
+    invitationId: text("invitation_id").notNull(),
+    userId: text("user_id").notNull(),
+    ...fullAudit,
+  },
+  (t) => [
+    uniqueIndex("invitation_hidden_by_user_active")
+      .on(t.invitationId, t.userId)
+      .where(sql`${t.deletedAt} IS NULL`),
+    index("invitation_hidden_by_user").on(t.userId),
+  ],
+);
 export const userInviteBlocks = sqliteTable(
   "user_invite_blocks",
   {
@@ -87,6 +106,7 @@ export const categories = sqliteTable(
     name: text("name").notNull(),
     type: text("type").notNull(),
     icon: text("icon").notNull(),
+    color: text("color").notNull().default("#FF681C"),
     sortOrder: integer("sort_order").notNull().default(0),
     ...fullAudit,
   },

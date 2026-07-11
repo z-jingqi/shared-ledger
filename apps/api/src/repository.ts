@@ -26,6 +26,7 @@ const mapMember = (row: Row): Member => ({
   userId: row.userId,
   name: row.name,
   role: row.role,
+  allowAdminEdit: Boolean(row.allowAdminEdit),
   joinedAt: row.joinedAt,
 });
 
@@ -35,6 +36,7 @@ const mapSimple = (row: Row): SimpleEntity => ({
   name: row.name,
   ...(row.type ? { type: row.type } : {}),
   ...(row.icon ? { icon: row.icon } : {}),
+  ...(row.color ? { color: row.color } : {}),
   ...(row.sortOrder !== undefined ? { sortOrder: row.sortOrder } : {}),
 });
 
@@ -46,6 +48,9 @@ const mapInvitation = (row: Row): Invitation => ({
   ...(row.inviteePhone ? { inviteePhone: row.inviteePhone } : {}),
   ...(row.inviteeUserId ? { inviteeUserId: row.inviteeUserId } : {}),
   role: row.role,
+  ...(row.allowAdminEdit !== undefined && row.allowAdminEdit !== null
+    ? { allowAdminEdit: Boolean(row.allowAdminEdit) }
+    : {}),
   status: row.status,
   expiresAt: row.expiresAt,
   ...(row.lastRemindedAt ? { lastRemindedAt: row.lastRemindedAt } : {}),
@@ -176,7 +181,7 @@ const aiMessageColumns = "id,session_id AS sessionId,role,content,parts,attachme
 const aiToolCallColumns =
   "id,session_id AS sessionId,user_id AS userId,book_id AS bookId,skill_name AS skillName,tool_name AS toolName,status,args,result,error_message AS errorMessage,created_at AS createdAt,updated_at AS updatedAt";
 const invitationColumns =
-  "id,book_id AS bookId,inviter_user_id AS inviterUserId,invitee_email AS inviteeEmail,invitee_phone AS inviteePhone,invitee_user_id AS inviteeUserId,role,status,expires_at AS expiresAt,last_reminded_at AS lastRemindedAt,created_at AS createdAt,updated_at AS updatedAt";
+  "id,book_id AS bookId,inviter_user_id AS inviterUserId,invitee_email AS inviteeEmail,invitee_phone AS inviteePhone,invitee_user_id AS inviteeUserId,role,allow_admin_edit AS allowAdminEdit,status,expires_at AS expiresAt,last_reminded_at AS lastRemindedAt,created_at AS createdAt,updated_at AS updatedAt";
 
 export type InvitationUserSummary = Pick<LedgerUser, "id" | "name" | "plan"> & {
   avatarUrl?: string;
@@ -326,7 +331,7 @@ export class D1LedgerRepository {
   async listMembers(bookId: string) {
     const result = await this.db
       .prepare(
-        `SELECT bm.id,bm.book_id AS bookId,bm.user_id AS userId,u.name,bm.role,bm.joined_at AS joinedAt
+        `SELECT bm.id,bm.book_id AS bookId,bm.user_id AS userId,u.name,bm.role,bm.allow_admin_edit AS allowAdminEdit,bm.joined_at AS joinedAt
          FROM book_members bm JOIN users u ON u.id = bm.user_id WHERE bm.book_id = ? AND bm.deleted_at IS NULL ORDER BY bm.joined_at`,
       )
       .bind(bookId)
@@ -342,7 +347,7 @@ export class D1LedgerRepository {
   ) {
     const row = await this.db
       .prepare(
-        `SELECT bm.id,bm.book_id AS bookId,bm.user_id AS userId,u.name,bm.role,bm.joined_at AS joinedAt
+        `SELECT bm.id,bm.book_id AS bookId,bm.user_id AS userId,u.name,bm.role,bm.allow_admin_edit AS allowAdminEdit,bm.joined_at AS joinedAt
          FROM book_members bm JOIN users u ON u.id = bm.user_id WHERE bm.id = ? AND bm.book_id = ? AND bm.deleted_at IS NULL`,
       )
       .bind(memberId, bookId)
@@ -358,7 +363,7 @@ export class D1LedgerRepository {
   async removeMember(bookId: string, memberId: string, actorId = systemActorId) {
     const row = await this.db
       .prepare(
-        `SELECT bm.id,bm.book_id AS bookId,bm.user_id AS userId,u.name,bm.role,bm.joined_at AS joinedAt
+        `SELECT bm.id,bm.book_id AS bookId,bm.user_id AS userId,u.name,bm.role,bm.allow_admin_edit AS allowAdminEdit,bm.joined_at AS joinedAt
          FROM book_members bm JOIN users u ON u.id = bm.user_id WHERE bm.id = ? AND bm.book_id = ? AND bm.deleted_at IS NULL`,
       )
       .bind(memberId, bookId)
@@ -377,7 +382,7 @@ export class D1LedgerRepository {
   async removeMemberByUser(bookId: string, userId: string) {
     const row = await this.db
       .prepare(
-        `SELECT bm.id,bm.book_id AS bookId,bm.user_id AS userId,u.name,bm.role,bm.joined_at AS joinedAt
+        `SELECT bm.id,bm.book_id AS bookId,bm.user_id AS userId,u.name,bm.role,bm.allow_admin_edit AS allowAdminEdit,bm.joined_at AS joinedAt
          FROM book_members bm JOIN users u ON u.id = bm.user_id WHERE bm.user_id = ? AND bm.book_id = ? AND bm.deleted_at IS NULL`,
       )
       .bind(userId, bookId)
@@ -506,7 +511,7 @@ export class D1LedgerRepository {
     const book = await this.getBook(current.bookId);
     if (!book) throw new Error("账本不存在");
     if (!book.incomeEnabled && input.type === "income") throw new Error("当前账本未启用收入记录");
-    await this.assertTransactionCategoriesBelongToUser(actorId, input);
+    await this.assertTransactionCategoriesBelongToUser(current.createdByUserId, input);
     const timestamp = now();
     const transaction: Transaction = {
       ...current,
@@ -597,7 +602,7 @@ export class D1LedgerRepository {
   async listCategories(userId: string) {
     const result = await this.db
       .prepare(
-        "SELECT id,user_id AS userId,name,type,icon,sort_order AS sortOrder FROM categories WHERE user_id = ? AND deleted_at IS NULL ORDER BY type,sort_order,created_at",
+        "SELECT id,user_id AS userId,name,type,icon,color,sort_order AS sortOrder FROM categories WHERE user_id = ? AND deleted_at IS NULL ORDER BY type,sort_order,created_at",
       )
       .bind(userId)
       .all<Row>();
@@ -614,7 +619,7 @@ export class D1LedgerRepository {
     }
     const row = await this.db
       .prepare(
-        `SELECT id,user_id AS userId,name,type,icon,sort_order AS sortOrder FROM categories WHERE ${clauses.join(" AND ")} LIMIT 1`,
+        `SELECT id,user_id AS userId,name,type,icon,color,sort_order AS sortOrder FROM categories WHERE ${clauses.join(" AND ")} LIMIT 1`,
       )
       .bind(...values)
       .first<Row>();
@@ -630,6 +635,7 @@ export class D1LedgerRepository {
         name,
         type,
         icon: type === "income" ? "wallet" : "tag",
+        color: type === "income" ? "#22A06B" : "#FF681C",
         sortOrder: 0,
       },
       userId,
@@ -710,17 +716,32 @@ export class D1LedgerRepository {
   async findMember(bookId: string, userId: string) {
     const row = await this.db
       .prepare(
-        "SELECT id,book_id AS bookId,user_id AS userId FROM book_members WHERE book_id = ? AND user_id = ? AND deleted_at IS NULL",
+        `SELECT bm.id,bm.book_id AS bookId,bm.user_id AS userId,u.name,bm.role,bm.allow_admin_edit AS allowAdminEdit,bm.joined_at AS joinedAt
+         FROM book_members bm JOIN users u ON u.id = bm.user_id
+         WHERE bm.user_id = ? AND bm.book_id = ? AND bm.deleted_at IS NULL`,
       )
-      .bind(bookId, userId)
+      .bind(userId, bookId)
       .first<Row>();
-    return row;
+    return row ? mapMember(row) : null;
+  }
+
+  async updateMemberEditConsent(bookId: string, userId: string, allowAdminEdit: boolean) {
+    const member = await this.findMember(bookId, userId);
+    if (!member || member.role === "creator") return null;
+    const timestamp = now();
+    await this.db
+      .prepare(
+        "UPDATE book_members SET allow_admin_edit=?,updated_at=?,updated_by_user_id=? WHERE book_id=? AND user_id=? AND deleted_at IS NULL",
+      )
+      .bind(allowAdminEdit ? 1 : 0, timestamp, userId, bookId, userId)
+      .run();
+    return { ...member, allowAdminEdit };
   }
 
   async getCategory(entityId: string) {
     const result = await this.db
       .prepare(
-        "SELECT id,user_id AS userId,name,type,icon,sort_order AS sortOrder FROM categories WHERE id = ? AND deleted_at IS NULL",
+        "SELECT id,user_id AS userId,name,type,icon,color,sort_order AS sortOrder FROM categories WHERE id = ? AND deleted_at IS NULL",
       )
       .bind(entityId)
       .first<Row>();
@@ -732,7 +753,7 @@ export class D1LedgerRepository {
     const entity: SimpleEntity = { ...data, id: id("category"), userId };
     await this.db
       .prepare(
-        "INSERT INTO categories (id,user_id,name,type,icon,sort_order,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO categories (id,user_id,name,type,icon,color,sort_order,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
       )
       .bind(
         entity.id,
@@ -740,6 +761,7 @@ export class D1LedgerRepository {
         entity.name,
         entity.type,
         entity.icon,
+        entity.color ?? "#FF681C",
         entity.sortOrder ?? 0,
         actorId,
         actorId,
@@ -756,9 +778,18 @@ export class D1LedgerRepository {
     const entity = { ...current, ...data };
     await this.db
       .prepare(
-        "UPDATE categories SET name=?,type=?,icon=?,sort_order=?,updated_at=?,updated_by_user_id=? WHERE id=?",
+        "UPDATE categories SET name=?,type=?,icon=?,color=?,sort_order=?,updated_at=?,updated_by_user_id=? WHERE id=?",
       )
-      .bind(entity.name, entity.type, entity.icon, entity.sortOrder ?? 0, now(), actorId, entityId)
+      .bind(
+        entity.name,
+        entity.type,
+        entity.icon,
+        entity.color ?? "#FF681C",
+        entity.sortOrder ?? 0,
+        now(),
+        actorId,
+        entityId,
+      )
       .run();
     return entity;
   }
@@ -808,9 +839,13 @@ export class D1LedgerRepository {
          LEFT JOIN users invitee ON invitee.id = i.invitee_user_id
          LEFT JOIN subscriptions invitee_plan ON invitee_plan.user_id = invitee.id AND invitee_plan.status = 'active'
          WHERE i.book_id=? AND i.deleted_at IS NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM invitation_hidden_by hidden
+             WHERE hidden.invitation_id=i.id AND hidden.user_id=? AND hidden.deleted_at IS NULL
+           )
          ORDER BY i.created_at DESC`,
       )
-      .bind(bookId)
+      .bind(bookId, viewerUserId)
       .all<Row>();
     return result.results.map((row) => mapInvitationDetail(row, viewerUserId));
   }
@@ -822,9 +857,16 @@ export class D1LedgerRepository {
       .first<{ email: string | null; phone: string | null }>();
     const result = await this.db
       .prepare(
-        `SELECT ${invitationColumns} FROM invitations WHERE deleted_at IS NULL AND (invitee_user_id=? OR (invitee_email IS NOT NULL AND invitee_email=?) OR (invitee_phone IS NOT NULL AND invitee_phone=?)) ORDER BY created_at DESC`,
+        `SELECT ${invitationColumns} FROM invitations
+         WHERE deleted_at IS NULL
+           AND (invitee_user_id=? OR (invitee_email IS NOT NULL AND invitee_email=?) OR (invitee_phone IS NOT NULL AND invitee_phone=?))
+           AND NOT EXISTS (
+             SELECT 1 FROM invitation_hidden_by hidden
+             WHERE hidden.invitation_id=invitations.id AND hidden.user_id=? AND hidden.deleted_at IS NULL
+           )
+         ORDER BY created_at DESC`,
       )
-      .bind(userId, user?.email ?? "", user?.phone ?? "")
+      .bind(userId, user?.email ?? "", user?.phone ?? "", userId)
       .all<Row>();
     return result.results.map(mapInvitation);
   }
@@ -853,9 +895,13 @@ export class D1LedgerRepository {
              OR (i.invitee_email IS NOT NULL AND i.invitee_email=?)
              OR (i.invitee_phone IS NOT NULL AND i.invitee_phone=?)
            )
+           AND NOT EXISTS (
+             SELECT 1 FROM invitation_hidden_by hidden
+             WHERE hidden.invitation_id=i.id AND hidden.user_id=? AND hidden.deleted_at IS NULL
+           )
          ORDER BY i.created_at DESC`,
       )
-      .bind(userId, userId, user?.email ?? "", user?.phone ?? "")
+      .bind(userId, userId, user?.email ?? "", user?.phone ?? "", userId)
       .all<Row>();
     return result.results.map((row) => mapInvitationDetail(row, userId));
   }
@@ -868,6 +914,16 @@ export class D1LedgerRepository {
     return row ? mapInvitation(row) : null;
   }
 
+  async expirePendingInvitations() {
+    const timestamp = now();
+    await this.db
+      .prepare(
+        "UPDATE invitations SET status='expired',updated_at=?,updated_by_user_id=? WHERE status='pending' AND expires_at<? AND deleted_at IS NULL",
+      )
+      .bind(timestamp, systemActorId, timestamp)
+      .run();
+  }
+
   async createInvitation(input: Omit<Invitation, "id" | "status" | "expiresAt">) {
     const timestamp = now();
     const invitation: Invitation = {
@@ -875,6 +931,8 @@ export class D1LedgerRepository {
       id: id("invitation"),
       status: "pending",
       expiresAt: new Date(Date.now() + 7 * 86400000).toISOString(),
+      createdAt: timestamp,
+      updatedAt: timestamp,
     };
     await this.db
       .prepare(
@@ -899,18 +957,54 @@ export class D1LedgerRepository {
     return invitation;
   }
 
+  async acceptInvitation(invitationId: string, userId: string, allowAdminEdit: boolean, actorId = userId) {
+    const invitation = await this.getInvitation(invitationId);
+    if (!invitation || invitation.status !== "pending") return null;
+    const timestamp = now();
+    await this.db.batch([
+      this.db
+        .prepare(
+          "UPDATE invitations SET status='accepted',invitee_user_id=?,allow_admin_edit=?,updated_at=?,updated_by_user_id=? WHERE id=? AND status='pending' AND deleted_at IS NULL",
+        )
+        .bind(userId, allowAdminEdit ? 1 : 0, timestamp, actorId, invitationId),
+      this.db
+        .prepare(
+          "INSERT INTO book_members (id,book_id,user_id,role,allow_admin_edit,joined_at,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        )
+        .bind(
+          id("member"),
+          invitation.bookId,
+          userId,
+          invitation.role,
+          allowAdminEdit ? 1 : 0,
+          timestamp,
+          actorId,
+          actorId,
+          timestamp,
+          timestamp,
+        ),
+    ]);
+    return {
+      ...invitation,
+      status: "accepted" as const,
+      inviteeUserId: userId,
+      allowAdminEdit,
+      updatedAt: timestamp,
+    };
+  }
+
   async findPendingInvitation(bookId: string, email?: string, phone?: string, userId?: string) {
     return this.db
       .prepare(
-        `SELECT ${invitationColumns} FROM invitations WHERE book_id=? AND status='pending' AND deleted_at IS NULL AND ((? != '' AND invitee_email=?) OR (? != '' AND invitee_phone=?) OR (? != '' AND invitee_user_id=?)) LIMIT 1`,
+        `SELECT ${invitationColumns} FROM invitations WHERE book_id=? AND status='pending' AND expires_at>? AND deleted_at IS NULL AND ((? != '' AND invitee_email=?) OR (? != '' AND invitee_phone=?) OR (? != '' AND invitee_user_id=?)) LIMIT 1`,
       )
-      .bind(bookId, email ?? "", email ?? "", phone ?? "", phone ?? "", userId ?? "", userId ?? "")
+      .bind(bookId, now(), email ?? "", email ?? "", phone ?? "", phone ?? "", userId ?? "", userId ?? "")
       .first<Row>()
       .then((row) => (row ? mapInvitation(row) : null));
   }
   async updateInvitation(
     invitationId: string,
-    fields: Partial<Pick<Invitation, "status" | "inviteeUserId" | "lastRemindedAt">>,
+    fields: Partial<Pick<Invitation, "status" | "inviteeUserId" | "lastRemindedAt" | "allowAdminEdit">>,
     actorId = systemActorId,
   ) {
     const invitation = await this.getInvitation(invitationId);
@@ -918,11 +1012,12 @@ export class D1LedgerRepository {
     const changed = { ...invitation, ...fields };
     await this.db
       .prepare(
-        "UPDATE invitations SET status=?,invitee_user_id=?,last_reminded_at=?,updated_at=?,updated_by_user_id=? WHERE id=?",
+        "UPDATE invitations SET status=?,invitee_user_id=?,allow_admin_edit=?,last_reminded_at=?,updated_at=?,updated_by_user_id=? WHERE id=?",
       )
       .bind(
         changed.status,
         changed.inviteeUserId ?? null,
+        changed.allowAdminEdit === undefined ? null : changed.allowAdminEdit ? 1 : 0,
         changed.lastRemindedAt ?? null,
         now(),
         actorId,
@@ -932,15 +1027,15 @@ export class D1LedgerRepository {
     return changed;
   }
 
-  async deleteInvitation(invitationId: string, actorId = systemActorId) {
+  async hideInvitationForUser(invitationId: string, userId: string) {
     const invitation = await this.getInvitation(invitationId);
     if (!invitation || invitation.status === "pending") return null;
     const timestamp = now();
     await this.db
       .prepare(
-        "UPDATE invitations SET deleted_at=?,deleted_by_user_id=?,updated_at=?,updated_by_user_id=? WHERE id=?",
+        "INSERT OR IGNORE INTO invitation_hidden_by (id,invitation_id,user_id,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
       )
-      .bind(timestamp, actorId, timestamp, actorId, invitationId)
+      .bind(id("invitation_hidden"), invitationId, userId, userId, userId, timestamp, timestamp)
       .run();
     return invitation;
   }
@@ -1038,13 +1133,30 @@ export class D1LedgerRepository {
       user: mapUserSummary({ ...row, id: row.userId }),
     }));
   }
-  async addMember(bookId: string, userId: string, role: "admin" | "member", actorId = systemActorId) {
+  async addMember(
+    bookId: string,
+    userId: string,
+    role: "admin" | "member",
+    actorId = systemActorId,
+    allowAdminEdit = false,
+  ) {
     const timestamp = now();
     await this.db
       .prepare(
-        "INSERT OR IGNORE INTO book_members (id,book_id,user_id,role,joined_at,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+        "INSERT OR IGNORE INTO book_members (id,book_id,user_id,role,allow_admin_edit,joined_at,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
       )
-      .bind(id("member"), bookId, userId, role, timestamp, actorId, actorId, timestamp, timestamp)
+      .bind(
+        id("member"),
+        bookId,
+        userId,
+        role,
+        allowAdminEdit ? 1 : 0,
+        timestamp,
+        actorId,
+        actorId,
+        timestamp,
+        timestamp,
+      )
       .run();
   }
 

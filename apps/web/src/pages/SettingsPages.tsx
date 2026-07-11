@@ -38,7 +38,24 @@ import { useActiveBook } from "../hooks/useActiveBook";
 import { useApi } from "../hooks/useApi";
 import { api } from "../lib";
 
-type Resource = { id: string; name: string; type?: "income" | "expense"; icon?: string; sortOrder?: number };
+type Resource = {
+  id: string;
+  name: string;
+  type?: "income" | "expense";
+  icon?: string;
+  color?: string;
+  sortOrder?: number;
+};
+const categoryColors = [
+  "#FF681C",
+  "#F59E0B",
+  "#22A06B",
+  "#14B8A6",
+  "#3B82F6",
+  "#7C5CFC",
+  "#EC4899",
+  "#64748B",
+];
 type ImportJobSummary = ImportJobStatus;
 type ProfileEditState = {
   avatarUploading: boolean;
@@ -525,45 +542,71 @@ function BookSettingsPage({ bookId }: { bookId: string }) {
 
 function CategoryManagerPage() {
   const navigate = useNavigate();
-  const { book } = useActiveBook();
   const { data, reload } = useApi<{ categories: Resource[] }>("/me/categories");
+  const [selectedType, setSelectedType] = useState<"expense" | "income">("expense");
   const [editing, setEditing] = useState<Resource | undefined>();
   const [deleteTarget, setDeleteTarget] = useState<Resource | undefined>();
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [formType, setFormType] = useState<"expense" | "income">("expense");
   const [name, setName] = useState("");
+  const [color, setColor] = useState(categoryColors[0]);
   const [error, setError] = useState("");
-  const items = (data?.categories ?? []).filter(
-    (category) => book?.incomeEnabled || category.type !== "income",
-  );
+  const [saving, setSaving] = useState(false);
+  const items = (data?.categories ?? [])
+    .filter((category) => category.type === selectedType)
+    .sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0));
+
+  const startCreate = () => {
+    setEditing(undefined);
+    setFormType(selectedType);
+    setName("");
+    setColor(selectedType === "income" ? "#22A06B" : categoryColors[0]);
+    setError("");
+    setEditorOpen(true);
+  };
 
   const startEdit = (item: Resource) => {
     setEditing(item);
+    setFormType(item.type === "income" ? "income" : "expense");
     setName(item.name);
+    setColor(item.color ?? categoryColors[0]);
     setError("");
+    setEditorOpen(true);
   };
-  const resetForm = () => {
+
+  const closeEditor = () => {
+    setEditorOpen(false);
     setEditing(undefined);
     setName("");
     setError("");
   };
+
   const save = async () => {
     if (!name.trim()) return;
     setError("");
+    setSaving(true);
     const body = JSON.stringify({
       name: name.trim(),
-      type: editing?.type ?? "expense",
-      icon: editing?.icon ?? "tag",
-      sortOrder: editing?.sortOrder ?? items.length,
+      type: formType,
+      color,
+      sortOrder:
+        editing?.sortOrder ??
+        (data?.categories ?? []).filter((category) => category.type === formType).length + 1,
     });
     try {
       if (editing) await api(`/categories/${editing.id}`, { method: "PATCH", body });
       else await api("/me/categories", { method: "POST", body });
       toast.success(editing ? "分类已更新" : "分类已新增", { duration: 2400, closeButton: true });
-      resetForm();
+      setSelectedType(formType);
+      closeEditor();
       await reload();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "保存失败");
+    } finally {
+      setSaving(false);
     }
   };
+
   const remove = async () => {
     if (!deleteTarget) return;
     await api(`/categories/${deleteTarget.id}`, { method: "DELETE" });
@@ -575,43 +618,131 @@ function CategoryManagerPage() {
   return (
     <IosPage>
       <IosTopBar title="分类管理" back onBack={() => goBack(navigate, "/settings")} />
-      <IosScroll className="ios-me-scroll">
-        <IosCard className="ios-category-list ios-category-manager">
+      <IosScroll className="ios-category-page-scroll">
+        <div className="ios-category-type-tabs" role="tablist" aria-label="分类类型">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={selectedType === "expense"}
+            className={selectedType === "expense" ? "active" : ""}
+            onClick={() => setSelectedType("expense")}
+          >
+            支出
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={selectedType === "income"}
+            className={selectedType === "income" ? "active" : ""}
+            onClick={() => setSelectedType("income")}
+          >
+            收入
+          </button>
+        </div>
+
+        <div className="ios-category-section-heading">
+          <h2>{selectedType === "expense" ? "支出分类" : "收入分类"}</h2>
+          <span>共 {items.length} 个</span>
+        </div>
+
+        <section className="ios-category-surface">
           {items.map((item) => (
-            <div key={item.id}>
-              <IconTile tint="#fff0e8" color="#ff681c">
-                <TagIcon size={18} weight="fill" />
-              </IconTile>
-              <span>
-                <b>{item.name}</b>
-                <small>通用分类</small>
-              </span>
-              <button type="button" onClick={() => startEdit(item)}>
+            <div className="ios-category-row" key={item.id}>
+              <span
+                className="ios-category-color-mark"
+                style={{ background: item.color ?? categoryColors[0] }}
+              />
+              <b>{item.name}</b>
+              <button className="ios-category-text-action" type="button" onClick={() => startEdit(item)}>
                 编辑
               </button>
-              <button className="danger" type="button" onClick={() => setDeleteTarget(item)}>
+              <button
+                className="ios-category-text-action danger"
+                type="button"
+                onClick={() => setDeleteTarget(item)}
+              >
                 删除
               </button>
             </div>
           ))}
-          {!items.length && <p className="muted">暂无分类</p>}
-        </IosCard>
-        <IosCard className="ios-form-card">
-          <IosField label={editing ? "编辑分类" : "新增分类"} error={error}>
-            <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：餐饮" />
-          </IosField>
-          <div className="ios-category-actions">
-            {editing && (
-              <IosButton variant="secondary" onClick={resetForm}>
-                取消编辑
-              </IosButton>
-            )}
-            <IosButton disabled={!name.trim()} onClick={() => void save()}>
-              {editing ? "保存分类" : "新增分类"}
-            </IosButton>
-          </div>
-        </IosCard>
+          {!items.length && (
+            <div className="ios-category-empty">
+              <b>还没有{selectedType === "expense" ? "支出" : "收入"}分类</b>
+              <small>新增后即可在记账时选择</small>
+            </div>
+          )}
+        </section>
       </IosScroll>
+
+      <div className="ios-category-page-footer">
+        <IosButton onClick={startCreate}>新增{selectedType === "expense" ? "支出" : "收入"}分类</IosButton>
+      </div>
+
+      {editorOpen && (
+        <IosSheet
+          title={editing ? "编辑分类" : "新增分类"}
+          onClose={closeEditor}
+          footer={
+            <div className="ios-category-sheet-actions">
+              <IosButton variant="secondary" onClick={closeEditor}>
+                取消
+              </IosButton>
+              <IosButton disabled={!name.trim() || saving} onClick={() => void save()}>
+                {saving ? "保存中…" : "保存分类"}
+              </IosButton>
+            </div>
+          }
+        >
+          <div className="ios-category-editor">
+            <div className="ios-category-type-tabs compact" role="tablist" aria-label="分类类型">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={formType === "expense"}
+                className={formType === "expense" ? "active" : ""}
+                onClick={() => setFormType("expense")}
+              >
+                支出
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={formType === "income"}
+                className={formType === "income" ? "active" : ""}
+                onClick={() => setFormType("income")}
+              >
+                收入
+              </button>
+            </div>
+            <IosField label="分类名称" error={error}>
+              <Input
+                autoFocus
+                value={name}
+                maxLength={30}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="例如：餐饮"
+              />
+            </IosField>
+            <fieldset className="ios-category-color-fieldset">
+              <legend>选择颜色</legend>
+              <div>
+                {categoryColors.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    aria-label={`选择颜色 ${option}`}
+                    aria-pressed={color === option}
+                    className={color === option ? "selected" : ""}
+                    style={{ background: option }}
+                    onClick={() => setColor(option)}
+                  />
+                ))}
+              </div>
+            </fieldset>
+          </div>
+        </IosSheet>
+      )}
+
       {deleteTarget && (
         <IosDialog
           title="删除分类"

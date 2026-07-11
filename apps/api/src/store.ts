@@ -10,11 +10,13 @@ export type Invitation = {
   inviteePhone?: string;
   inviteeUserId?: string;
   role: "admin" | "member";
+  allowAdminEdit?: boolean;
   status: "pending" | "accepted" | "declined" | "expired" | "revoked";
   expiresAt: string;
   lastRemindedAt?: string;
   createdAt?: string;
   updatedAt?: string;
+  hiddenByUserIds?: string[];
 };
 export type UserInviteBlock = {
   id: string;
@@ -76,6 +78,7 @@ export type SimpleEntity = {
   name: string;
   type?: string;
   icon?: string;
+  color?: string;
   sortOrder?: number;
 };
 export type AiConfirmationAction =
@@ -119,6 +122,7 @@ export class MemoryLedgerStore {
       userId: "user_demo",
       name: "张三",
       role: "creator",
+      allowAdminEdit: false,
       joinedAt: now(),
     },
   ];
@@ -154,8 +158,24 @@ export class MemoryLedgerStore {
   records: ImportedRecord[] = [];
   aiConfirmations: AiConfirmation[] = [];
   categories: SimpleEntity[] = [
-    { id: "cat_food", userId: "user_demo", name: "餐饮", type: "expense", icon: "fork-knife", sortOrder: 1 },
-    { id: "cat_salary", userId: "user_demo", name: "工资", type: "income", icon: "wallet", sortOrder: 1 },
+    {
+      id: "cat_food",
+      userId: "user_demo",
+      name: "餐饮",
+      type: "expense",
+      icon: "fork-knife",
+      color: "#FF681C",
+      sortOrder: 1,
+    },
+    {
+      id: "cat_salary",
+      userId: "user_demo",
+      name: "工资",
+      type: "income",
+      icon: "wallet",
+      color: "#22A06B",
+      sortOrder: 1,
+    },
   ];
   createUser(
     name: string,
@@ -185,6 +205,7 @@ export class MemoryLedgerStore {
       userId: user.id,
       name: user.name,
       role: "creator",
+      allowAdminEdit: false,
       joinedAt: now(),
     });
     return book;

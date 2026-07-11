@@ -10,6 +10,7 @@ export type LedgerTransaction = {
   categoryId?: string;
   categoryName?: string;
   memberId?: string;
+  createdByUserId?: string;
   items?: Array<{ id?: string; name: string; amount: number; categoryId?: string; note?: string }>;
 };
 export function IosTransactionRow({

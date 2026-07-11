@@ -21,7 +21,7 @@ const eventName = "ledger:data-invalidated";
 
 export function invalidateLedgerData(detail: LedgerDataInvalidation = {}) {
   window.dispatchEvent(new CustomEvent<LedgerDataInvalidation>(eventName, { detail }));
-  void ledgerQueryClient.invalidateQueries({
+  return ledgerQueryClient.invalidateQueries({
     predicate: (query) => {
       const [, path] = query.queryKey;
       return typeof path === "string" && shouldReloadApiPath(path, detail);
@@ -34,8 +34,10 @@ function shouldReloadApiPath(path: string | undefined, detail: LedgerDataInvalid
   const scopes = new Set(detail.scopes ?? ["all"]);
   if (scopes.has("all")) return true;
   const bookPrefix = detail.bookId ? `/books/${detail.bookId}` : undefined;
+  const isGlobalBooksPath = scopes.has("books") && path === "/books";
   if (
     bookPrefix &&
+    !isGlobalBooksPath &&
     !path.startsWith(bookPrefix) &&
     !path.startsWith("/transactions/") &&
     path !== "/me/categories"

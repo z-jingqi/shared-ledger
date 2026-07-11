@@ -861,9 +861,11 @@ export function TransactionFormSheet({
 }) {
   const id = recordId;
   const { book } = useActiveBook();
-  const { data: existing } = useApi<{ transaction: LedgerTransaction }>(
-    id ? `/transactions/${id}` : undefined,
-  );
+  const { user } = useAuth();
+  const { data: existing } = useApi<{
+    transaction: LedgerTransaction;
+    permissions?: { canEdit: boolean; canDelete: boolean };
+  }>(id ? `/transactions/${id}` : undefined);
   const { data: categoriesData } = useApi<{ categories: CategoryOption[] }>("/me/categories");
   const draftKey = getRecordDraftKey(id, book?.id);
   const initialDraft = readRecordDraft(draftKey);
@@ -872,6 +874,9 @@ export function TransactionFormSheet({
   const normalizedSourceDraft =
     book?.incomeEnabled === false && sourceDraft ? { ...sourceDraft, type: "expense" as const } : sourceDraft;
   const categories = categoriesData?.categories ?? [];
+  const editingAnotherMembersRecord = Boolean(
+    existing?.transaction.createdByUserId && existing.transaction.createdByUserId !== user?.id,
+  );
 
   if (id && !initialDraft && !existing?.transaction) {
     return (
@@ -888,6 +893,8 @@ export function TransactionFormSheet({
       book={book}
       categories={categories}
       draftKey={draftKey}
+      categoryLocked={editingAnotherMembersRecord}
+      lockedCategoryName={existing?.transaction.categoryName}
       initialState={createTransactionFormState(
         normalizedSourceDraft,
         book?.incomeEnabled ? initialType : "expense",
@@ -901,6 +908,8 @@ function TransactionFormEditor({
   book,
   categories,
   draftKey,
+  categoryLocked = false,
+  lockedCategoryName,
   id,
   initialState,
   onClose,
@@ -908,6 +917,8 @@ function TransactionFormEditor({
   book: ReturnType<typeof useActiveBook>["book"];
   categories: CategoryOption[];
   draftKey: string;
+  categoryLocked?: boolean;
+  lockedCategoryName?: string;
   id?: string;
   initialState: TransactionFormState;
   onClose: () => void;
@@ -929,7 +940,7 @@ function TransactionFormEditor({
     type,
     view,
   } = state;
-  const canUseImageRecognition = user?.plan === "pro";
+  const canUseImageRecognition = user?.plan === "pro" && !categoryLocked;
   const incomeEnabled = Boolean(book?.incomeEnabled);
   const effectiveType = incomeEnabled ? type : "expense";
   const fileInput = useRef<HTMLInputElement>(null);
@@ -1058,7 +1069,7 @@ function TransactionFormEditor({
     const payload = {
       type: effectiveType,
       amount: amountNumber,
-      categoryId: selectedCategory?.id,
+      categoryId: categoryLocked ? categoryId : selectedCategory?.id,
       note: note.trim() || undefined,
       occurredAt,
       items: normalizeLineItemPayload(items),
@@ -1159,7 +1170,7 @@ function TransactionFormEditor({
         />
       ) : (
         <div className="ios-record-form">
-          {incomeEnabled ? (
+          {incomeEnabled && !categoryLocked ? (
             <IosSegment
               value={type}
               onChange={(value) => dispatchForm({ type: "set-type", value })}
@@ -1177,28 +1188,35 @@ function TransactionFormEditor({
 
           <section>
             <h3>类别</h3>
-            <div className="ios-category-strip">
-              {visibleCategories.slice(0, 8).map((category) => (
-                <button
-                  aria-label={category.name}
-                  className={category.id === categoryId ? "active" : ""}
-                  type="button"
-                  onClick={() => dispatchForm({ type: "set-category", value: category.id })}
-                  key={category.id}
-                >
-                  <IconTile
-                    tint={
-                      category.id === categoryId ? categoryColor(category) : `${categoryColor(category)}18`
-                    }
-                    color={category.id === categoryId ? "#fff" : categoryColor(category)}
+            {categoryLocked ? (
+              <div className="ios-locked-category">
+                <b>{lockedCategoryName || "未分类"}</b>
+                <small>协助编辑时保留记录创建者的分类</small>
+              </div>
+            ) : (
+              <div className="ios-category-strip">
+                {visibleCategories.slice(0, 8).map((category) => (
+                  <button
+                    aria-label={category.name}
+                    className={category.id === categoryId ? "active" : ""}
+                    type="button"
+                    onClick={() => dispatchForm({ type: "set-category", value: category.id })}
+                    key={category.id}
                   >
-                    {category.name[0] ?? "类"}
-                  </IconTile>
-                  <span>{category.name}</span>
-                </button>
-              ))}
-              {!visibleCategories.length && <p className="muted">暂无分类，可稍后在设置中维护。</p>}
-            </div>
+                    <IconTile
+                      tint={
+                        category.id === categoryId ? categoryColor(category) : `${categoryColor(category)}18`
+                      }
+                      color={category.id === categoryId ? "#fff" : categoryColor(category)}
+                    >
+                      {category.name[0] ?? "类"}
+                    </IconTile>
+                    <span>{category.name}</span>
+                  </button>
+                ))}
+                {!visibleCategories.length && <p className="muted">暂无分类，可稍后在设置中维护。</p>}
+              </div>
+            )}
           </section>
 
           <div className="ios-record-meta-row">
@@ -1360,9 +1378,17 @@ export function RecordDetailSheet({
   onClose: () => void;
   onEdit: (transactionId: string) => void;
 }) {
-  const { data, error } = useApi<{ transaction: LedgerTransaction }>(`/transactions/${transactionId}`);
+  const { user } = useAuth();
+  const { data, error } = useApi<{
+    transaction: LedgerTransaction;
+    permissions?: { canEdit: boolean; canDelete: boolean };
+  }>(`/transactions/${transactionId}`);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const transaction = data?.transaction;
+  const canEdit = Boolean(
+    data?.permissions?.canEdit ??
+    (transaction && (!transaction.createdByUserId || transaction.createdByUserId === user?.id)),
+  );
   const close = onClose;
   const deleteRecord = async () => {
     if (!transaction) return;
@@ -1400,15 +1426,19 @@ export function RecordDetailSheet({
               value={transaction.items?.length ? `${transaction.items.length} 项` : "无"}
             />
           </IosCard>
-          <div className="ios-sheet-actions">
-            <IosButton variant="outline" onClick={() => onEdit(transaction.id)}>
-              <NotePencilIcon size={18} />
-              编辑
-            </IosButton>
-            <button className="ios-danger-text-button" type="button" onClick={() => setConfirmDelete(true)}>
-              删除记录
-            </button>
-          </div>
+          {canEdit ? (
+            <div className="ios-sheet-actions">
+              <IosButton variant="outline" onClick={() => onEdit(transaction.id)}>
+                <NotePencilIcon size={18} />
+                编辑
+              </IosButton>
+              <button className="ios-danger-text-button" type="button" onClick={() => setConfirmDelete(true)}>
+                删除记录
+              </button>
+            </div>
+          ) : (
+            <p className="ios-record-readonly-note">此记录由其他成员创建，你可以查看但不能编辑。</p>
+          )}
         </div>
       )}
       {confirmDelete && transaction && (

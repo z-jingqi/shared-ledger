@@ -92,6 +92,18 @@ html.is-ios {
   padding-bottom: 0;
 }
 
+.standalone-settings-shell .content,
+.standalone-settings-shell .ios-page {
+  height: 100%;
+  min-height: 0;
+}
+
+@media (min-width: 650px) {
+  .phone.standalone-settings-shell {
+    height: calc(100dvh - 16px);
+  }
+}
+
 .ios-page {
   min-height: 100%;
   display: flex;

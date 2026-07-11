@@ -27,12 +27,19 @@ import {
   isBadgeInvitation,
   markInvitationItemsViewed,
 } from "../features/invitations/viewed";
+import { invalidateLedgerData } from "../features/data/invalidations";
 import { useActiveBook } from "../hooks/useActiveBook";
 import { useApi } from "../hooks/useApi";
 import { api } from "../lib";
 
 type Role = "creator" | "admin" | "member";
-type Member = { id: string; userId?: string; name: string; role: Role };
+type Member = {
+  id: string;
+  userId?: string;
+  name: string;
+  role: Role;
+  allowAdminEdit: boolean;
+};
 type UserSummary = {
   id: string;
   name: string;
@@ -46,6 +53,7 @@ type Invitation = InvitationLike & {
   inviteeEmail?: string;
   inviteeUserId?: string;
   role: "admin" | "member";
+  allowAdminEdit?: boolean;
   expiresAt: string;
   createdAt?: string;
   updatedAt?: string;
@@ -70,11 +78,35 @@ export function MembersPage() {
   );
   const [removing, setRemoving] = useState<Member | "me" | undefined>();
   const [inviteSheetOpen, setInviteSheetOpen] = useState(false);
+  const [savingConsent, setSavingConsent] = useState(false);
 
   const members = memberData?.members ?? [];
   const myMember = members.find((member) => member.userId === user?.id);
   const canManageMembers = myMember?.role === "creator" || myMember?.role === "admin";
   const invitationsPath = queryPath("/invitations", book?.id);
+
+  const updateEditConsent = async (allowAdminEdit: boolean) => {
+    if (!book || !myMember || myMember.role === "creator") return;
+    setSavingConsent(true);
+    try {
+      await api(`/books/${book.id}/members/me/preferences`, {
+        method: "PATCH",
+        body: JSON.stringify({ allowAdminEdit }),
+      });
+      toast.success(allowAdminEdit ? "已允许管理员协助编辑" : "已改为仅自己可编辑", {
+        duration: 2600,
+        closeButton: true,
+      });
+      await reloadMembers();
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "设置失败", {
+        duration: 3000,
+        closeButton: true,
+      });
+    } finally {
+      setSavingConsent(false);
+    }
+  };
 
   const removeMember = async () => {
     if (!book || !removing) return;
@@ -107,7 +139,7 @@ export function MembersPage() {
               <MemberRow
                 member={member}
                 isMe={member.userId === user?.id}
-                canRemove={member.role !== "creator" && canManageMembers}
+                canRemove={member.userId !== user?.id && member.role !== "creator" && canManageMembers}
                 onRemove={() => setRemoving(member)}
                 key={member.id}
               />
@@ -115,6 +147,28 @@ export function MembersPage() {
             {!members.length && <p className="muted">暂无成员</p>}
           </IosCard>
         </section>
+
+        {myMember && myMember.role !== "creator" ? (
+          <section>
+            <h3 className="ios-member-section-title">我的记录权限</h3>
+            <IosCard className="ios-member-consent-card">
+              <span>
+                <b>允许管理员协助编辑</b>
+                <small>开启后，创建者和管理员可修改或删除你在此账本中的记录。</small>
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-label="允许管理员协助编辑"
+                aria-checked={myMember.allowAdminEdit}
+                disabled={savingConsent}
+                onClick={() => void updateEditConsent(!myMember.allowAdminEdit)}
+              >
+                <i />
+              </button>
+            </IosCard>
+          </section>
+        ) : null}
 
         <IosCard className="ios-member-action-list" aria-label="成员操作">
           <ActionLink to={invitationsPath} title="邀请记录" caption="查看收到、已发和历史邀请" />
@@ -138,8 +192,8 @@ export function MembersPage() {
           title={removing === "me" ? "退出账本" : "移除成员"}
           message={
             removing === "me"
-              ? "退出后你将无法访问该账本，但历史记录会保留给其他成员。"
-              : `确定移除「${removing.name}」？历史记录将保留，对方将无法再访问该账本。`
+              ? "退出后你将无法访问该账本；历史记录会保留并变为只读，管理员也不能再修改。"
+              : `确定移除「${removing.name}」？历史记录会保留并变为只读，对方将无法再访问该账本。`
           }
           confirmText={removing === "me" ? "退出账本" : "移除"}
           onCancel={() => setRemoving(undefined)}
@@ -324,6 +378,7 @@ export function InvitationRecordsPage() {
   const initialTab = parseInvitationTab(searchParams.get("tab"));
   const [tab, setTab] = useState<InvitationTab>(initialTab);
   const [declining, setDeclining] = useState<Invitation | undefined>();
+  const [accepting, setAccepting] = useState<Invitation | undefined>();
   const [deletingInvitation, setDeletingInvitation] = useState<Invitation | undefined>();
   const { data: invitationsData, reload: reloadInvitations } = useApi<{ invitations: Invitation[] }>(
     user ? "/invitations" : undefined,
@@ -334,8 +389,8 @@ export function InvitationRecordsPage() {
 
   const invitations = invitationsData?.invitations ?? [];
   const blocks = blocksData?.blocks ?? [];
-  const received = invitations.filter((item) => item.direction === "received");
-  const sent = invitations.filter((item) => item.direction === "sent");
+  const received = invitations.filter((item) => item.direction === "received" && item.status === "pending");
+  const sent = invitations.filter((item) => item.direction === "sent" && item.status === "pending");
   const history = invitations.filter((item) => item.status !== "pending");
   const badgeInvitations = useMemo(() => invitations.filter(isBadgeInvitation), [invitations]);
 
@@ -355,15 +410,31 @@ export function InvitationRecordsPage() {
     await Promise.all([reloadInvitations(), reloadBlocks()]);
   };
 
-  const handleReceivedInvitation = async (invitation: Invitation, action: "accept" | "decline") => {
+  const acceptInvitation = async (invitation: Invitation, allowAdminEdit: boolean) => {
     try {
-      if (action === "accept") {
-        await api(`/invitations/${invitation.id}/accept`, { method: "POST" });
-        toast.success("已加入账本", { duration: 2600, closeButton: true });
-      } else {
-        await api(`/invitations/${invitation.id}/decline`, { method: "POST", body: JSON.stringify({}) });
-        toast.success("已拒绝邀请", { duration: 2600, closeButton: true });
-      }
+      await api(`/invitations/${invitation.id}/accept`, {
+        method: "POST",
+        body: JSON.stringify({ allowAdminEdit }),
+      });
+      toast.success("已加入账本", { duration: 2600, closeButton: true });
+      setAccepting(undefined);
+      await invalidateLedgerData({
+        bookId: invitation.bookId,
+        scopes: ["books", "members", "invitations"],
+      });
+      navigate(queryPath("/home", invitation.bookId), { replace: true });
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "操作失败", { duration: 3000, closeButton: true });
+    }
+  };
+
+  const declineInvitation = async (invitation: Invitation) => {
+    try {
+      await api(`/invitations/${invitation.id}/decline`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      toast.success("已拒绝邀请", { duration: 2600, closeButton: true });
       await reloadAll();
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : "操作失败", { duration: 3000, closeButton: true });
@@ -441,7 +512,7 @@ export function InvitationRecordsPage() {
             emptyTitle="暂无收到的邀请"
             emptyCaption="别人邀请你加入账本时会显示在这里。"
             invitations={received}
-            onAccept={(invitation) => void handleReceivedInvitation(invitation, "accept")}
+            onAccept={setAccepting}
             onDecline={setDeclining}
             onDelete={setDeletingInvitation}
           />
@@ -452,7 +523,6 @@ export function InvitationRecordsPage() {
             emptyTitle="暂无已发邀请"
             emptyCaption="邀请发送后，会在这里看到处理状态。"
             invitations={sent}
-            sent
             onRemind={(invitation) => void handleSentInvitation(invitation, "remind")}
             onRevoke={(invitation) => void handleSentInvitation(invitation, "revoke")}
             onDelete={setDeletingInvitation}
@@ -499,11 +569,18 @@ export function InvitationRecordsPage() {
           invitation={declining}
           onCancel={() => setDeclining(undefined)}
           onDecline={() => {
-            void handleReceivedInvitation(declining, "decline").then(() => setDeclining(undefined));
+            void declineInvitation(declining).then(() => setDeclining(undefined));
           }}
           onDeclineAndBlock={() => void declineAndBlock(declining)}
         />
       )}
+      {accepting ? (
+        <AcceptInvitationSheet
+          invitation={accepting}
+          onClose={() => setAccepting(undefined)}
+          onAccept={(allowAdminEdit) => acceptInvitation(accepting, allowAdminEdit)}
+        />
+      ) : null}
       {deletingInvitation && (
         <IosDialog
           danger
@@ -511,7 +588,7 @@ export function InvitationRecordsPage() {
           message={
             deletingInvitation.status === "pending"
               ? "进行中的邀请不能删除，请先撤回或等待对方处理。"
-              : "删除后这条邀请历史不会再显示。"
+              : "这条记录只会从你的邀请历史中隐藏，对方仍可查看。"
           }
           confirmText="删除"
           onCancel={() => setDeletingInvitation(undefined)}
@@ -569,7 +646,6 @@ function InvitationSection({
   emptyTitle,
   emptyCaption,
   invitations,
-  sent,
   compact,
   onAccept,
   onDecline,
@@ -581,7 +657,6 @@ function InvitationSection({
   emptyTitle: string;
   emptyCaption: string;
   invitations: Invitation[];
-  sent?: boolean;
   compact?: boolean;
   onAccept?: (invitation: Invitation) => void;
   onDecline?: (invitation: Invitation) => void;
@@ -593,49 +668,55 @@ function InvitationSection({
     <section>
       <h3 className="ios-member-section-title">{title}</h3>
       <IosCard className="ios-invitation-list">
-        {invitations.map((invitation) => (
-          <div className={`ios-invitation-row${compact ? " compact" : ""}`} key={invitation.id}>
-            <span
-              className={`ios-invitation-status-dot ${statusTone(invitation.status)}`}
-              aria-hidden="true"
-            />
-            <span>
-              <b>{sent ? inviteeDisplay(invitation) : inviterDisplay(invitation)}</b>
-              <small>
-                {invitation.book?.name ?? "账本邀请"} · {roleLabel(invitation.role)} ·{" "}
-                {statusLabel(invitation.status)}
-              </small>
-            </span>
-            {invitation.status === "pending" && !sent ? (
-              <div className="ios-inline-actions">
-                <button type="button" onClick={() => onAccept?.(invitation)}>
-                  接受
+        {invitations.map((invitation) => {
+          const isSent = invitation.direction === "sent";
+          return (
+            <div className={`ios-invitation-row${compact ? " compact" : ""}`} key={invitation.id}>
+              <span
+                className={`ios-invitation-status-dot ${statusTone(invitation.status)}`}
+                aria-hidden="true"
+              />
+              <span>
+                <b>{isSent ? inviteeDisplay(invitation) : inviterDisplay(invitation)}</b>
+                <small>
+                  {invitation.book?.name ?? "账本邀请"} · {roleLabel(invitation.role)} ·{" "}
+                  {statusLabel(invitation.status)}
+                  {invitation.status === "accepted" && typeof invitation.allowAdminEdit === "boolean"
+                    ? ` · ${invitation.allowAdminEdit ? "管理员可协助编辑" : "仅本人可编辑"}`
+                    : ""}
+                </small>
+              </span>
+              {invitation.status === "pending" && !isSent ? (
+                <div className="ios-inline-actions">
+                  <button type="button" onClick={() => onAccept?.(invitation)}>
+                    接受
+                  </button>
+                  <button className="danger" type="button" onClick={() => onDecline?.(invitation)}>
+                    拒绝
+                  </button>
+                </div>
+              ) : invitation.status === "pending" && isSent ? (
+                <div className="ios-inline-actions">
+                  <button type="button" onClick={() => onRemind?.(invitation)}>
+                    提醒
+                  </button>
+                  <button className="danger" type="button" onClick={() => onRevoke?.(invitation)}>
+                    撤回
+                  </button>
+                </div>
+              ) : (
+                <button
+                  className="ios-member-remove"
+                  type="button"
+                  aria-label="删除邀请记录"
+                  onClick={() => onDelete(invitation)}
+                >
+                  <TrashIcon size={18} />
                 </button>
-                <button className="danger" type="button" onClick={() => onDecline?.(invitation)}>
-                  拒绝
-                </button>
-              </div>
-            ) : invitation.status === "pending" && sent ? (
-              <div className="ios-inline-actions">
-                <button type="button" onClick={() => onRemind?.(invitation)}>
-                  提醒
-                </button>
-                <button className="danger" type="button" onClick={() => onRevoke?.(invitation)}>
-                  撤回
-                </button>
-              </div>
-            ) : (
-              <button
-                className="ios-member-remove"
-                type="button"
-                aria-label="删除邀请记录"
-                onClick={() => onDelete(invitation)}
-              >
-                <TrashIcon size={18} />
-              </button>
-            )}
-          </div>
-        ))}
+              )}
+            </div>
+          );
+        })}
         {!invitations.length && (
           <div className="ios-member-empty-note">
             <b>{emptyTitle}</b>
@@ -666,7 +747,12 @@ function MemberRow({
           {member.name}
           {isMe ? "（我）" : ""}
         </b>
-        <small>{roleLabel(member.role)}</small>
+        <small>
+          {roleLabel(member.role)}
+          {member.role !== "creator"
+            ? ` · ${member.allowAdminEdit ? "管理员可协助编辑" : "仅本人可编辑"}`
+            : ""}
+        </small>
       </span>
       {canRemove && (
         <button className="ios-member-remove" type="button" aria-label="移除成员" onClick={onRemove}>
@@ -697,6 +783,74 @@ function UserIdentity({ user, caption }: { user: UserSummary; caption?: string }
         <small>{caption ?? user.email ?? "已注册用户"}</small>
       </span>
     </>
+  );
+}
+
+function AcceptInvitationSheet({
+  invitation,
+  onClose,
+  onAccept,
+}: {
+  invitation: Invitation;
+  onClose: () => void;
+  onAccept: (allowAdminEdit: boolean) => Promise<void>;
+}) {
+  const [allowAdminEdit, setAllowAdminEdit] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  const accept = async () => {
+    setSubmitting(true);
+    try {
+      await onAccept(allowAdminEdit);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <IosSheet
+      title="接受邀请"
+      onClose={onClose}
+      footer={
+        <IosButton disabled={submitting} onClick={() => void accept()}>
+          {submitting ? "加入中…" : "接受并加入"}
+        </IosButton>
+      }
+    >
+      <div className="ios-accept-invitation-sheet">
+        <IosCard className="ios-accept-invitation-summary">
+          <b>{invitation.book?.name ?? "共享账本"}</b>
+          <small>
+            {inviterDisplay(invitation)} 邀请你成为{roleLabel(invitation.role)}
+          </small>
+        </IosCard>
+
+        <section>
+          <h3>选择你的记录编辑权限</h3>
+          <p>该设置只影响你创建的记录，加入后仍可在成员管理中更改。</p>
+          <div className="ios-invite-consent-options">
+            <button
+              type="button"
+              className={!allowAdminEdit ? "active" : ""}
+              aria-pressed={!allowAdminEdit}
+              onClick={() => setAllowAdminEdit(false)}
+            >
+              <b>仅我可以编辑</b>
+              <small>管理员可以查看，但不能修改或删除你的记录。</small>
+            </button>
+            <button
+              type="button"
+              className={allowAdminEdit ? "active" : ""}
+              aria-pressed={allowAdminEdit}
+              onClick={() => setAllowAdminEdit(true)}
+            >
+              <b>允许管理员协助编辑</b>
+              <small>创建者和管理员可以修改或删除你的记录。</small>
+            </button>
+          </div>
+        </section>
+      </div>
+    </IosSheet>
   );
 }
 
