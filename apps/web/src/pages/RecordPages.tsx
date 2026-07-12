@@ -3,7 +3,6 @@ import {
   CaretRightIcon,
   CheckCircleIcon,
   FunnelIcon,
-  NotePencilIcon,
   PaperclipIcon,
   PlusCircleIcon,
   ReceiptIcon,
@@ -1394,6 +1393,8 @@ export function RecordDetailSheet({
   const unassignedAmount = transaction
     ? Math.max(0, amountToCents(transaction.amount) - detailItemsTotalCents) / 100
     : 0;
+  const detailCategory = transaction ? categoryLabel(transaction) : "";
+  const detailTitle = transaction?.note?.trim() || detailCategory;
   const close = onClose;
   const deleteRecord = async () => {
     if (!transaction) return;
@@ -1409,81 +1410,91 @@ export function RecordDetailSheet({
       toast.error(cause instanceof Error ? cause.message : "删除失败", { duration: 3000, closeButton: true });
     }
   };
+  const footer = transaction ? (
+    canEdit ? (
+      <div className="ios-record-detail-actions">
+        <button className="ios-record-detail-edit" type="button" onClick={() => onEdit(transaction.id)}>
+          编辑记录
+        </button>
+        <button className="ios-record-detail-delete" type="button" onClick={() => setConfirmDelete(true)}>
+          删除记录
+        </button>
+      </div>
+    ) : (
+      <p className="ios-record-readonly-note">此记录由其他成员创建，你可以查看但不能编辑。</p>
+    )
+  ) : undefined;
 
   return (
-    <IosSheet title="交易详情" onClose={close}>
-      {error && <p className="field-error">{error}</p>}
-      {!transaction && !error && <IosListSkeleton rows={3} />}
-      {transaction && (
-        <div className="ios-record-detail">
-          <div className="ios-record-detail-hero">
-            <strong className={incomeEnabled ? transaction.type : "neutral"}>
-              {yuan(transaction.amount, currency)}
-            </strong>
-            <span>{transaction.note || "未命名记录"}</span>
-            <small>{categoryLabel(transaction)}</small>
-          </div>
-          <IosCard className="ios-detail-rows">
-            <DetailRow label="时间" value={new Date(transaction.occurredAt).toLocaleString("zh-CN")} />
-            <DetailRow label="备注" value={transaction.note || "—"} />
-          </IosCard>
-          <section className="ios-record-line-details" aria-label="金额明细">
-            <header>
-              <h3>金额明细</h3>
-              <small>{detailItems.length ? `${detailItems.length} 项` : "未拆分"}</small>
-            </header>
-            <IosCard className="ios-record-line-details-card">
-              {detailItems.length ? (
-                <ul>
-                  {detailItems.map((item, index) => (
-                    <li key={item.id ?? `${item.name}-${index}`}>
-                      <span>
-                        <b>{item.name || "未命名明细"}</b>
-                        {item.note ? <small>{item.note}</small> : null}
-                      </span>
-                      <strong className={incomeEnabled ? transaction.type : "neutral"}>
-                        {yuan(item.amount, currency)}
-                      </strong>
-                    </li>
-                  ))}
-                  {unassignedAmount > 0 ? (
-                    <li className="unassigned">
-                      <span>
-                        <b>未拆分金额</b>
-                        <small>总金额中尚未分配到明细的部分</small>
-                      </span>
-                      <strong className={incomeEnabled ? transaction.type : "neutral"}>
-                        {yuan(unassignedAmount, currency)}
-                      </strong>
-                    </li>
-                  ) : null}
-                </ul>
-              ) : (
-                <p className="ios-record-line-details-empty">这笔金额暂未添加明细</p>
-              )}
-              <footer>
-                <span>总金额</span>
-                <strong className={incomeEnabled ? transaction.type : "neutral"}>
-                  {yuan(transaction.amount, currency)}
-                </strong>
-              </footer>
-            </IosCard>
-          </section>
-          {canEdit ? (
-            <div className="ios-sheet-actions">
-              <IosButton variant="outline" onClick={() => onEdit(transaction.id)}>
-                <NotePencilIcon size={18} />
-                编辑
-              </IosButton>
-              <button className="ios-danger-text-button" type="button" onClick={() => setConfirmDelete(true)}>
-                删除记录
-              </button>
+    <>
+      <IosSheet
+        title="交易详情"
+        onClose={close}
+        footer={footer}
+        className={`ios-record-detail-sheet${detailItems.length ? " has-line-items" : " no-line-items"}`}
+      >
+        {error && <p className="field-error">{error}</p>}
+        {!transaction && !error && <IosListSkeleton rows={3} />}
+        {transaction && (
+          <div className="ios-record-detail">
+            <div className="ios-record-detail-summary">
+              <span className="ios-record-detail-summary-copy">
+                <span>
+                  <b>{detailTitle}</b>
+                  {detailCategory !== detailTitle ? <em>{detailCategory}</em> : null}
+                </span>
+                <small>{formatDetailDateTime(transaction.occurredAt)}</small>
+              </span>
+              <strong className={incomeEnabled ? transaction.type : "neutral"}>
+                {incomeEnabled ? (transaction.type === "income" ? "+" : "-") : ""}
+                {yuan(transaction.amount, currency)}
+              </strong>
             </div>
-          ) : (
-            <p className="ios-record-readonly-note">此记录由其他成员创建，你可以查看但不能编辑。</p>
-          )}
-        </div>
-      )}
+            {detailItems.length ? (
+              <section className="ios-record-line-details" aria-label="金额明细">
+                <header>
+                  <h3>金额明细</h3>
+                  <small>{detailItems.length} 项</small>
+                </header>
+                <IosCard className="ios-record-line-details-card">
+                  <div className="ios-record-line-details-scroll ios-scroll">
+                    <ul>
+                      {detailItems.map((item, index) => (
+                        <li key={item.id ?? `${item.name}-${index}`}>
+                          <span>
+                            <b>{item.name || "未命名明细"}</b>
+                            {item.note ? <small>{item.note}</small> : null}
+                          </span>
+                          <strong className={incomeEnabled ? transaction.type : "neutral"}>
+                            {yuan(item.amount, currency)}
+                          </strong>
+                        </li>
+                      ))}
+                      {unassignedAmount > 0 ? (
+                        <li className="unassigned">
+                          <span>
+                            <b>未拆分金额</b>
+                            <small>总金额中尚未分配到明细的部分</small>
+                          </span>
+                          <strong className={incomeEnabled ? transaction.type : "neutral"}>
+                            {yuan(unassignedAmount, currency)}
+                          </strong>
+                        </li>
+                      ) : null}
+                    </ul>
+                  </div>
+                  <footer>
+                    <span>总金额</span>
+                    <strong className={incomeEnabled ? transaction.type : "neutral"}>
+                      {yuan(transaction.amount, currency)}
+                    </strong>
+                  </footer>
+                </IosCard>
+              </section>
+            ) : null}
+          </div>
+        )}
+      </IosSheet>
       {confirmDelete && transaction && (
         <IosDialog
           danger
@@ -1494,7 +1505,7 @@ export function RecordDetailSheet({
           onConfirm={() => void deleteRecord()}
         />
       )}
-    </IosSheet>
+    </>
   );
 }
 
@@ -1593,13 +1604,19 @@ function normalizeRecordFiltersForBook(filters: RecordFilters, incomeEnabled: bo
   return incomeEnabled || filters.type === "all" ? filters : { ...filters, type: "all" };
 }
 
-function DetailRow({ label, value }: { label: string; value: string }) {
-  return (
-    <p>
-      <span>{label}</span>
-      <b>{value}</b>
-    </p>
-  );
+function formatDetailDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const parts = new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("year")}/${part("month")}/${part("day")} ${part("hour")}:${part("minute")}`;
 }
 
 function LegacyRecordsRedirect() {

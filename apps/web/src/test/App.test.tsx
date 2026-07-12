@@ -21,6 +21,7 @@ let categories: Array<{
 }> = [];
 let transactionError = "";
 let transactionDetailPermissions = { canEdit: true, canDelete: true };
+let transactionDetailItems: NonNullable<LedgerTransaction["items"]> = [];
 let transactionRequests: Array<{
   path: string;
   method: string;
@@ -327,6 +328,7 @@ describe("shared ledger mobile UI", () => {
     ];
     transactionError = "";
     transactionDetailPermissions = { canEdit: true, canDelete: true };
+    transactionDetailItems = [{ id: "item_milk", name: "牛奶", amount: 100 }];
     transactionRequests = [];
     bookMutationRequests = [];
     importBatchRequests = [];
@@ -1010,7 +1012,7 @@ describe("shared ledger mobile UI", () => {
                 occurredAt: "2026-06-01",
                 categoryId: "cat_food",
                 createdByUserId: "user_test",
-                items: [{ id: "item_milk", name: "牛奶", amount: 100 }],
+                items: transactionDetailItems,
               },
               permissions: transactionDetailPermissions,
             }),
@@ -2818,8 +2820,24 @@ describe("shared ledger mobile UI", () => {
     expect(within(amountDetails).getByText("牛奶")).toBeInTheDocument();
     expect(within(amountDetails).getByText("1 项")).toBeInTheDocument();
     expect(within(amountDetails).getAllByText("¥100.00")).toHaveLength(2);
-    expect(within(detail).queryByRole("button", { name: "编辑" })).not.toBeInTheDocument();
+    expect(amountDetails.querySelector(".ios-record-line-details-scroll")).toBeInTheDocument();
+    expect(within(detail).queryByRole("button", { name: "编辑记录" })).not.toBeInTheDocument();
     expect(within(detail).queryByRole("button", { name: "删除记录" })).not.toBeInTheDocument();
+  });
+  it("hides the amount-detail region and keeps the sheet compact when no line items exist", async () => {
+    const user = userEvent.setup();
+    transactionDetailItems = [];
+    window.history.pushState({}, "", "/records?bookId=book_test");
+    const { container } = render(<App />);
+
+    await waitFor(() => expect(recordRow(container, "tx_home")).toBeInTheDocument());
+    await user.click(recordRow(container, "tx_home")!);
+    const detail = await screen.findByRole("dialog", { name: "交易详情" });
+
+    expect(detail).toHaveClass("ios-record-detail-sheet", "no-line-items");
+    expect(within(detail).queryByRole("region", { name: "金额明细" })).not.toBeInTheDocument();
+    expect(within(detail).queryByText("未拆分")).not.toBeInTheDocument();
+    expect(within(detail).getByRole("button", { name: "编辑记录" })).toBeInTheDocument();
   });
   it("does not show save and continue when editing a record", async () => {
     const user = userEvent.setup();
@@ -2830,7 +2848,7 @@ describe("shared ledger mobile UI", () => {
     await user.click(recordRow(container, "tx_home")!);
     expect(window.location.pathname).toBe("/records");
     expect(await screen.findByRole("heading", { name: "交易详情" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "编辑" }));
+    await user.click(screen.getByRole("button", { name: "编辑记录" }));
     expect(await screen.findByRole("heading", { name: "编辑记录" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "保存修改" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "保存并继续" })).not.toBeInTheDocument();
