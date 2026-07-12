@@ -39,7 +39,7 @@ export function IosTransactionRow({
         <b>{transaction.note?.trim() || "无备注"}</b>
         {incomeEnabled ? <small className={transaction.type}>{typeLabel}</small> : null}
       </span>
-      <strong className={incomeEnabled ? transaction.type : "neutral"}>
+      <strong className={transaction.type}>
         {incomeEnabled ? (transaction.type === "income" ? "+" : "-") : ""}
         {yuan(transaction.amount, currency)}
       </strong>

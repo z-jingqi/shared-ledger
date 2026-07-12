@@ -7,6 +7,7 @@ import "./styles.ios.css";
 import "./styles.core-tabs.css";
 import "./styles.records-ios.css";
 import "./styles.account-ai.css";
+import "./styles.clear-ui.css";
 import { App } from "./App";
 import { applyPlatformClasses } from "./app/platform";
 

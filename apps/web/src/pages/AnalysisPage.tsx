@@ -20,7 +20,7 @@ export function AnalysisPage() {
   const { user } = useAuth();
   const { openSheet } = useAppSheetActions();
   const { book, books, setActiveBook } = useActiveBook();
-  const [range, setRange] = useState<Range>("month");
+  const [range, setRange] = useState<Range>("week");
   const [visibleSeries, setVisibleSeries] = useState<VisibleSeries>({ expense: true, income: true });
   const [selectedBar, setSelectedBar] = useState(0);
   const [bookSwitcherOpen, setBookSwitcherOpen] = useState(false);

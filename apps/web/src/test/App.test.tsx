@@ -1550,7 +1550,7 @@ describe("shared ledger mobile UI", () => {
           type: "expense",
           amount: 100,
           note: "餐饮",
-          occurredAt: "2026-07-01",
+          occurredAt: dateForTest(new Date()),
           categoryId: "cat_food",
         },
       ],
@@ -1560,7 +1560,7 @@ describe("shared ledger mobile UI", () => {
           type: "expense",
           amount: 300,
           note: "酒店",
-          occurredAt: "2026-07-02",
+          occurredAt: dateForTest(new Date()),
         },
       ],
     };
@@ -1570,6 +1570,8 @@ describe("shared ledger mobile UI", () => {
     const ledgerButton = await findBookSwitcher();
     expect(ledgerButton).toBeInTheDocument();
     expect(ledgerButton).not.toHaveTextContent("·");
+    expect(screen.getByRole("button", { name: "本周" })).toHaveClass("active");
+    expect(screen.getByRole("button", { name: "本月" })).not.toHaveClass("active");
     expect((await screen.findAllByText(/100\.00/)).length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("button", { name: bookSwitcherName("家庭账本") }));
@@ -1593,7 +1595,7 @@ describe("shared ledger mobile UI", () => {
           type: "expense",
           amount: 234.49,
           note: "购物",
-          occurredAt: "2026-07-02",
+          occurredAt: dateForTest(new Date()),
           memberId: "member_test",
         },
         {
@@ -1601,7 +1603,7 @@ describe("shared ledger mobile UI", () => {
           type: "expense",
           amount: 12,
           note: "旧成员",
-          occurredAt: "2026-07-03",
+          occurredAt: dateForTest(new Date()),
           memberId: "member_removed",
         },
       ],
@@ -1623,7 +1625,7 @@ describe("shared ledger mobile UI", () => {
           type: "expense",
           amount: 300,
           note: "酒店",
-          occurredAt: "2026-07-02",
+          occurredAt: dateForTest(new Date()),
         },
       ],
     };
@@ -1674,7 +1676,7 @@ describe("shared ledger mobile UI", () => {
     render(<App />);
 
     expect(await screen.findByRole("link", { name: /管理账本/ })).toHaveAttribute("href", "/books/manage");
-    expect(screen.queryByRole("heading", { name: "我的" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "我的" })).toBeInTheDocument();
     expect(screen.getByText("批量处理 · 高级分析")).toBeInTheDocument();
     expect(screen.queryByText("AI 识别 · 批量处理 · 高级分析")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /成员与邀请/ })).toHaveAttribute(
@@ -1956,7 +1958,7 @@ describe("shared ledger mobile UI", () => {
     );
     expect(toggle).toHaveAttribute("aria-checked", "true");
   });
-  it("uses neutral expense-only UI when income is disabled", async () => {
+  it("uses expense-only UI when income is disabled", async () => {
     const user = userEvent.setup();
     bookList = bookList.map((book) => (book.id === "book_test" ? { ...book, incomeEnabled: false } : book));
     window.history.pushState({}, "", "/home?bookId=book_test");

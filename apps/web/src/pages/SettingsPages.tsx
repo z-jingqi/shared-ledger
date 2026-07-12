@@ -147,6 +147,7 @@ export function SettingsPage() {
 
   return (
     <IosPage className="ios-me">
+      <IosTopBar title="我的" />
       <IosScroll className="ios-me-scroll ios-main-tab-scroll">
         <IosCard className="ios-profile-card ios-me-hero" onClick={() => setProfileOpen(true)}>
           <span className="ios-profile-avatar-button" aria-hidden="true">

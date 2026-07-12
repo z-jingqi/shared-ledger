@@ -1,0 +1,1574 @@
+/*
+ * Clear mobile UI
+ *
+ * This file intentionally loads after the legacy theme. It moves every content
+ * surface to the compact, flat visual language used by the approved mini
+ * program concept while leaving the existing bottom navigation untouched.
+ */
+
+:root {
+  --ios-bg: #f6f7f9;
+  --ios-bg-2: #f8f9fb;
+  --ios-surface: #ffffff;
+  --ios-text: #151b27;
+  --ios-muted: #7c8798;
+  --ios-soft: #f3f5f8;
+  --ios-line: #e5e9ef;
+  --ios-accent: #ff681c;
+  --ios-accent-2: #ff7a45;
+  --ios-income: #18a864;
+  --ios-danger: #e34b45;
+  --ios-blue: #377cf6;
+  --ios-radius-sm: 10px;
+  --ios-radius: 13px;
+  --ios-radius-lg: 15px;
+  --ios-radius-xl: 20px;
+  --ios-shadow: 0 1px 2px rgba(20, 31, 49, 0.03);
+  --ios-shadow-strong: 0 8px 24px rgba(20, 31, 49, 0.08);
+  --clear-gutter: clamp(12px, 4.1vw, 18px);
+  --clear-card-border: 1px solid var(--ios-line);
+}
+
+html,
+body,
+#root {
+  background: #edf0f3;
+}
+
+.phone,
+.phone .content,
+.ios-page {
+  background: var(--ios-bg);
+}
+
+.ios-page,
+.ios-sheet,
+.ios-dialog,
+.ui-dialog-content,
+.selection-modal {
+  color: var(--ios-text);
+}
+
+/* Top bars and shared controls */
+
+.ios-topbar {
+  min-height: 64px;
+  gap: 10px;
+  padding: calc(12px + var(--ios-safe-area-top)) var(--clear-gutter) 8px;
+}
+
+.ios-topbar.with-back {
+  grid-template-columns: 38px minmax(0, 1fr) 38px;
+}
+
+.ios-topbar h1,
+.ios-me .ios-topbar:not(.with-back) h1 {
+  min-width: 0;
+  color: var(--ios-text);
+  font-size: 24px;
+  font-weight: 850;
+  line-height: 1.15;
+  letter-spacing: -0.5px;
+  overflow-wrap: anywhere;
+}
+
+.ios-topbar.with-back h1 {
+  max-width: 100%;
+  font-size: 17px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ios-topbar-back {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  color: #293243;
+}
+
+.ios-topbar-back:active {
+  background: #eceff3;
+}
+
+.ios-ledger-pill,
+.ios-ai-spark,
+.ios-top-actions > button {
+  min-height: 38px;
+  border: var(--clear-card-border);
+  background: #fff;
+  box-shadow: none;
+}
+
+.ios-ledger-pill {
+  max-width: calc(100% - 50px);
+  gap: 7px;
+  padding: 5px 10px 5px 6px;
+  border-radius: 12px;
+}
+
+.ios-ai-spark,
+.ios-top-actions > .ios-ai-spark {
+  border-color: #ffd8c5;
+  background: #fff2eb;
+  color: #b94712;
+}
+
+.ios-ai-spark > span {
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -0.15px;
+}
+
+.ios-ledger-pill span:not(.ios-book-mark) {
+  max-width: min(54vw, 218px);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.ios-ledger-pill em {
+  font-size: 11px;
+}
+
+.ios-book-mark {
+  border-radius: 8px;
+}
+
+.ios-ai-spark,
+.ios-top-actions > button {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+}
+
+.ios-card,
+.ios-metric,
+.ios-chart-card,
+.ios-ai-analysis-card,
+.ios-record-list,
+.ios-settings-section .ios-card,
+.ios-book-list-row,
+.ios-book-switcher-list button,
+.ios-book-switcher-list a {
+  border: var(--clear-card-border);
+  background: #fff;
+  box-shadow: var(--ios-shadow);
+}
+
+.ios-card,
+.ios-chart-card,
+.ios-ai-analysis-card,
+.ios-record-list {
+  border-radius: var(--ios-radius-lg);
+}
+
+.ios-book-list-row.active,
+.ios-book-switcher-list button.active {
+  border: 1px solid #ffb58f;
+}
+
+.ios-create-book-row {
+  border-radius: 11px;
+  box-shadow: none;
+}
+
+.ios-add-menu {
+  gap: 0;
+  padding: 6px;
+  border: var(--clear-card-border);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(20, 31, 49, 0.12);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.ios-add-menu button {
+  border-radius: 10px;
+  background: #fff;
+}
+
+.ios-add-menu button + button {
+  border-top: 1px solid #edf0f3;
+}
+
+.ios-add-menu b,
+.ios-add-menu small {
+  overflow-wrap: anywhere;
+}
+
+.ios-main-tab-scroll,
+.ios-home-scroll,
+.ios-record-scroll,
+.ios-analysis-scroll,
+.ios-me-scroll {
+  padding-right: var(--clear-gutter);
+  padding-left: var(--clear-gutter);
+}
+
+.ios-home-scroll,
+.ios-record-scroll,
+.ios-analysis-scroll,
+.ios-me-scroll {
+  padding-top: 5px;
+}
+
+/* Home */
+
+.ios-balance-hero {
+  overflow: visible;
+  border: var(--clear-card-border);
+  border-radius: var(--ios-radius-lg);
+  padding: 15px 16px 14px;
+  background: #fff;
+  color: var(--ios-text);
+  box-shadow: var(--ios-shadow);
+}
+
+.ios-balance-hero::after {
+  display: none;
+}
+
+.ios-balance-month-select {
+  color: #4d5869;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.ios-balance-month-select svg {
+  color: #7f8997;
+}
+
+.ios-balance-hero > strong {
+  margin-top: 8px;
+  color: var(--ios-text);
+  font-size: clamp(30px, 9vw, 38px);
+  font-weight: 850;
+  line-height: 1.05;
+  letter-spacing: -1px;
+  overflow-wrap: anywhere;
+}
+
+.ios-balance-hero > div {
+  gap: 0;
+  margin-top: 15px;
+  border-top: 1px solid #edf0f3;
+}
+
+.ios-balance-hero p {
+  min-width: 0;
+  border-radius: 0;
+  padding: 11px 10px 0 0;
+  background: transparent;
+}
+
+.ios-balance-hero p + p {
+  border-left: 1px solid #edf0f3;
+  padding-right: 0;
+  padding-left: 14px;
+}
+
+.ios-balance-hero small {
+  color: var(--ios-muted);
+  font-size: 11px;
+  opacity: 1;
+}
+
+.ios-balance-hero b {
+  margin-top: 3px;
+  color: #313a49;
+  font-size: 15px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.ios-today-card {
+  min-height: 58px;
+  margin-top: 11px;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.ios-icon-tile {
+  border-radius: 10px;
+  box-shadow: none;
+}
+
+.ios-today-card b {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.ios-today-card small {
+  display: block;
+  margin-top: 1px;
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.ios-today-card a,
+.ios-today-card button {
+  height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--ios-accent);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.ios-today-card a::after,
+.ios-today-card button::after {
+  content: "›";
+  margin-left: 3px;
+  font-size: 19px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.ios-section {
+  margin-top: 17px;
+}
+
+.ios-section > h2,
+.ios-section header h2,
+.ios-settings-section h2,
+.ios-me-status h2 {
+  margin: 0 2px 8px;
+  color: #313a49;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.ios-section header a {
+  color: #7d8796;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.ios-reminder-list {
+  gap: 8px;
+}
+
+.ios-reminder-row {
+  min-height: 66px;
+  gap: 10px;
+  border: 1px solid #ffdcca;
+  border-radius: 13px;
+  padding: 10px 12px;
+  background: #fff9f5;
+  box-shadow: none;
+}
+
+.ios-reminder-row.danger {
+  border-color: #f5d5d2;
+  background: #fff8f7;
+}
+
+.ios-reminder-row b {
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.ios-reminder-row small {
+  margin-top: 2px;
+  font-size: 11px;
+}
+
+.ios-reminder-row > svg {
+  color: #9aa3af;
+  flex-shrink: 0;
+}
+
+.ios-transaction-card {
+  border-radius: var(--ios-radius-lg);
+}
+
+.ios-transaction-empty {
+  min-height: 74px;
+  border-radius: 0;
+  padding: 17px 14px;
+  background: #fff;
+  line-height: 1.5;
+}
+
+/* Records */
+
+.ios-record-search {
+  min-height: 44px;
+  height: auto;
+  border: var(--clear-card-border);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: none;
+}
+
+.ios-record-search input {
+  min-width: 0;
+  font-size: 13px;
+}
+
+.ios-record-search .ios-record-ai-search-button {
+  min-width: 72px;
+  border-radius: 9px;
+  background: #fff2eb;
+  font-size: 11px;
+}
+
+.ios-filter-chips {
+  gap: 7px;
+  margin: 10px 0 2px;
+}
+
+.ios-filter-chips button,
+.ios-analysis-ranges button {
+  min-height: 34px;
+  border-radius: 10px;
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.ios-filter-chips button.active,
+.ios-analysis-ranges button.active {
+  border-color: var(--ios-accent);
+  background: var(--ios-accent);
+}
+
+.ios-active-filter-bar {
+  min-height: 42px;
+  margin: 9px 0 2px;
+  padding: 7px 9px;
+  border: 1px solid #ffd9c6;
+  border-radius: 11px;
+  background: #fffaf7;
+  box-shadow: none;
+}
+
+.ios-active-filter-bar em {
+  max-width: 120px;
+  border-radius: 7px;
+  background: #f3f5f7;
+  font-size: 10.5px;
+}
+
+.ios-active-filter-bar button {
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ios-accent);
+}
+
+.ios-record-groups {
+  gap: 15px;
+  margin-top: 15px;
+}
+
+.ios-record-groups article > header {
+  margin: 0 2px 7px;
+}
+
+.ios-record-groups h2 {
+  color: #303846;
+  font-size: 13px;
+}
+
+.ios-record-groups header span {
+  min-width: 0;
+  color: var(--ios-muted);
+  font-size: 10.5px;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.ios-transaction-row {
+  display: grid;
+  grid-template-columns: minmax(46px, 58px) minmax(0, 1fr) max-content;
+  min-height: 62px;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom-color: #edf0f3;
+}
+
+.ios-transaction-category-name {
+  width: 100%;
+  max-width: 58px;
+  padding: 5px 6px;
+  border-radius: 9px;
+  background: #f3f5f8;
+  color: #667181;
+  font-size: 11px;
+}
+
+.ios-transaction-copy {
+  align-self: center;
+}
+
+.ios-transaction-copy b {
+  display: -webkit-box;
+  color: #242c39;
+  font-size: 13px;
+  font-weight: 780;
+  line-height: 1.35;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.ios-transaction-copy small {
+  margin-top: 3px;
+  color: var(--ios-muted) !important;
+  font-size: 10.5px;
+  font-weight: 650;
+}
+
+.ios-transaction-row strong {
+  align-self: center;
+  max-width: min(31vw, 128px);
+  font-size: 13px;
+  font-weight: 820;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.ios-transaction-row strong.expense {
+  color: #ef5b55;
+}
+
+.ios-record-empty-state {
+  min-height: 170px;
+  border: var(--clear-card-border);
+  border-radius: var(--ios-radius-lg);
+  background: #fff;
+  box-shadow: none;
+}
+
+.ios-record-empty-state p {
+  color: var(--ios-muted);
+  font-size: 12px;
+}
+
+/* Analysis */
+
+.ios-analysis-ranges {
+  gap: 7px;
+  padding: 0 var(--clear-gutter) 9px;
+}
+
+.ios-analysis-ranges button {
+  flex: 1;
+  padding-inline: 8px;
+}
+
+.ios-analysis-summary {
+  gap: 8px;
+}
+
+.ios-metric {
+  min-width: 0;
+  border-radius: 13px;
+  padding: 12px;
+}
+
+.ios-metric small {
+  font-size: 10.5px;
+}
+
+.ios-metric b {
+  margin-top: 5px;
+  font-size: clamp(15px, 4.4vw, 18px);
+  overflow-wrap: anywhere;
+}
+
+.ios-analysis-ai-action {
+  min-height: 48px;
+  margin-bottom: 10px;
+  border: var(--clear-card-border);
+  border-radius: 13px;
+  box-shadow: none;
+}
+
+.ios-analysis-ai-action > svg:first-child {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+}
+
+.ios-analysis-ai-action b {
+  font-size: 13px;
+}
+
+.ios-analysis-ai-action small {
+  font-size: 10.5px;
+}
+
+.ios-chart-card {
+  margin-top: 11px;
+  padding: 14px;
+}
+
+.ios-chart-card h2 {
+  margin-bottom: 10px;
+  font-size: 14px;
+}
+
+.ios-chart-legend {
+  gap: 4px;
+}
+
+.ios-chart-legend button {
+  padding: 4px 6px;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 10px;
+}
+
+.ios-bar-chart {
+  min-height: 146px;
+  gap: clamp(1px, 1vw, 7px);
+}
+
+.ios-bar-chart > button {
+  height: 132px;
+}
+
+.ios-chart-values {
+  min-height: 30px;
+  margin-top: 8px;
+  border-radius: 9px;
+}
+
+.ios-breakdown > div {
+  gap: 13px;
+}
+
+.ios-donut {
+  width: clamp(94px, 29vw, 118px);
+  height: clamp(94px, 29vw, 118px);
+}
+
+.ios-donut span {
+  width: 72%;
+  height: 72%;
+  padding-inline: 2px;
+}
+
+.ios-donut b {
+  font-size: clamp(12px, 3.7vw, 14px);
+  letter-spacing: -0.35px;
+  white-space: nowrap;
+}
+
+.ios-breakdown ul {
+  min-width: 0;
+  gap: 8px;
+}
+
+.ios-breakdown li {
+  min-width: 0;
+  font-size: 11px;
+}
+
+.ios-breakdown li span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ios-member-bars {
+  gap: 11px;
+}
+
+.ios-member-bars > div {
+  min-width: 0;
+}
+
+.ios-member-bars p {
+  min-width: 0;
+}
+
+/* My */
+
+.ios-me .ios-topbar:not(.with-back) {
+  padding-bottom: 6px;
+}
+
+.ios-me-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ios-me .ios-me-hero {
+  min-height: 104px;
+  gap: 13px;
+  border: var(--clear-card-border);
+  border-radius: var(--ios-radius-lg);
+  padding: 14px;
+  background: #fff;
+  box-shadow: var(--ios-shadow);
+}
+
+.ios-me .ios-me-hero::after {
+  display: none;
+}
+
+.ios-me .ios-profile-avatar-button,
+.ios-me .ios-profile-avatar-button > span,
+.ios-me .ios-profile-avatar-button img {
+  width: 70px;
+  height: 70px;
+}
+
+.ios-me .ios-profile-avatar-button > span {
+  font-size: 23px;
+}
+
+.ios-me .ios-profile-avatar-button i {
+  right: -1px;
+  bottom: 1px;
+  border-width: 3px;
+}
+
+.ios-me-hero-copy {
+  gap: 5px;
+}
+
+.ios-me-hero-copy > span {
+  flex-wrap: wrap;
+}
+
+.ios-me-hero-copy b {
+  max-width: 100%;
+  font-size: clamp(17px, 5.2vw, 21px);
+  font-weight: 850;
+}
+
+.ios-me-hero-copy em {
+  border: 0;
+  border-radius: 7px;
+  padding: 3px 6px;
+  background: #fff1e9;
+  font-size: 10px;
+}
+
+.ios-me-hero-copy small {
+  display: -webkit-box;
+  color: var(--ios-muted);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.4;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.ios-me .ios-me-hero > svg {
+  color: #a1a9b5;
+}
+
+.ios-me-status {
+  gap: 7px;
+}
+
+.ios-me-status > div {
+  gap: 8px;
+}
+
+.ios-me-status-card,
+.ios-me-status-card.banner {
+  min-height: 78px;
+  gap: 10px;
+  border: 1px solid #ffd9c5;
+  border-radius: 13px;
+  padding: 11px 12px;
+  background: #fff9f5;
+  box-shadow: none;
+}
+
+.ios-me-status-card::after {
+  display: none;
+}
+
+.ios-me-status-card > .ios-icon-tile,
+.ios-me-status-card.banner > .ios-icon-tile {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: #fff0e8 !important;
+  color: var(--ios-accent) !important;
+}
+
+.ios-me-status-card span,
+.ios-me-status-card.banner span {
+  min-width: 0;
+  gap: 1px;
+  margin: 0;
+}
+
+.ios-me-status-card b {
+  font-size: 12px;
+}
+
+.ios-me-status-card strong,
+.ios-me-status-card.banner strong {
+  color: var(--ios-accent) !important;
+  font-size: 21px;
+}
+
+.ios-me-status-card small {
+  display: block;
+  overflow: hidden;
+  color: var(--ios-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ios-me-status-card.banner em {
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 11px;
+}
+
+.ios-me .ios-subscription-card {
+  min-height: 72px;
+  gap: 11px;
+  border: 1px solid #ffd7c2;
+  border-radius: 13px;
+  padding: 12px;
+  background: #fff8f4;
+  color: var(--ios-text);
+  box-shadow: none;
+}
+
+.ios-me .ios-subscription-card > i {
+  display: none;
+}
+
+.ios-me .ios-subscription-card .ios-icon-tile {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: #fff0e8 !important;
+  color: var(--ios-accent) !important;
+}
+
+.ios-me .ios-subscription-card b {
+  color: var(--ios-text);
+  font-size: 15px;
+}
+
+.ios-me .ios-subscription-card small {
+  color: var(--ios-muted);
+  font-size: 10.5px;
+}
+
+.ios-me .ios-subscription-card em {
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 8px;
+  background: var(--ios-accent);
+  color: #fff;
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.ios-settings-section {
+  gap: 7px;
+}
+
+.ios-settings-section .ios-card {
+  overflow: hidden;
+  border-radius: 13px;
+}
+
+.ios-settings-row,
+.ios-settings-info {
+  min-height: 52px;
+  gap: 11px;
+  padding: 9px 12px;
+  border-bottom-color: #edf0f3;
+  font-size: 13px;
+}
+
+.ios-settings-row .ios-icon-tile,
+.ios-settings-info .ios-icon-tile {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: #f4f5f7 !important;
+  color: #303846 !important;
+}
+
+.ios-settings-row > span:nth-child(2),
+.ios-settings-info > span:nth-child(2) {
+  min-width: 0;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.ios-settings-row small,
+.ios-settings-info small {
+  max-width: min(34vw, 130px);
+  overflow: hidden;
+  color: var(--ios-muted);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ios-logout-row {
+  min-height: 46px;
+  border: var(--clear-card-border);
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: none;
+  font-size: 13px;
+}
+
+/* Sheets, forms and secondary pages */
+
+.ios-sheet {
+  border: 0;
+  border-radius: 22px 22px 0 0;
+  background: var(--ios-bg);
+  box-shadow: 0 -10px 36px rgba(25, 35, 52, 0.12);
+}
+
+.ios-sheet-header {
+  min-height: 54px;
+  padding-right: var(--clear-gutter);
+  padding-left: var(--clear-gutter);
+  background: var(--ios-bg);
+}
+
+.ios-sheet-header h2 {
+  min-width: 0;
+  color: var(--ios-text);
+  font-size: 17px;
+  font-weight: 850;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ios-sheet-grabber::before {
+  background: #cdd2d9;
+}
+
+.ios-sheet-body {
+  padding: 8px var(--clear-gutter) 18px;
+}
+
+.ios-sheet-footer {
+  gap: 8px;
+  padding: 10px var(--clear-gutter) calc(12px + var(--ios-safe-area-bottom));
+  border-top: 1px solid var(--ios-line);
+  background: rgba(246, 247, 249, 0.97);
+  box-shadow: none;
+}
+
+.ios-button,
+.ui-button,
+.primary-wide {
+  border-radius: 11px;
+  box-shadow: none;
+}
+
+.ios-button.primary,
+.ui-button:not(.ui-button-outline):not(.ui-button-ghost):not(.ui-button-secondary) {
+  background: var(--ios-accent);
+}
+
+.ios-field input,
+.ios-field textarea,
+.ios-field select,
+.ui-input,
+.ui-textarea,
+.ui-select-trigger,
+.form input,
+.form textarea,
+.form select {
+  border-color: var(--ios-line);
+  border-radius: 11px;
+  background: #fff;
+  box-shadow: none;
+}
+
+.ios-field input:focus,
+.ios-field textarea:focus,
+.ios-field select:focus,
+.ui-input:focus,
+.ui-textarea:focus,
+.form input:focus,
+.form textarea:focus,
+.form select:focus {
+  border-color: #ffab82;
+  box-shadow: 0 0 0 3px rgba(255, 95, 31, 0.1);
+  outline: 0;
+}
+
+.ios-segment {
+  border-radius: 11px;
+  background: #eceff3;
+}
+
+.ios-segment button {
+  border-radius: 9px;
+}
+
+.ios-segment button.selected {
+  box-shadow: none;
+}
+
+.ios-dialog,
+.ui-dialog-content,
+.selection-modal {
+  border: var(--clear-card-border);
+  border-radius: 17px;
+  background: #fff;
+  box-shadow: 0 20px 50px rgba(20, 31, 49, 0.18);
+}
+
+.ui-panel,
+.ui-card,
+.amount-card,
+.record-fields,
+.line-summary,
+.records-upload-panel,
+.ios-form-card {
+  border-color: var(--ios-line);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: none;
+}
+
+.page-title h1,
+.ui-card-title,
+.ui-dialog-title,
+.section-header h2,
+.ui-panel h2,
+.selection-modal h2 {
+  color: var(--ios-text);
+  overflow-wrap: anywhere;
+}
+
+.ios-record-detail-sheet {
+  max-height: 70dvh;
+}
+
+.ios-record-detail-summary,
+.ios-record-line-details-card {
+  border: var(--clear-card-border);
+  background: #fff;
+  box-shadow: none;
+}
+
+.ios-record-detail-summary-copy,
+.ios-record-detail-summary-copy > span,
+.ios-record-line-details-card li > span {
+  min-width: 0;
+}
+
+.ios-record-detail-summary-copy b,
+.ios-record-line-details-card li b,
+.ios-record-line-details-card li small {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.ios-record-detail-actions button {
+  border-radius: 10px;
+  box-shadow: none;
+}
+
+/* Import, pending records and collaboration */
+
+.ios-import-hero,
+.ios-import-job,
+.ios-pending-card,
+.ios-pending-items,
+.ios-members-overview,
+.ios-member-summary,
+.ios-invite-intro,
+.ios-member-action-list,
+.ios-member-list,
+.ios-member-consent-card,
+.ios-invite-intro-card,
+.ios-invite-search-card,
+.ios-invite-selected,
+.ios-invite-search-results button,
+.ios-invitation-list {
+  border: var(--clear-card-border);
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: none;
+}
+
+.ios-import-hero {
+  padding: 12px 13px;
+}
+
+.ios-import-hero p {
+  color: var(--ios-muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.ios-import-stats {
+  gap: 7px;
+}
+
+.ios-import-stats span {
+  min-width: 0;
+  border: var(--clear-card-border);
+  border-radius: 11px;
+  background: #fff;
+  box-shadow: none;
+}
+
+.ios-import-filter,
+.ios-members-tabs {
+  border: var(--clear-card-border);
+  border-radius: 11px;
+  background: #fff;
+  box-shadow: none;
+}
+
+.ios-import-filter button,
+.ios-members-tabs button {
+  border-radius: 9px;
+}
+
+.ios-import-job {
+  min-width: 0;
+  padding: 10px;
+}
+
+.ios-import-job > span,
+.ios-import-job b,
+.ios-import-job small,
+.ios-import-job p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.ios-import-job b {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.ios-import-preview {
+  border-radius: 10px;
+}
+
+.ios-pending-card {
+  overflow: visible;
+  padding: 12px;
+}
+
+.ios-pending-main {
+  min-width: 0;
+}
+
+.ios-pending-main > span:nth-child(2),
+.ios-pending-main b,
+.ios-pending-main small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.ios-pending-actions button,
+.ios-import-job button {
+  border-radius: 9px;
+  box-shadow: none;
+}
+
+.ios-members-overview {
+  padding: 13px;
+}
+
+.ios-members-overview::before {
+  display: none;
+}
+
+.ios-members-overview > span:nth-child(2),
+.ios-member-summary span:nth-child(2),
+.ios-invite-intro span:nth-child(2),
+.ios-member-row > span:nth-child(2),
+.ios-member-action-row span,
+.ios-invite-search-heading,
+.ios-invite-search-results button > span:nth-child(2),
+.ios-invite-selected > span:nth-child(2),
+.ios-invitation-row > span:nth-child(2) {
+  min-width: 0;
+}
+
+.ios-members-overview b,
+.ios-members-overview small,
+.ios-member-row b,
+.ios-member-row small,
+.ios-member-action-row b,
+.ios-member-action-row small,
+.ios-invite-intro-card b,
+.ios-invite-intro-card small,
+.ios-invite-search-results b,
+.ios-invite-search-results small,
+.ios-invite-selected b,
+.ios-invite-selected small,
+.ios-invitation-row b,
+.ios-invitation-row small {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.ios-member-row,
+.ios-member-action-row,
+.ios-invitation-row {
+  border-bottom-color: #edf0f3;
+}
+
+.ios-member-send-button,
+.ios-invite-submit-button,
+.ios-invite-search-button {
+  border-radius: 10px;
+  box-shadow: none;
+}
+
+/* Account and subscription */
+
+.ios-account-scroll {
+  gap: 12px;
+  padding-right: var(--clear-gutter);
+  padding-left: var(--clear-gutter);
+}
+
+.ios-upgrade-hero {
+  border: 1px solid #ffd7c2;
+  border-radius: 15px;
+  padding: 18px 16px;
+  background: #fff8f4;
+  color: var(--ios-text);
+  box-shadow: none;
+}
+
+.ios-upgrade-hero::after {
+  display: none;
+}
+
+.ios-upgrade-hero button {
+  border-radius: 8px;
+  padding: 4px 9px;
+}
+
+.ios-upgrade-hero h1 {
+  max-width: none;
+  margin-top: 10px;
+  color: var(--ios-text);
+  font-size: 22px;
+  overflow-wrap: anywhere;
+}
+
+.ios-upgrade-hero p {
+  color: var(--ios-muted);
+  font-size: 12px;
+}
+
+.ios-upgrade-features {
+  border: var(--clear-card-border);
+  border-radius: 13px;
+  padding: 3px 13px;
+  background: #fff;
+  box-shadow: none;
+}
+
+.ios-upgrade-features div {
+  min-width: 0;
+  padding: 11px 0;
+  border-bottom-color: #edf0f3;
+}
+
+.ios-upgrade-features p,
+.ios-upgrade-features b,
+.ios-upgrade-features small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ios-security-summary {
+  border: var(--clear-card-border);
+  border-radius: 13px;
+  box-shadow: none;
+}
+
+/* AI */
+
+.ios-ai-workspace,
+.ios-ai-workspace .ios-sheet-header,
+.ios-ai-workspace .ios-sheet-body,
+.ios-ai-workspace .ai-page {
+  background: var(--ios-bg);
+}
+
+.ios-ai-workspace .ai-message,
+.ios-ai-workspace .ai-assistant,
+.ai-result-card,
+.ai-structured-card,
+.ai-navigation-card,
+.ai-pending-confirmation {
+  border-color: var(--ios-line);
+  border-radius: 13px;
+  box-shadow: none;
+}
+
+.ios-ai-workspace .ai-assistant {
+  background: #fff;
+}
+
+.ios-ai-workspace .ai-message,
+.ios-ai-workspace .ai-message * {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.ios-ai-workspace .ai-composer,
+.ai-composer {
+  border-color: var(--ios-line);
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: none;
+}
+
+.ios-ai-session-sheet,
+.ios-ai-session-row,
+.ios-ai-session-search,
+.ios-ai-session-new {
+  border-color: var(--ios-line);
+  background: #fff;
+  box-shadow: none;
+}
+
+.ios-ai-session-row.active,
+.ios-ai-session-new {
+  border-color: #ffd2bd;
+  background: #fff4ed;
+}
+
+/* Authentication */
+
+.phone.auth-shell {
+  background: #f7f8fa;
+  box-shadow: none;
+}
+
+.ios-auth-brand span {
+  border: var(--clear-card-border);
+  border-radius: 15px;
+  background: #fff;
+  color: var(--ios-accent);
+  box-shadow: none;
+}
+
+.ios-auth-brand h1 {
+  font-size: 24px;
+}
+
+.ios-auth-input {
+  border-color: var(--ios-line);
+  border-radius: 11px;
+  box-shadow: none;
+}
+
+.auth-brand-icon {
+  border: var(--clear-card-border);
+  background: #fff;
+  box-shadow: none;
+}
+
+.auth-input-shell {
+  border-color: var(--ios-line);
+  border-radius: 11px;
+  box-shadow: none;
+}
+
+.auth-input-shell:focus-within {
+  border-color: #ffab82;
+  box-shadow: 0 0 0 3px rgba(255, 95, 31, 0.1);
+}
+
+.auth-submit.ui-button {
+  border-radius: 11px;
+  box-shadow: none;
+}
+
+/* Narrow screens and long localized text */
+
+@media (max-width: 360px) {
+  :root {
+    --clear-gutter: 12px;
+  }
+
+  .ios-topbar {
+    gap: 7px;
+  }
+
+  .ios-ledger-pill span:not(.ios-book-mark) {
+    max-width: 52vw;
+    font-size: 13px;
+  }
+
+  .ios-transaction-row {
+    grid-template-columns: 48px minmax(0, 1fr) max-content;
+    gap: 7px;
+    padding-inline: 10px;
+  }
+
+  .ios-transaction-category-name {
+    max-width: 48px;
+    font-size: 10px;
+  }
+
+  .ios-transaction-copy b,
+  .ios-transaction-row strong {
+    font-size: 12px;
+  }
+
+  .ios-me .ios-profile-avatar-button,
+  .ios-me .ios-profile-avatar-button > span,
+  .ios-me .ios-profile-avatar-button img {
+    width: 60px;
+    height: 60px;
+  }
+
+  .ios-me .ios-subscription-card em {
+    padding-inline: 6px;
+  }
+
+  .ios-breakdown > div {
+    gap: 9px;
+  }
+}
+
+@media (min-width: 650px) {
+  .phone:not(.auth-shell) {
+    border: 1px solid #e2e6eb;
+    box-shadow: 0 12px 38px rgba(25, 35, 52, 0.09);
+  }
+}
+
+/* Horizontal list rows use a shared top edge, especially when copy wraps. */
+
+:is(
+  .ios-reminder-row,
+  .ios-settings-row,
+  .ios-settings-info,
+  .ios-book-list-row,
+  .ios-book-switcher-list button,
+  .ios-book-switcher-list a,
+  .ios-category-row,
+  .ios-import-job,
+  .ios-pending-main,
+  .ios-member-row,
+  .ios-member-action-row,
+  .ios-invitation-row,
+  .ios-invite-search-results button,
+  .ios-invite-selected,
+  .ios-ai-session-row,
+  .ai-card-list-row,
+  .ios-record-line-details-card li,
+  .ios-upgrade-features div,
+  .transaction,
+  .pending-row,
+  .history-row,
+  .book-card,
+  .member-row,
+  .invitation-row,
+  .settings-list a,
+  .settings-list button,
+  .settings-info-row
+) {
+  align-items: flex-start;
+}
+
+:is(
+    .ios-reminder-row,
+    .ios-settings-row,
+    .ios-settings-info,
+    .ios-book-list-row,
+    .ios-category-row,
+    .ios-import-job,
+    .ios-pending-main,
+    .ios-member-row,
+    .ios-member-action-row,
+    .ios-invitation-row,
+    .ios-ai-session-row,
+    .ai-card-list-row,
+    .ios-record-line-details-card li,
+    .transaction,
+    .pending-row,
+    .history-row,
+    .book-card,
+    .member-row,
+    .invitation-row,
+    .settings-info-row
+  )
+  > * {
+  align-self: flex-start;
+}
+
+.ios-record-line-details-card li > strong,
+.ios-settings-row > svg,
+.ios-book-list-row > svg,
+.ios-member-row > :last-child,
+.ios-invitation-row > :last-child {
+  align-self: flex-start;
+}
+
+/* Transaction copy, category and amount share the first text baseline. */
+
+.ios-transaction-row {
+  min-height: 0;
+  align-items: baseline;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.ios-transaction-row > *,
+.ios-transaction-copy,
+.ios-transaction-row > strong {
+  align-self: baseline;
+}
+
+.ios-transaction-category-name,
+.ios-transaction-copy b,
+.ios-transaction-row strong {
+  line-height: 1.35;
+}
+
+.ios-transaction-category-name {
+  padding-top: 0;
+  padding-bottom: 0;
+  line-height: 1.6;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ios-sheet,
+  .ios-dialog,
+  .ios-ai-session-sheet {
+    animation-duration: 0.01ms !important;
+  }
+}
