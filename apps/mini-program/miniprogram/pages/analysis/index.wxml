@@ -1,0 +1,70 @@
+<view class="screen">
+  <page-header
+    book-name="{{book.name}}"
+    book-mark="{{bookMark}}"
+    bind:booktap="onBookTap"
+  />
+  <view class="range-tabs">
+    <button class="{{range === 'week' ? 'active' : ''}}" data-range="week" bindtap="onRange">本周</button>
+    <button class="{{range === 'month' ? 'active' : ''}}" data-range="month" bindtap="onRange">本月</button>
+    <button class="{{range === 'year' ? 'active' : ''}}" data-range="year" bindtap="onRange">本年</button>
+  </view>
+  <scroll-view class="analysis-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+    <view class="page-content analysis-content">
+      <view wx:if="{{loading}}" class="surface skeleton chart-skeleton"></view>
+      <block wx:else>
+        <view class="summary-grid {{book.incomeEnabled ? '' : 'single'}}">
+          <view wx:if="{{book.incomeEnabled}}" class="surface metric"><text>收入</text><text class="metric-value income">{{income}}</text></view>
+          <view class="surface metric"><text>支出</text><text class="metric-value expense">{{expense}}</text></view>
+        </view>
+
+        <view class="surface chart-card">
+          <view class="chart-heading">
+            <text>收支趋势</text>
+            <view class="legend">
+              <button class="{{showExpense ? '' : 'disabled'}}" bindtap="onToggleExpense"><view class="legend-dot expense-dot"></view>支出</button>
+              <button wx:if="{{book.incomeEnabled}}" class="{{showIncome ? '' : 'disabled'}}" bindtap="onToggleIncome"><view class="legend-dot income-dot"></view>收入</button>
+            </view>
+          </view>
+          <scroll-view class="bars-scroll" scroll-x enhanced show-scrollbar="{{false}}">
+            <view class="bars {{range}}">
+              <button wx:for="{{bars}}" wx:key="label" class="bar-column {{selectedBar.label === item.label ? 'selected' : ''}}" data-index="{{index}}" bindtap="onBar">
+                <view class="bar-track">
+                  <view wx:if="{{showExpense}}" class="bar expense-bar" style="height: {{item.expenseHeight}}%;"></view>
+                  <view wx:if="{{showIncome && book.incomeEnabled}}" class="bar income-bar" style="height: {{item.incomeHeight}}%;"></view>
+                </view>
+                <text>{{item.label}}</text>
+              </button>
+            </view>
+          </scroll-view>
+          <view wx:if="{{selectedBar}}" class="selected-values">
+            <text wx:if="{{showExpense}}" class="expense">{{selectedBar.expenseText}}</text>
+            <text wx:if="{{showIncome && book.incomeEnabled}}" class="income">{{selectedBar.incomeText}}</text>
+          </view>
+        </view>
+
+        <view class="surface breakdown-card">
+          <text class="card-title">支出构成</text>
+          <view wx:if="{{categories.length}}" class="breakdown-list">
+            <view wx:for="{{categories}}" wx:key="name" class="breakdown-row">
+              <view class="breakdown-copy"><text>{{item.name}}</text><text>{{item.value}}</text></view>
+              <view class="progress"><view class="progress-value" style="width: {{item.width}}; background: {{item.color}};"></view></view>
+            </view>
+          </view>
+          <text wx:else class="empty-copy">本期暂无支出</text>
+        </view>
+
+        <view class="surface breakdown-card">
+          <text class="card-title">成员贡献</text>
+          <view wx:if="{{members.length}}" class="breakdown-list">
+            <view wx:for="{{members}}" wx:key="name" class="breakdown-row">
+              <view class="breakdown-copy"><text>{{item.name}}</text><text>{{item.value}}</text></view>
+              <view class="progress"><view class="progress-value" style="width: {{item.width}};"></view></view>
+            </view>
+          </view>
+          <text wx:else class="empty-copy">本期暂无成员记录</text>
+        </view>
+      </block>
+    </view>
+  </scroll-view>
+</view>

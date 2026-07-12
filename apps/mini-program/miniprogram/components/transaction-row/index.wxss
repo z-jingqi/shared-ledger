@@ -1,0 +1,55 @@
+.transaction-row {
+  display: grid;
+  grid-template-columns: 104rpx minmax(0, 1fr) max-content;
+  align-items: baseline;
+  gap: 14rpx;
+  width: 100%;
+  min-height: 66rpx;
+  padding: 16rpx 20rpx;
+  border-bottom: 2rpx solid #edf0f3;
+  background: #fff;
+  text-align: left;
+}
+
+.transaction-row:last-child {
+  border-bottom: 0;
+}
+
+.category {
+  overflow: hidden;
+  padding: 2rpx 10rpx;
+  border-radius: 12rpx;
+  background: #f3f5f7;
+  color: #687285;
+  font-size: 22rpx;
+  line-height: 1.6;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transaction-title {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 27rpx;
+  font-weight: 650;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.amount {
+  flex: none;
+  font-size: 27rpx;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.amount.expense {
+  color: #ef5b55;
+}
+
+.amount.income {
+  color: #159b58;
+}

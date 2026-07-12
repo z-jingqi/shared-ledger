@@ -1,0 +1,15 @@
+<view class="categories-screen">
+  <page-header title="分类管理" show-back="{{true}}" />
+  <view class="categories-content">
+    <view class="type-tabs"><button class="{{type === 'expense' ? 'active' : ''}}" data-type="expense" bindtap="onType">支出分类</button><button class="{{type === 'income' ? 'active' : ''}}" data-type="income" bindtap="onType">收入分类</button></view>
+    <view class="color-row"><text>新分类颜色</text><view><button wx:for="{{colors}}" wx:key="*this" class="color-dot {{selectedColor === item ? 'active' : ''}}" style="background: {{item}};" data-color="{{item}}" bindtap="onColor"></button></view></view>
+    <button class="add-category" bindtap="onAdd">＋ 新增分类</button>
+    <view class="surface category-list">
+      <view wx:for="{{visibleCategories}}" wx:key="id" class="category-row">
+        <view class="category-color" style="background: {{item.color || '#ff681c'}};"></view><text>{{item.name}}</text>
+        <button data-id="{{item.id}}" bindtap="onEdit">编辑</button><button class="delete" data-id="{{item.id}}" bindtap="onDelete">删除</button>
+      </view>
+      <view wx:if="{{!visibleCategories.length}}" class="empty-state"><text>暂无分类</text></view>
+    </view>
+  </view>
+</view>

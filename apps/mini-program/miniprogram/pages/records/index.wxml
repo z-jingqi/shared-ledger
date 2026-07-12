@@ -1,0 +1,38 @@
+<view class="screen">
+  <page-header
+    book-name="{{book.name}}"
+    book-mark="{{bookMark}}"
+    show-ai="{{true}}"
+    bind:booktap="onBookTap"
+    bind:aitap="onAiTap"
+  />
+  <view class="page-content records-content">
+    <view class="search-row">
+      <view class="search-box">
+        <text class="search-icon">⌕</text>
+        <input value="{{query}}" placeholder="搜索流水，或输入一句话" bindinput="onInput" />
+        <button class="ai-search" bindtap="onAiSearch">AI 搜索</button>
+      </view>
+      <button class="filter-button" aria-label="筛选" bindtap="onFilter">▽</button>
+    </view>
+    <view class="type-tabs">
+      <button class="{{type === 'all' ? 'active' : ''}}" data-type="all" bindtap="onType">全部</button>
+      <button class="{{type === 'expense' ? 'active' : ''}}" data-type="expense" bindtap="onType">支出</button>
+      <button wx:if="{{book.incomeEnabled}}" class="{{type === 'income' ? 'active' : ''}}" data-type="income" bindtap="onType">收入</button>
+    </view>
+
+    <view wx:if="{{loading}}" class="records-loading">
+      <view class="surface skeleton group-skeleton"></view>
+      <view class="surface skeleton group-skeleton"></view>
+    </view>
+    <view wx:elif="{{groups.length}}" class="record-groups">
+      <view wx:for="{{groups}}" wx:key="date" class="record-group">
+        <view class="group-heading"><text>{{item.label}}</text><text>{{item.total}}</text></view>
+        <view class="surface record-list">
+          <transaction-row wx:for="{{item.transactions}}" wx:for-item="transaction" wx:key="id" item="{{transaction}}" bind:rowtap="onDetail" />
+        </view>
+      </view>
+    </view>
+    <view wx:else class="surface empty-state"><text>没有找到流水</text><text>调整搜索内容或筛选条件试试</text></view>
+  </view>
+</view>

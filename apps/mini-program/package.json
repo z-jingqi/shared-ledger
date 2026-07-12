@@ -1,0 +1,11 @@
+{
+  "name": "@shared-ledger/mini-program",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "check": "node scripts/validate.mjs",
+    "lint": "node scripts/validate.mjs",
+    "test": "node --test test/*.test.mjs",
+    "typecheck": "node scripts/validate.mjs"
+  }
+}

@@ -1,0 +1,5 @@
+<button class="transaction-row" bindtap="onTap">
+  <text class="category">{{item.categoryText}}</text>
+  <text class="transaction-title">{{item.title}}</text>
+  <text class="amount {{item.amountClass}}">{{item.amountText}}</text>
+</button>

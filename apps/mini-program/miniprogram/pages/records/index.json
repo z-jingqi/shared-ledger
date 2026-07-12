@@ -1,0 +1,6 @@
+{
+  "usingComponents": {
+    "page-header": "/components/page-header/index",
+    "transaction-row": "/components/transaction-row/index"
+  }
+}

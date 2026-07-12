@@ -1,0 +1,13 @@
+<view class="profile-screen">
+  <page-header title="账户资料" show-back="{{true}}" />
+  <view class="profile-content">
+    <button class="avatar-button" open-type="chooseAvatar" bindchooseavatar="onChooseAvatar">
+      <image wx:if="{{avatarUrl}}" src="{{avatarUrl}}" mode="aspectFill" />
+      <text wx:else>{{initial}}</text>
+      <view>更换头像</view>
+    </button>
+    <label class="profile-field"><text>用户名</text><input value="{{name}}" maxlength="60" bindinput="onName" /></label>
+    <label class="profile-field"><text>邮箱</text><input value="{{email}}" type="text" bindinput="onEmail" /></label>
+    <button class="primary-button save-profile" loading="{{saving}}" disabled="{{saving}}" bindtap="onSave">保存资料</button>
+  </view>
+</view>

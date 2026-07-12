@@ -44,3 +44,7 @@ Thumbs.db
 
 # Tooling caches
 .eslintcache
+
+# WeChat Developer Tools local state
+apps/mini-program/project.private.config.json
+apps/mini-program/miniprogram_npm/

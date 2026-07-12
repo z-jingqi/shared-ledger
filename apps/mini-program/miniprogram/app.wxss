@@ -1,0 +1,130 @@
+page {
+  --color-brand: #ff681c;
+  --color-brand-soft: #fff1e9;
+  --color-expense: #ef5b55;
+  --color-income: #159b58;
+  --color-text: #121a2a;
+  --color-muted: #7d8798;
+  --color-border: #e4e8ed;
+  --color-background: #f4f6f8;
+  --color-surface: #ffffff;
+  --radius-sm: 16rpx;
+  --radius-md: 24rpx;
+  --radius-lg: 32rpx;
+  min-height: 100%;
+  background: var(--color-background);
+  color: var(--color-text);
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+  font-size: 28rpx;
+}
+
+view,
+text,
+button,
+input,
+textarea,
+scroll-view {
+  box-sizing: border-box;
+}
+
+button {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+}
+
+button::after {
+  display: none;
+}
+
+.screen {
+  min-height: 100vh;
+  padding-bottom: calc(148rpx + env(safe-area-inset-bottom));
+}
+
+.screen-scroll {
+  height: 100vh;
+}
+
+.page-content {
+  padding: 20rpx 24rpx 40rpx;
+}
+
+.surface {
+  border: 2rpx solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.section-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 30rpx 2rpx 16rpx;
+  font-size: 28rpx;
+  font-weight: 700;
+}
+
+.section-title text:last-child {
+  color: var(--color-muted);
+  font-size: 24rpx;
+  font-weight: 500;
+}
+
+.muted {
+  color: var(--color-muted);
+}
+
+.empty-state {
+  padding: 64rpx 24rpx;
+  text-align: center;
+}
+
+.empty-state text {
+  display: block;
+  color: var(--color-muted);
+  font-size: 26rpx;
+  line-height: 1.7;
+}
+
+.primary-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 92rpx;
+  border-radius: 24rpx;
+  background: var(--color-brand);
+  color: #fff;
+  font-weight: 700;
+}
+
+.secondary-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 84rpx;
+  border: 2rpx solid var(--color-border);
+  border-radius: 22rpx;
+  background: #fff;
+  font-weight: 650;
+}
+
+.skeleton {
+  overflow: hidden;
+  background: linear-gradient(90deg, #eef1f4 20%, #fafbfc 45%, #eef1f4 70%);
+  background-size: 220% 100%;
+  animation: shimmer 1.2s linear infinite;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -120% 0;
+  }
+}

@@ -1,0 +1,24 @@
+<view class="imports-screen">
+  <page-header title="图片识别" show-back="{{true}}" />
+  <view class="imports-content">
+    <view class="quota-row"><text>今日剩余</text><text class="quota-value">{{remaining}} / 10</text></view>
+    <button class="choose-button" loading="{{uploading}}" disabled="{{uploading}}" bindtap="onChoose">＋ 拍照或从相册选择</button>
+    <view class="filter-tabs">
+      <button class="{{filter === 'all' ? 'active' : ''}}" data-filter="all" bindtap="onFilter">全部</button>
+      <button class="{{filter === 'processing' ? 'active' : ''}}" data-filter="processing" bindtap="onFilter">处理中</button>
+      <button class="{{filter === 'success' ? 'active' : ''}}" data-filter="success" bindtap="onFilter">成功</button>
+      <button class="{{filter === 'failed' ? 'active' : ''}}" data-filter="failed" bindtap="onFilter">失败</button>
+    </view>
+    <scroll-view class="job-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+      <view wx:if="{{loading}}" class="surface skeleton job-skeleton"></view>
+      <view wx:elif="{{visibleJobs.length}}" class="job-list">
+        <view wx:for="{{visibleJobs}}" wx:key="id" class="surface job-card">
+          <view class="job-thumb">图</view>
+          <view class="job-copy"><text>{{item.fileName}}</text><text>{{item.progressText || item.stage || item.status}}</text><view wx:if="{{item.progress}}" class="job-progress"><view class="job-progress-value" style="width: {{item.progress}}%;"></view></view></view>
+          <text class="job-status {{item.status}}">{{item.status === 'failed' ? '×' : item.status === 'completed' || item.status === 'pending_confirmation' ? '✓' : '…'}}</text>
+        </view>
+      </view>
+      <view wx:else class="surface empty-state"><text>最近 7 天没有任务</text><text>拍照或选择图片开始识别</text></view>
+    </scroll-view>
+  </view>
+</view>

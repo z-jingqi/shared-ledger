@@ -1,0 +1,161 @@
+.settings-scroll {
+  height: calc(100vh - 116rpx - env(safe-area-inset-top));
+}
+
+.settings-content {
+  padding-top: 8rpx;
+}
+
+.profile-skeleton {
+  height: 210rpx;
+}
+
+.profile-card {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 190rpx;
+  padding: 28rpx;
+  text-align: left;
+}
+
+.avatar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 112rpx;
+  height: 112rpx;
+  border-radius: 50%;
+  background: #ff681c;
+  color: #fff;
+  font-size: 38rpx;
+  font-weight: 800;
+}
+
+.profile-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 14rpx;
+  min-width: 0;
+  margin-left: 24rpx;
+}
+
+.profile-copy > view {
+  display: flex;
+  align-items: baseline;
+  gap: 12rpx;
+}
+
+.profile-name {
+  overflow: hidden;
+  font-size: 35rpx;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-copy > text {
+  color: #778295;
+  font-size: 24rpx;
+}
+
+.pro-badge {
+  padding: 4rpx 10rpx;
+  border-radius: 12rpx;
+  background: #fff0e8;
+  color: #c84c13;
+  font-size: 20rpx;
+  font-weight: 800;
+}
+
+.chevron {
+  flex: none;
+  color: #8b95a4;
+  font-size: 44rpx;
+  font-weight: 300;
+}
+
+.section-block {
+  margin-top: 30rpx;
+}
+
+.settings-heading {
+  display: block;
+  margin: 0 6rpx 14rpx;
+  color: #5e697c;
+  font-size: 24rpx;
+  font-weight: 700;
+}
+
+.task-summary,
+.settings-list button {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 22rpx 26rpx;
+  text-align: left;
+}
+
+.task-summary > view,
+.row-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6rpx;
+  min-width: 0;
+}
+
+.task-summary view text:first-child,
+.row-copy text:first-child {
+  font-weight: 700;
+}
+
+.task-summary view text:last-child,
+.row-copy text:last-child {
+  color: #8892a2;
+  font-size: 22rpx;
+}
+
+.settings-list {
+  overflow: hidden;
+}
+
+.settings-list button {
+  border-bottom: 2rpx solid #edf0f3;
+}
+
+.settings-list button:last-child {
+  border-bottom: 0;
+}
+
+.row-tail {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36rpx;
+  height: 36rpx;
+  padding: 0 8rpx;
+  border-radius: 18rpx;
+  background: #ff681c;
+  color: #fff;
+  font-size: 20rpx;
+  font-weight: 750;
+}
+
+.logout-button {
+  width: 100%;
+  height: 88rpx;
+  margin-top: 34rpx;
+  border-radius: 22rpx;
+  background: #fff;
+  color: #dc403b;
+  font-weight: 700;
+}

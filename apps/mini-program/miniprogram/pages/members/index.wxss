@@ -1,0 +1,83 @@
+.members-screen {
+  min-height: 100vh;
+  background: #f4f6f8;
+}
+
+.members-scroll {
+  height: calc(100vh - 112rpx - env(safe-area-inset-top));
+}
+
+.members-content {
+  padding: 14rpx 24rpx calc(30rpx + env(safe-area-inset-bottom));
+}
+
+.group-title {
+  display: block;
+  margin: 20rpx 4rpx 14rpx;
+  color: #5f6a7d;
+  font-size: 24rpx;
+  font-weight: 700;
+}
+
+.invite-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+}
+
+.invite-card,
+.member-row {
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+  padding: 22rpx 24rpx;
+}
+
+.invite-card > view,
+.member-row > view:last-child {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.invite-card view text:first-child,
+.member-row view text:first-child {
+  font-weight: 700;
+}
+
+.invite-card view text:last-child,
+.member-row view text:last-child {
+  color: #8490a1;
+  font-size: 22rpx;
+}
+
+.invite-card button {
+  padding: 14rpx 22rpx;
+  border-radius: 16rpx;
+  background: #ff681c;
+  color: #fff;
+  font-size: 23rpx;
+  font-weight: 700;
+}
+
+.member-list {
+  overflow: hidden;
+}
+
+.member-row {
+  border-bottom: 2rpx solid #edf0f3;
+}
+
+.member-avatar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 70rpx;
+  height: 70rpx;
+  border-radius: 50%;
+  background: #fff0e8;
+  color: #d85115;
+  font-weight: 800;
+}

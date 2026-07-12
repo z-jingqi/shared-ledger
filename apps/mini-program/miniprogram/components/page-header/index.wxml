@@ -1,0 +1,17 @@
+<view class="header" style="padding-top: {{statusBarHeight}}px;">
+  <view class="header-main" style="height: {{navigationHeight}}px;">
+    <button wx:if="{{showBack}}" class="header-back" aria-label="返回" bindtap="onBack">
+      <text>‹</text>
+    </button>
+    <button wx:elif="{{bookName}}" class="ledger-pill" bindtap="onBook">
+      <text class="ledger-mark">{{bookMark}}</text>
+      <text class="ledger-name">{{bookName}}</text>
+      <text class="ledger-caret">⌄</text>
+    </button>
+    <view wx:else class="header-placeholder"></view>
+
+    <text wx:if="{{title}}" class="header-title">{{title}}</text>
+    <button wx:if="{{showAi}}" class="ai-button" bindtap="onAi">AI</button>
+    <view wx:else class="header-placeholder"></view>
+  </view>
+</view>

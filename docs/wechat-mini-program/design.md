@@ -1,6 +1,6 @@
 # shared-ledger 微信小程序设计方案
 
-> 状态：产品与技术设计稿，尚未开始编码。
+> 状态：微信原生页面骨架、四个主 Tab 与核心子页面已落地。
 >
 > 工作分支：`codex/wechat-mini-program`
 
@@ -44,16 +44,14 @@
 
 ## 3. 技术选型
 
-使用 Taro 4 + React + TypeScript 创建 `apps/mini-program`。
+使用微信原生小程序运行时创建 `apps/mini-program`，页面直接由 WXML、WXSS、JavaScript 和 JSON 组成。
 
 选择原因：
 
-- 项目团队可以继续使用 React/TypeScript，但页面与组件最终遵循小程序的页面、组件和 API 模型。
-- 支持自定义 TabBar，可实现四个主 Tab 与中间记账按钮。
-- 支持 `request`、`uploadFile`、分包、页面生命周期和微信端条件编译。
-- 与现有 pnpm monorepo、ESLint、Prettier、Vitest 质量流程兼容。
-
-小程序包应使用所选 Taro 4 版本官方支持的 React 版本，不强制与 `apps/web` 的 React 版本一致。
+- 不引入跨端运行时，页面生命周期、组件属性、事件和网络请求都使用微信原生 API。
+- 原生自定义 TabBar 实现四个主 Tab 与中间记账按钮。
+- `wx.request`、`wx.uploadFile`、`wx.chooseMedia` 与 `RequestTask` 直接对接现有 API。
+- 独立结构检查和 Node 测试纳入 pnpm monorepo，不依赖 Web 构建链路。
 
 ## 4. 目录结构
 
@@ -61,55 +59,41 @@
 apps/
   api/                         # 现有 Cloudflare Worker API
   web/                         # 现有 Web 客户端
-  mini-program/                # 新增 Taro 微信小程序
-    config/
-    src/
-      app.config.ts
-      app.tsx
-      assets/
+  mini-program/
+    project.config.json        # 微信开发者工具项目配置
+    miniprogram/
+      app.js
+      app.json
+      app.wxss
+      custom-tab-bar/
       components/
-        app-header/
-        bottom-tabs/
-        ledger-pill/
-        amount-text/
+        page-header/
         transaction-row/
-        status-chip/
-        bottom-sheet/
-        confirm-dialog/
-        empty-state/
-      features/
-        auth/
-        books/
-        records/
-        analysis/
-        imports/
-        ai/
-        members/
-        profile/
       pages/
         home/
         records/
         analysis/
         settings/
-      subpackages/
-        transaction/
-        import/
+        login/
+        record-form/
+        transaction-detail/
+        imports/
+        categories/
+        members/
         ai/
-        collaboration/
-        settings/
       services/
-        api-client.ts
-        auth-session.ts
-        event-stream.ts
-        upload.ts
-      stores/
-      styles/
+        api.js
+        session.js
       utils/
+        format.js
+        transactions.js
+    scripts/validate.mjs
+    test/
 packages/
   shared/                      # 复用 schema、类型、纯校验逻辑
 ```
 
-禁止从 `apps/web` 直接导入组件、CSS、React Router 或浏览器专用代码。
+禁止从 `apps/web` 直接导入组件、CSS、React Router 或浏览器专用代码；小程序源码中不得出现 Taro、React 或 WebView 运行时。
 
 ## 5. 页面与分包
 
@@ -203,7 +187,7 @@ packages/
 ### 微信登录流程
 
 ```text
-小程序 Taro.login()
+小程序 wx.login()
   -> POST /api/auth/wechat/session { code }
   -> API Worker 使用 AppID/AppSecret 换取 openid/session_key
   -> 查询 auth_identities(provider = "wechat")
@@ -245,7 +229,7 @@ packages/
 
 小程序继续消费现有 Agent 流式事件，不新增另一套 AI 协议：
 
-- 使用 `Taro.request({ enableChunked: true })`。
+- 使用 `wx.request({ enableChunked: true })`。
 - 通过 `RequestTask.onChunkReceived` 接收 ArrayBuffer。
 - 使用增量 `TextDecoder` 解码，并按 SSE 的 event/data 边界解析。
 - 保留 `message_delta`、`skill_selected`、`step_started`、`tool_call`、`tool_result`、`confirmation`、`done`、`error`。
@@ -258,7 +242,7 @@ packages/
 
 - 只支持图片，不支持 PDF、CSV、Excel。
 - free 用户不显示识别入口；API 仍返回 403 防止绕过。
-- Pro 用户从相机或相册选择图片，使用 `Taro.uploadFile` 上传原图。
+- Pro 用户从相机或相册选择图片，使用 `wx.uploadFile` 上传原图。
 - 小程序只调用 shared-ledger API；OCR 的 API key、Webhook secret 和 Service Binding 不下发客户端。
 - 任务状态通过当前 SSE/状态接口消费，页面隐藏或断流时降级为有上限的轮询。
 - 列表只请求最近 7 天任务；缩略图按需加载，不一次性渲染原图。
@@ -318,10 +302,8 @@ packages/
 建议新增命令：
 
 ```text
-pnpm --filter @shared-ledger/mini-program lint
-pnpm --filter @shared-ledger/mini-program typecheck
+pnpm --filter @shared-ledger/mini-program check
 pnpm --filter @shared-ledger/mini-program test
-pnpm --filter @shared-ledger/mini-program build:weapp
 ```
 
 PR 必须完成构建；preview 上传体验版，主分支通过审核后再发布正式版。
@@ -330,7 +312,7 @@ PR 必须完成构建；preview 上传体验版，主分支通过审核后再发
 
 这不是分阶段交付方案，而是一次完整实现时的工程依赖顺序：
 
-1. 创建 Taro 应用骨架、token、基础组件和自定义 TabBar。
+1. 创建微信原生应用骨架、token、基础组件和自定义 TabBar。
 2. 完成微信登录、Bearer session、API client 和错误处理。
 3. 接入首页、流水、分析、我的真实数据。
 4. 完成交易、分类、账本、成员和邀请流程。

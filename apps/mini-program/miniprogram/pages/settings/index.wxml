@@ -1,0 +1,51 @@
+<view class="screen">
+  <page-header title="我的" book-name="{{book.name}}" book-mark="{{bookMark}}" bind:booktap="onBookTap" />
+  <scroll-view class="settings-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+    <view class="page-content settings-content">
+      <view wx:if="{{loading}}" class="surface skeleton profile-skeleton"></view>
+      <block wx:else>
+        <button class="surface profile-card" bindtap="onProfile">
+          <view class="avatar">{{profileInitial}}</view>
+          <view class="profile-copy">
+            <view><text class="profile-name">{{user.name}}</text><text wx:if="{{user.plan === 'pro'}}" class="pro-badge">Pro</text></view>
+            <text>当前账本 · {{book.name || '暂无账本'}}</text>
+          </view>
+          <text class="chevron">›</text>
+        </button>
+
+        <view wx:if="{{pendingCount || taskCount}}" class="section-block">
+          <text class="settings-heading">待处理</text>
+          <button class="surface task-summary" data-url="/pages/imports/index" bindtap="onNavigate">
+            <view><text>图片与待确认</text><text>{{pendingCount}} 条待确认 · {{taskCount}} 个任务</text></view>
+            <text class="chevron">›</text>
+          </button>
+        </view>
+
+        <view class="section-block">
+          <text class="settings-heading">账本与协作</text>
+          <view class="surface settings-list">
+            <button data-url="/pages/members/index" bindtap="onNavigate">
+              <view class="row-copy"><text>成员与邀请</text><text>管理共同记账成员</text></view>
+              <view class="row-tail"><text wx:if="{{invitationCount}}" class="badge">{{invitationCount}}</text><text class="chevron">›</text></view>
+            </button>
+            <button data-url="/pages/categories/index" bindtap="onNavigate">
+              <view class="row-copy"><text>分类管理</text><text>维护个人收入与支出分类</text></view>
+              <text class="chevron">›</text>
+            </button>
+          </view>
+        </view>
+
+        <view class="section-block">
+          <text class="settings-heading">服务与账户</text>
+          <view class="surface settings-list">
+            <button bindtap="onProfile"><view class="row-copy"><text>账户资料</text><text>头像、用户名与安全设置</text></view><text class="chevron">›</text></button>
+            <button bindtap="onSubscription"><view class="row-copy"><text>订阅权益</text><text>{{user.plan === 'pro' ? '当前为 Pro' : '查看 Pro 功能'}}</text></view><text class="chevron">›</text></button>
+            <button bindtap="onExport"><view class="row-copy"><text>导出数据</text><text>导出当前账本数据</text></view><text class="chevron">›</text></button>
+          </view>
+        </view>
+
+        <button class="logout-button" bindtap="onLogout">退出登录</button>
+      </block>
+    </view>
+  </scroll-view>
+</view>

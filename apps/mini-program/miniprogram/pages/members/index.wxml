@@ -1,0 +1,24 @@
+<view class="members-screen">
+  <page-header title="成员与邀请" show-back="{{true}}" />
+  <scroll-view class="members-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+    <view class="members-content">
+      <view wx:if="{{invitations.length}}">
+        <text class="group-title">待处理邀请</text>
+        <view class="invite-list">
+          <view wx:for="{{invitations}}" wx:key="id" class="surface invite-card">
+            <view><text>{{item.inviter.name}} 邀请你加入</text><text>{{item.book.name}} · {{item.role === 'admin' ? '管理员' : '成员'}}</text></view>
+            <button data-id="{{item.id}}" bindtap="onAccept">接受</button>
+          </view>
+        </view>
+      </view>
+      <text class="group-title">当前账本成员 · {{members.length}}</text>
+      <view class="surface member-list">
+        <view wx:for="{{members}}" wx:key="id" class="member-row">
+          <view class="member-avatar">{{item.initial}}</view>
+          <view><text>{{item.name}}</text><text>{{item.role === 'creator' ? '创建者' : item.role === 'admin' ? '管理员' : '成员'}}</text></view>
+        </view>
+        <view wx:if="{{!members.length}}" class="empty-state"><text>暂无成员数据</text></view>
+      </view>
+    </view>
+  </scroll-view>
+</view>

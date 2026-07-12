@@ -1,0 +1,44 @@
+<view class="screen">
+  <page-header
+    book-name="{{book.name}}"
+    book-mark="{{bookMark}}"
+    show-ai="{{true}}"
+    bind:booktap="onBookTap"
+    bind:aitap="onAiTap"
+  />
+  <view class="page-content">
+    <view wx:if="{{loading}}" class="home-loading">
+      <view class="surface skeleton hero-skeleton"></view>
+      <view class="surface skeleton row-skeleton"></view>
+    </view>
+    <block wx:elif="{{book}}">
+      <view class="surface balance-card">
+        <text class="balance-label">{{monthLabel}}</text>
+        <text class="balance-total">{{total}}</text>
+        <view class="balance-metrics">
+          <view><text>记录</text><text class="metric-value">{{count}} 笔</text></view>
+          <view><text>支出</text><text class="metric-value expense">{{expense}}</text></view>
+          <view wx:if="{{book.incomeEnabled}}"><text>收入</text><text class="metric-value income">{{income}}</text></view>
+        </view>
+      </view>
+
+      <button class="surface today-card" bindtap="onManualRecord">
+        <view class="today-icon">日</view>
+        <view><text class="today-title">今日记账</text><text class="today-copy">随手记录，保持账本清晰</text></view>
+        <text class="today-action">继续记账 ›</text>
+      </button>
+
+      <button wx:if="{{pendingCount || taskCount}}" class="surface task-card" bindtap="onTasks">
+        <view><text class="task-title">待处理</text><text>{{pendingCount}} 条待确认 · {{taskCount}} 个图片任务</text></view>
+        <text>›</text>
+      </button>
+
+      <view class="section-title"><text>最近交易</text><text bindtap="onAllRecords">查看全部 ›</text></view>
+      <view class="surface transaction-list" wx:if="{{recent.length}}">
+        <transaction-row wx:for="{{recent}}" wx:key="id" item="{{item}}" bind:rowtap="onDetail" />
+      </view>
+      <view wx:else class="surface empty-state"><text>还没有记录</text><text>从中间的加号开始记一笔</text></view>
+    </block>
+    <view wx:else class="surface empty-state"><text>还没有账本</text><text>请先在 Web 端创建一个账本</text></view>
+  </view>
+</view>

@@ -1,0 +1,20 @@
+<view class="login-screen" style="padding-top: {{statusBarHeight}}px;">
+  <view class="brand-mark">一</view>
+  <view class="login-copy">
+    <text class="login-title">一起记</text>
+    <text class="login-subtitle">把每天的小事，记进共同生活里</text>
+  </view>
+  <view class="login-card">
+    <label class="field">
+      <text>用户名或邮箱</text>
+      <input value="{{identifier}}" placeholder="请输入账号" bindinput="onIdentifier" />
+    </label>
+    <label class="field">
+      <text>密码</text>
+      <input value="{{password}}" password placeholder="请输入密码" confirm-type="done" bindinput="onPassword" bindconfirm="onSubmit" />
+    </label>
+    <text wx:if="{{error}}" class="form-error">{{error}}</text>
+    <button class="login-button" loading="{{submitting}}" disabled="{{submitting}}" bindtap="onSubmit">登录</button>
+  </view>
+  <text class="login-note">登录即表示你同意仅将账本数据用于提供记账服务</text>
+</view>

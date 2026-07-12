@@ -1,0 +1,119 @@
+.ai-screen {
+  min-height: 100vh;
+  background: #f4f6f8;
+}
+
+.message-scroll {
+  height: calc(100vh - 260rpx - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+}
+
+.messages {
+  display: flex;
+  flex-direction: column;
+  gap: 24rpx;
+  padding: 24rpx;
+}
+
+.ai-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24rpx;
+  padding: 160rpx 56rpx 60rpx;
+  color: #667185;
+  line-height: 1.7;
+  text-align: center;
+}
+
+.ai-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 80rpx;
+  height: 80rpx;
+  border-radius: 24rpx;
+  background: #fff0e8;
+  color: #c94a10;
+  font-size: 25rpx;
+  font-weight: 850;
+}
+
+.message {
+  max-width: 86%;
+  line-height: 1.65;
+}
+
+.message.user {
+  align-self: flex-end;
+  text-align: right;
+}
+
+.message.assistant {
+  align-self: flex-start;
+  padding: 22rpx 24rpx;
+  border: 2rpx solid #e2e6eb;
+  border-radius: 22rpx;
+  background: #fff;
+}
+
+.message.thinking text {
+  color: #8a94a3;
+  background: linear-gradient(90deg, #9da6b3 20%, #d8dde3 50%, #9da6b3 80%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: thinking 1.2s linear infinite;
+}
+
+@keyframes thinking {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.composer {
+  position: fixed;
+  right: 24rpx;
+  bottom: calc(22rpx + env(safe-area-inset-bottom));
+  left: 24rpx;
+  display: flex;
+  align-items: flex-end;
+  gap: 14rpx;
+  min-height: 96rpx;
+  padding: 14rpx;
+  border: 2rpx solid #e1e5ea;
+  border-radius: 30rpx;
+  background: #fff;
+}
+
+.composer textarea {
+  flex: 1;
+  min-height: 60rpx;
+  max-height: 220rpx;
+  padding: 12rpx 0;
+  font-size: 27rpx;
+  line-height: 1.45;
+}
+
+.attach-button,
+.send-button {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 68rpx;
+  height: 68rpx;
+  border-radius: 50%;
+  background: #f3f5f7;
+  font-size: 34rpx;
+}
+
+.send-button {
+  background: #ff681c;
+  color: #fff;
+  font-weight: 700;
+}
+
+.send-button[disabled] {
+  background: #ffd1b9;
+}

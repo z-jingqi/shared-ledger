@@ -1,0 +1,102 @@
+.categories-screen {
+  min-height: 100vh;
+  background: #f4f6f8;
+}
+
+.categories-content {
+  padding: 12rpx 24rpx calc(30rpx + env(safe-area-inset-bottom));
+}
+
+.type-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 8rpx;
+  border-radius: 20rpx;
+  background: #e9edf1;
+}
+
+.type-tabs button {
+  height: 68rpx;
+  border-radius: 15rpx;
+  color: #758092;
+  font-weight: 650;
+}
+
+.type-tabs button.active {
+  background: #fff;
+  color: #ff681c;
+  font-weight: 750;
+}
+
+.color-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 26rpx 4rpx 18rpx;
+  color: #657083;
+  font-size: 24rpx;
+}
+
+.color-row > view {
+  display: flex;
+  gap: 14rpx;
+}
+
+.color-dot {
+  width: 36rpx;
+  height: 36rpx;
+  border: 6rpx solid transparent;
+  border-radius: 50%;
+}
+
+.color-dot.active {
+  box-shadow:
+    0 0 0 4rpx #fff,
+    0 0 0 6rpx #263044;
+}
+
+.add-category {
+  height: 84rpx;
+  margin-bottom: 20rpx;
+  border: 2rpx solid #ffd4bf;
+  border-radius: 20rpx;
+  background: #fff1e9;
+  color: #d54f13;
+  font-weight: 750;
+}
+
+.category-list {
+  overflow: hidden;
+}
+
+.category-row {
+  display: grid;
+  grid-template-columns: 20rpx minmax(0, 1fr) max-content max-content;
+  align-items: baseline;
+  gap: 18rpx;
+  padding: 22rpx 24rpx;
+  border-bottom: 2rpx solid #edf0f3;
+}
+
+.category-row:last-child {
+  border-bottom: 0;
+}
+
+.category-row .category-color {
+  width: 18rpx;
+  height: 18rpx;
+  border-radius: 50%;
+}
+
+.category-row > text {
+  font-weight: 650;
+}
+
+.category-row button {
+  color: #667185;
+  font-size: 23rpx;
+}
+
+.category-row button.delete {
+  color: #df4540;
+}

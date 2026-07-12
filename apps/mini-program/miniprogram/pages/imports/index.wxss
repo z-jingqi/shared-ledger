@@ -1,0 +1,141 @@
+.imports-screen {
+  min-height: 100vh;
+  background: #f4f6f8;
+}
+
+.imports-content {
+  padding: 14rpx 24rpx calc(24rpx + env(safe-area-inset-bottom));
+}
+
+.quota-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 18rpx 22rpx;
+  border: 2rpx solid #e3e7eb;
+  border-radius: 18rpx;
+  background: #fff;
+  color: #7b8697;
+  font-size: 23rpx;
+}
+
+.quota-row .quota-value {
+  color: #159b58;
+  font-weight: 750;
+}
+
+.choose-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 96rpx;
+  margin-top: 18rpx;
+  border-radius: 22rpx;
+  background: #ff681c;
+  color: #fff;
+  font-weight: 750;
+}
+
+.filter-tabs {
+  display: flex;
+  gap: 10rpx;
+  margin: 22rpx 0 18rpx;
+}
+
+.filter-tabs button {
+  height: 58rpx;
+  padding: 0 22rpx;
+  border-radius: 29rpx;
+  color: #657083;
+  font-size: 23rpx;
+}
+
+.filter-tabs button.active {
+  background: #ff681c;
+  color: #fff;
+  font-weight: 700;
+}
+
+.job-scroll {
+  height: calc(100vh - 380rpx - env(safe-area-inset-top));
+}
+
+.job-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.job-card {
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+  padding: 18rpx;
+}
+
+.job-thumb {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 118rpx;
+  height: 92rpx;
+  border-radius: 16rpx;
+  background: #eef3fb;
+  color: #5e8fe8;
+  font-weight: 750;
+}
+
+.job-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8rpx;
+  min-width: 0;
+}
+
+.job-copy > text:first-child {
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-copy > text:nth-child(2) {
+  color: #8791a1;
+  font-size: 22rpx;
+}
+
+.job-progress {
+  overflow: hidden;
+  height: 8rpx;
+  border-radius: 4rpx;
+  background: #edf0f3;
+}
+
+.job-progress .job-progress-value {
+  display: block;
+  height: 100%;
+  background: #ff681c;
+}
+
+.job-status {
+  flex: none;
+  color: #9ca5b2;
+  font-size: 36rpx;
+  font-weight: 800;
+}
+
+.job-status.failed,
+.job-status.cancelled {
+  color: #ef5b55;
+}
+
+.job-status.completed,
+.job-status.pending_confirmation {
+  color: #18a35c;
+}
+
+.job-skeleton {
+  height: 132rpx;
+}

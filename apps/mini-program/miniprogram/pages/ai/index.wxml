@@ -1,0 +1,15 @@
+<view class="ai-screen">
+  <page-header title="{{title}}" show-back="{{true}}" />
+  <scroll-view class="message-scroll" scroll-y enhanced show-scrollbar="{{false}}" scroll-into-view="{{anchor}}">
+    <view class="messages">
+      <view wx:if="{{!messages.length && !sending}}" class="ai-empty"><text class="ai-mark">AI</text><text>你好，我可以陪你聊天，也可以帮你处理账本中的任务。</text></view>
+      <view wx:for="{{messages}}" wx:key="id" id="message-{{index}}" class="message {{item.role}}"><text selectable>{{item.text}}</text></view>
+      <view wx:if="{{sending}}" class="message assistant thinking"><text>思考中…</text></view>
+    </view>
+  </scroll-view>
+  <view class="composer">
+    <button class="attach-button">＋</button>
+    <textarea value="{{input}}" auto-height maxlength="2000" placeholder="输入消息…" bindinput="onInput" />
+    <button class="send-button" disabled="{{!input || sending}}" bindtap="onSend">↑</button>
+  </view>
+</view>

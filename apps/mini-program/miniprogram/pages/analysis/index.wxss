@@ -1,0 +1,237 @@
+.range-tabs {
+  display: flex;
+  gap: 12rpx;
+  padding: 8rpx 24rpx 18rpx;
+  background: #f4f6f8;
+}
+
+.range-tabs button {
+  min-width: 104rpx;
+  height: 60rpx;
+  padding: 0 24rpx;
+  border: 2rpx solid #e1e5ea;
+  border-radius: 30rpx;
+  background: #fff;
+  color: #596476;
+  font-size: 24rpx;
+  font-weight: 650;
+}
+
+.range-tabs button.active {
+  border-color: #ff681c;
+  background: #ff681c;
+  color: #fff;
+}
+
+.analysis-scroll {
+  height: calc(100vh - 190rpx - env(safe-area-inset-top));
+}
+
+.analysis-content {
+  padding-top: 0;
+}
+
+.chart-skeleton {
+  height: 430rpx;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16rpx;
+}
+
+.summary-grid.single {
+  grid-template-columns: 1fr;
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  padding: 22rpx 24rpx;
+}
+
+.metric text {
+  color: #8590a0;
+  font-size: 23rpx;
+}
+
+.metric .metric-value {
+  font-size: 32rpx;
+  font-weight: 750;
+}
+
+.expense {
+  color: #ef5b55;
+}
+
+.income {
+  color: #159b58;
+}
+
+.chart-card,
+.breakdown-card {
+  margin-top: 20rpx;
+  padding: 26rpx;
+}
+
+.chart-heading,
+.legend,
+.selected-values,
+.breakdown-copy {
+  display: flex;
+  align-items: baseline;
+}
+
+.chart-heading {
+  justify-content: space-between;
+  font-weight: 750;
+}
+
+.legend {
+  gap: 18rpx;
+}
+
+.legend button {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  color: #596476;
+  font-size: 22rpx;
+}
+
+.legend button.disabled {
+  color: #b3bac4;
+}
+
+.legend .legend-dot {
+  width: 14rpx;
+  height: 14rpx;
+  border-radius: 4rpx;
+}
+
+.expense-dot,
+.expense-bar {
+  background: #ff681c;
+}
+
+.income-dot,
+.income-bar {
+  background: #159b58;
+}
+
+.bars-scroll {
+  width: 100%;
+  margin-top: 24rpx;
+}
+
+.bars {
+  display: flex;
+  align-items: stretch;
+  min-width: 100%;
+  height: 250rpx;
+}
+
+.bars.week .bar-column,
+.bars.year .bar-column {
+  min-width: calc(100% / 7);
+}
+
+.bars.year .bar-column {
+  min-width: 56rpx;
+}
+
+.bars.month .bar-column {
+  min-width: 46rpx;
+}
+
+.bar-column {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8rpx;
+  height: 250rpx;
+  color: #8a94a3;
+  font-size: 20rpx;
+}
+
+.bar-track {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 4rpx;
+  width: 100%;
+  height: 202rpx;
+}
+
+.bar {
+  display: block;
+  width: 12rpx;
+  min-height: 6rpx;
+  border-radius: 8rpx 8rpx 3rpx 3rpx;
+}
+
+.bar-column.selected text {
+  color: #151e2f;
+  font-weight: 750;
+}
+
+.selected-values {
+  justify-content: center;
+  gap: 24rpx;
+  min-height: 46rpx;
+  margin-top: 12rpx;
+  padding: 10rpx 18rpx;
+  border-radius: 14rpx;
+  background: #f7f8fa;
+  font-size: 23rpx;
+  font-weight: 750;
+}
+
+.card-title {
+  display: block;
+  margin-bottom: 22rpx;
+  font-weight: 750;
+}
+
+.breakdown-list {
+  display: flex;
+  flex-direction: column;
+  gap: 22rpx;
+}
+
+.breakdown-copy {
+  justify-content: space-between;
+  margin-bottom: 10rpx;
+  font-size: 24rpx;
+}
+
+.breakdown-copy text:last-child {
+  color: #5f6a7d;
+  font-weight: 650;
+}
+
+.progress {
+  overflow: hidden;
+  height: 10rpx;
+  border-radius: 5rpx;
+  background: #eef1f4;
+}
+
+.progress .progress-value {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #ff681c;
+}
+
+.empty-copy {
+  display: block;
+  padding: 28rpx 0;
+  color: #8c96a5;
+  font-size: 24rpx;
+  text-align: center;
+}

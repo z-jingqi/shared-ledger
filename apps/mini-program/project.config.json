@@ -1,0 +1,15 @@
+{
+  "appid": "touristappid",
+  "compileType": "miniprogram",
+  "libVersion": "3.7.12",
+  "miniprogramRoot": "miniprogram/",
+  "projectname": "shared-ledger-mini-program",
+  "setting": {
+    "es6": true,
+    "minified": true,
+    "postcss": true,
+    "urlCheck": true
+  },
+  "simulatorType": "wechat",
+  "srcMiniprogramRoot": "miniprogram/"
+}

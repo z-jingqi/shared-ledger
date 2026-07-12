@@ -1,0 +1,34 @@
+<view class="form-screen">
+  <page-header title="{{title}}" show-back="{{true}}" />
+  <scroll-view class="form-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+    <view class="form-content">
+      <view class="type-switch">
+        <button class="{{type === 'expense' ? 'active' : ''}}" data-type="expense" bindtap="onType">支出</button>
+        <button class="{{type === 'income' ? 'active' : ''}}" data-type="income" bindtap="onType">收入</button>
+      </view>
+
+      <view class="amount-block"><text>金额</text><text class="amount-value">¥{{amount}}</text></view>
+
+      <text class="field-label">分类</text>
+      <scroll-view class="category-scroll" scroll-x enhanced show-scrollbar="{{false}}">
+        <view class="category-list">
+          <button wx:for="{{categories}}" wx:key="id" class="category-button {{categoryId === item.id ? 'active' : ''}}" data-id="{{item.id}}" bindtap="onCategory">
+            <view class="category-color" style="background: {{item.color || '#ff681c'}};"></view><text>{{item.name}}</text>
+          </button>
+        </view>
+      </scroll-view>
+
+      <view class="form-row"><text>日期</text><picker mode="date" value="{{date}}" bindchange="onDate"><view>{{date}} ›</view></picker></view>
+      <textarea class="note-input" value="{{note}}" maxlength="60" auto-height placeholder="可选，添加备注…" bindinput="onNote" />
+      <view wx:if="{{items.length}}" class="item-list">
+        <view wx:for="{{items}}" wx:key="id" class="item-row"><text>{{item.name}}</text><text>¥{{item.amount}}</text><button data-index="{{index}}" bindtap="onRemoveItem">×</button></view>
+      </view>
+      <button class="detail-button" bindtap="onAddItem">＋ 添加明细</button>
+
+      <view class="keypad">
+        <button wx:for="{{keys}}" wx:key="*this" data-key="{{item}}" bindtap="onKey">{{item}}</button>
+      </view>
+      <button class="save-button" loading="{{saving}}" disabled="{{saving}}" bindtap="onSave">保存{{type === 'expense' ? '支出' : '收入'}}</button>
+    </view>
+  </scroll-view>
+</view>

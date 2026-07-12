@@ -1,0 +1,25 @@
+<view class="detail-screen">
+  <page-header title="交易详情" show-back="{{true}}" />
+  <view wx:if="{{loading}}" class="detail-loading skeleton"></view>
+  <view wx:elif="{{transaction}}" class="detail-layout">
+    <view class="detail-summary">
+      <text class="detail-note">{{transaction.note || transaction.categoryName || '未分类记录'}}</text>
+      <text class="detail-amount {{transaction.type}}">{{amountText}}</text>
+      <text class="detail-date">{{transaction.occurredAt}}</text>
+    </view>
+    <view class="surface detail-fields">
+      <view><text>分类</text><text>{{transaction.categoryName || '未分类'}}</text></view>
+      <view><text>备注</text><text>{{transaction.note || '无'}}</text></view>
+    </view>
+    <view wx:if="{{transaction.items && transaction.items.length}}" class="items-section">
+      <text class="items-title">明细 · {{transaction.items.length}}</text>
+      <scroll-view class="items-scroll surface" scroll-y enhanced>
+        <view wx:for="{{transaction.items}}" wx:key="id" class="item-row"><text>{{item.note || item.name || '明细'}}</text><text>¥{{item.amount}}</text></view>
+      </scroll-view>
+    </view>
+    <view class="detail-actions">
+      <button wx:if="{{permissions.canEdit}}" class="secondary-button" bindtap="onEdit">编辑</button>
+      <button wx:if="{{permissions.canDelete}}" class="delete-button" bindtap="onDelete">删除</button>
+    </view>
+  </view>
+</view>

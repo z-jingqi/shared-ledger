@@ -1,0 +1,29 @@
+<view class="tab-shell">
+  <view class="tab-group">
+    <button
+      wx:for="{{tabs}}"
+      wx:key="pagePath"
+      wx:if="{{index < 2}}"
+      class="tab-item {{selected === index ? 'active' : ''}}"
+      data-index="{{index}}"
+      bindtap="onSwitch"
+    >
+      <text class="tab-icon">{{item.icon}}</text>
+      <text>{{item.text}}</text>
+    </button>
+  </view>
+  <button class="add-button" aria-label="记一笔" bindtap="onAdd"><text>＋</text></button>
+  <view class="tab-group">
+    <button
+      wx:for="{{tabs}}"
+      wx:key="pagePath"
+      wx:if="{{index >= 2}}"
+      class="tab-item {{selected === index ? 'active' : ''}}"
+      data-index="{{index}}"
+      bindtap="onSwitch"
+    >
+      <text class="tab-icon">{{item.icon}}</text>
+      <text>{{item.text}}</text>
+    </button>
+  </view>
+</view>
