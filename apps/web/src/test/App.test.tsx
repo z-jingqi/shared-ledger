@@ -2812,8 +2812,12 @@ describe("shared ledger mobile UI", () => {
     await waitFor(() => expect(recordRow(container, "tx_home")).toBeInTheDocument());
     await user.click(recordRow(container, "tx_home")!);
     const detail = await screen.findByRole("dialog", { name: "交易详情" });
+    const amountDetails = within(detail).getByRole("region", { name: "金额明细" });
 
     expect(within(detail).getByText("此记录由其他成员创建，你可以查看但不能编辑。")).toBeInTheDocument();
+    expect(within(amountDetails).getByText("牛奶")).toBeInTheDocument();
+    expect(within(amountDetails).getByText("1 项")).toBeInTheDocument();
+    expect(within(amountDetails).getAllByText("¥100.00")).toHaveLength(2);
     expect(within(detail).queryByRole("button", { name: "编辑" })).not.toBeInTheDocument();
     expect(within(detail).queryByRole("button", { name: "删除记录" })).not.toBeInTheDocument();
   });

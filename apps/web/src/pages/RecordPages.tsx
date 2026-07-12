@@ -1389,6 +1389,11 @@ export function RecordDetailSheet({
     data?.permissions?.canEdit ??
     (transaction && (!transaction.createdByUserId || transaction.createdByUserId === user?.id)),
   );
+  const detailItems = transaction?.items ?? [];
+  const detailItemsTotalCents = detailItems.reduce((total, item) => total + amountToCents(item.amount), 0);
+  const unassignedAmount = transaction
+    ? Math.max(0, amountToCents(transaction.amount) - detailItemsTotalCents) / 100
+    : 0;
   const close = onClose;
   const deleteRecord = async () => {
     if (!transaction) return;
@@ -1421,11 +1426,49 @@ export function RecordDetailSheet({
           <IosCard className="ios-detail-rows">
             <DetailRow label="时间" value={new Date(transaction.occurredAt).toLocaleString("zh-CN")} />
             <DetailRow label="备注" value={transaction.note || "—"} />
-            <DetailRow
-              label="明细"
-              value={transaction.items?.length ? `${transaction.items.length} 项` : "无"}
-            />
           </IosCard>
+          <section className="ios-record-line-details" aria-label="金额明细">
+            <header>
+              <h3>金额明细</h3>
+              <small>{detailItems.length ? `${detailItems.length} 项` : "未拆分"}</small>
+            </header>
+            <IosCard className="ios-record-line-details-card">
+              {detailItems.length ? (
+                <ul>
+                  {detailItems.map((item, index) => (
+                    <li key={item.id ?? `${item.name}-${index}`}>
+                      <span>
+                        <b>{item.name || "未命名明细"}</b>
+                        {item.note ? <small>{item.note}</small> : null}
+                      </span>
+                      <strong className={incomeEnabled ? transaction.type : "neutral"}>
+                        {yuan(item.amount, currency)}
+                      </strong>
+                    </li>
+                  ))}
+                  {unassignedAmount > 0 ? (
+                    <li className="unassigned">
+                      <span>
+                        <b>未拆分金额</b>
+                        <small>总金额中尚未分配到明细的部分</small>
+                      </span>
+                      <strong className={incomeEnabled ? transaction.type : "neutral"}>
+                        {yuan(unassignedAmount, currency)}
+                      </strong>
+                    </li>
+                  ) : null}
+                </ul>
+              ) : (
+                <p className="ios-record-line-details-empty">这笔金额暂未添加明细</p>
+              )}
+              <footer>
+                <span>总金额</span>
+                <strong className={incomeEnabled ? transaction.type : "neutral"}>
+                  {yuan(transaction.amount, currency)}
+                </strong>
+              </footer>
+            </IosCard>
+          </section>
           {canEdit ? (
             <div className="ios-sheet-actions">
               <IosButton variant="outline" onClick={() => onEdit(transaction.id)}>

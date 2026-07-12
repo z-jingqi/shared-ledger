@@ -300,9 +300,10 @@
   color: var(--ios-text);
   font-size: 14px;
   font-weight: 850;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .ios-transaction-copy small {
@@ -320,6 +321,7 @@
 }
 
 .ios-transaction-row strong {
+  flex-shrink: 0;
   font-size: 15px;
   font-weight: 900;
   white-space: nowrap;
@@ -858,6 +860,117 @@
   text-align: right;
   font-weight: 700;
   overflow-wrap: anywhere;
+}
+
+.ios-record-line-details {
+  display: grid;
+  gap: 8px;
+}
+
+.ios-record-line-details > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px;
+}
+
+.ios-record-line-details h3 {
+  margin: 0;
+  color: var(--ios-text);
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.ios-record-line-details > header small {
+  color: var(--ios-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ios-record-line-details-card {
+  overflow: hidden;
+  padding: 0 16px;
+}
+
+.ios-record-line-details-card ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ios-record-line-details-card li,
+.ios-record-line-details-card footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 54px;
+  border-bottom: 1px solid #f2f4f7;
+}
+
+.ios-record-line-details-card li > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.ios-record-line-details-card li b {
+  color: var(--ios-text);
+  font-size: 14px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.ios-record-line-details-card li small {
+  color: var(--ios-muted);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+.ios-record-line-details-card li > strong,
+.ios-record-line-details-card footer strong {
+  flex-shrink: 0;
+  color: var(--ios-text);
+  font-size: 14px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.ios-record-line-details-card li > strong.expense,
+.ios-record-line-details-card footer strong.expense {
+  color: #d96b64;
+}
+
+.ios-record-line-details-card li > strong.income,
+.ios-record-line-details-card footer strong.income {
+  color: var(--ios-income);
+}
+
+.ios-record-line-details-card li.unassigned b,
+.ios-record-line-details-card li.unassigned > strong {
+  color: var(--ios-muted);
+}
+
+.ios-record-line-details-card footer {
+  min-height: 50px;
+  border-bottom: 0;
+  color: var(--ios-muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.ios-record-line-details-card footer strong {
+  font-size: 15px;
+}
+
+.ios-record-line-details-empty {
+  margin: 0;
+  padding: 18px 0;
+  border-bottom: 1px solid #f2f4f7;
+  color: var(--ios-muted);
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: center;
 }
 
 .ios-sheet-text-action,
