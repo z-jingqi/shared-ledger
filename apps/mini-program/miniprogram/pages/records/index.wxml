@@ -1,12 +1,18 @@
 <view class="screen">
   <page-header
-    book-name="{{book.name}}"
+    book-name="{{book.name || ''}}"
     book-mark="{{bookMark}}"
     show-ai="{{true}}"
     bind:booktap="onBookTap"
     bind:aitap="onAiTap"
   />
   <view class="page-content records-content">
+    <view wx:if="{{guest}}" class="surface records-guest">
+      <text>登录后查看你的真实流水</text>
+      <text>当前可以预览页面结构，搜索和筛选会在登录后启用。</text>
+      <button bindtap="onLogin">去登录</button>
+    </view>
+    <block wx:else>
     <view class="search-row">
       <view class="search-box">
         <text class="search-icon">⌕</text>
@@ -34,5 +40,6 @@
       </view>
     </view>
     <view wx:else class="surface empty-state"><text>没有找到流水</text><text>调整搜索内容或筛选条件试试</text></view>
+    </block>
   </view>
 </view>

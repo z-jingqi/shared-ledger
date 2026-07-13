@@ -1,4 +1,14 @@
-const api = require("../../services/api");
+import { request } from "../../services/api";
+import { requireLogin } from "../../services/session";
+import { errorMessage } from "../../utils/error";
+
+interface CategoriesData {
+  type: LedgerTransactionType;
+  categories: LedgerCategory[];
+  visibleCategories: LedgerCategory[];
+  colors: string[];
+  selectedColor: string;
+}
 
 Page({
   data: {
@@ -7,23 +17,24 @@ Page({
     visibleCategories: [],
     colors: ["#ff681c", "#ef5b55", "#4c8df6", "#18a35c", "#8f4ff6", "#f5a623"],
     selectedColor: "#ff681c",
-  },
+  } as CategoriesData,
 
-  onShow() {
-    this.loadCategories();
+  async onShow() {
+    if (!(await requireLogin("/pages/categories/index"))) return;
+    void this.loadCategories();
   },
 
   async loadCategories() {
     try {
-      const result = await api.request({ path: "/me/categories" });
+      const result = await request<{ categories: LedgerCategory[] }>({ path: "/me/categories" });
       this.setData({ categories: result.categories || [] });
       this.applyType();
     } catch (error) {
-      wx.showToast({ title: error.message || "分类加载失败", icon: "none" });
+      wx.showToast({ title: errorMessage(error, "分类加载失败"), icon: "none" });
     }
   },
 
-  onType(event) {
+  onType(event: DatasetEvent<{ type: LedgerTransactionType }>) {
     this.setData({ type: event.currentTarget.dataset.type });
     this.applyType();
   },
@@ -32,7 +43,7 @@ Page({
     this.setData({ visibleCategories: this.data.categories.filter((item) => item.type === this.data.type) });
   },
 
-  onColor(event) {
+  onColor(event: DatasetEvent<{ color: string }>) {
     this.setData({ selectedColor: event.currentTarget.dataset.color });
   },
 
@@ -40,7 +51,7 @@ Page({
     const result = await editableModal("新增分类", "输入分类名称");
     if (!result.confirm || !result.content.trim()) return;
     try {
-      await api.request({
+      await request({
         path: "/me/categories",
         method: "POST",
         header: { "Content-Type": "application/json" },
@@ -48,17 +59,17 @@ Page({
       });
       await this.loadCategories();
     } catch (error) {
-      wx.showToast({ title: error.message || "创建失败", icon: "none" });
+      wx.showToast({ title: errorMessage(error, "创建失败"), icon: "none" });
     }
   },
 
-  async onEdit(event) {
+  async onEdit(event: DatasetEvent<{ id: string }>) {
     const category = this.data.categories.find((item) => item.id === event.currentTarget.dataset.id);
     if (!category) return;
     const result = await editableModal("修改分类", "输入分类名称", category.name);
     if (!result.confirm || !result.content.trim()) return;
     try {
-      await api.request({
+      await request({
         path: `/categories/${category.id}`,
         method: "PATCH",
         header: { "Content-Type": "application/json" },
@@ -66,13 +77,13 @@ Page({
       });
       await this.loadCategories();
     } catch (error) {
-      wx.showToast({ title: error.message || "保存失败", icon: "none" });
+      wx.showToast({ title: errorMessage(error, "保存失败"), icon: "none" });
     }
   },
 
-  async onDelete(event) {
+  async onDelete(event: DatasetEvent<{ id: string }>) {
     const id = event.currentTarget.dataset.id;
-    const result = await new Promise((resolve) =>
+    const result = await new Promise<WechatMiniprogram.ShowModalSuccessCallbackResult>((resolve) =>
       wx.showModal({
         title: "删除分类",
         content: "历史流水会保留并显示为未分类。",
@@ -82,21 +93,21 @@ Page({
     );
     if (!result.confirm) return;
     try {
-      await api.request({ path: `/categories/${id}`, method: "DELETE" });
+      await request({ path: `/categories/${id}`, method: "DELETE" });
       await this.loadCategories();
     } catch (error) {
-      wx.showToast({ title: error.message || "删除失败", icon: "none" });
+      wx.showToast({ title: errorMessage(error, "删除失败"), icon: "none" });
     }
   },
 });
 
-function editableModal(title, placeholderText, content) {
-  return new Promise((resolve) =>
+function editableModal(title: string, placeholderText: string, content = "") {
+  return new Promise<WechatMiniprogram.ShowModalSuccessCallbackResult>((resolve) =>
     wx.showModal({
       title,
       editable: true,
       placeholderText,
-      content: content || "",
+      content,
       confirmColor: "#ff681c",
       success: resolve,
     }),

@@ -877,6 +877,28 @@ function executeSelect(db: TestD1Database, sql: string, values: unknown[]) {
 }
 
 function selectAuthIdentities(db: TestD1Database, lower: string, values: unknown[]) {
+  if (lower.includes("provider = 'wechat'")) {
+    const identity = db.rows.auth_identities.find(
+      (row) => row.provider === "wechat" && row.provider_account_id === values[0] && !row.deleted_at,
+    );
+    const user = identity
+      ? db.rows.users.find((row) => row.id === identity.user_id && !row.deleted_at)
+      : undefined;
+    if (!user) return [];
+    const subscription = db.rows.subscriptions.find(
+      (row) => row.user_id === user.id && row.status === "active" && !row.deleted_at,
+    );
+    return [
+      {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        avatarUrl: user.avatar_url,
+        phone: user.phone,
+        plan: subscription?.plan ?? "free",
+      },
+    ];
+  }
   if (lower.includes("provider_account_id")) {
     return db.rows.auth_identities
       .filter((row) => row.provider === "password" && row.provider_account_id === values[0])
@@ -1425,6 +1447,8 @@ export function createD1TestApp() {
     FILES: files as unknown as R2Bucket,
     IMPORT_PIPELINE_QUEUE: importQueue as unknown as Queue<ImportPipelineMessage>,
     GOOGLE_VISION_API_KEY: "test-google-vision-key",
+    WECHAT_MINI_APP_ID: "wx-test-app-id",
+    WECHAT_MINI_APP_SECRET: "wechat-test-secret",
   };
   return {
     app,

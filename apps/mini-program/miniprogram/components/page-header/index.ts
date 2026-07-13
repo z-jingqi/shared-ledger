@@ -1,3 +1,16 @@
+interface HeaderProperties {
+  title: string;
+  bookName: string;
+  bookMark: string;
+  showAi: boolean;
+  showBack: boolean;
+}
+
+interface HeaderData {
+  statusBarHeight: number;
+  navigationHeight: number;
+}
+
 Component({
   properties: {
     title: { type: String, value: "" },
@@ -9,10 +22,10 @@ Component({
   data: {
     statusBarHeight: 20,
     navigationHeight: 44,
-  },
+  } as HeaderData,
   lifetimes: {
     attached() {
-      const chrome = getApp().globalData.chrome || {};
+      const chrome = getApp<IAppOption>().globalData.chrome;
       this.setData({
         statusBarHeight: chrome.statusBarHeight || 20,
         navigationHeight: chrome.navigationHeight || 44,

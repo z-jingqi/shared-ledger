@@ -31,6 +31,38 @@
   padding-top: 0;
 }
 
+.analysis-guest {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+  padding: 24rpx 28rpx;
+}
+
+.analysis-guest > view {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  color: #7b8595;
+  font-size: 23rpx;
+}
+
+.analysis-guest > view > text:first-child {
+  color: #111827;
+  font-size: 27rpx;
+  font-weight: 750;
+}
+
+.analysis-guest button {
+  flex: none;
+  padding: 16rpx 24rpx;
+  border-radius: 18rpx;
+  background: #ff681c;
+  color: #fff;
+  font-size: 24rpx;
+  font-weight: 750;
+}
+
 .chart-skeleton {
   height: 430rpx;
 }

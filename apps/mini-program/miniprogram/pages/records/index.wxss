@@ -2,6 +2,30 @@
   padding-top: 12rpx;
 }
 
+.records-guest {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+  padding: 36rpx 30rpx;
+  color: #7b8595;
+  line-height: 1.55;
+}
+
+.records-guest > text:first-child {
+  color: #111827;
+  font-size: 31rpx;
+  font-weight: 800;
+}
+
+.records-guest button {
+  height: 78rpx;
+  margin-top: 8rpx;
+  border-radius: 20rpx;
+  background: #ff681c;
+  color: #fff;
+  font-weight: 750;
+}
+
 .search-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 78rpx;

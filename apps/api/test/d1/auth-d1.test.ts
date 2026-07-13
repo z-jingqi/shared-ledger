@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { verifyPassword } from "../../src/services/auth";
 import { createD1TestApp } from "./harness";
 
@@ -14,6 +14,8 @@ function cookieHeader(response: Response) {
 }
 
 describe("D1 auth session lifecycle", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   it("rejects legacy PBKDF2 hashes above Workers iteration limits without throwing", async () => {
     await expect(verifyPassword("123456", "pbkdf2$210000$legacy_salt$legacy_hash")).resolves.toBe(false);
   });
@@ -144,5 +146,65 @@ describe("D1 auth session lifecycle", () => {
       context.env,
     );
     expect(refreshAfterLogout.status).toBe(401);
+  });
+
+  it("creates one WeChat account and supports bearer access and refresh tokens", async () => {
+    const context = createD1TestApp();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ openid: "wechat-open-id", session_key: "wechat-session-key" })),
+    );
+
+    const first = await context.app.request(
+      "/auth/wechat/session",
+      { method: "POST", headers: jsonHeaders, body: JSON.stringify({ code: "first-code" }) },
+      context.env,
+    );
+    const firstBody = await first.json<any>();
+    expect(first.status).toBe(200);
+    expect(firstBody.user).toMatchObject({ plan: "free" });
+    expect(firstBody.accessToken).toEqual(expect.any(String));
+    expect(firstBody.refreshToken).toEqual(expect.any(String));
+    expect(context.db.rows.auth_identities).toContainEqual(
+      expect.objectContaining({
+        user_id: firstBody.user.id,
+        provider: "wechat",
+        provider_account_id: "wechat-open-id",
+      }),
+    );
+    expect(context.db.rows.books).toHaveLength(1);
+    expect(context.db.rows.categories).toHaveLength(17);
+
+    const me = await context.app.request(
+      "/auth/me",
+      { headers: { Authorization: `Bearer ${firstBody.accessToken}` } },
+      context.env,
+    );
+    expect(me.status).toBe(200);
+
+    const refreshed = await context.app.request(
+      "/auth/refresh",
+      {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ refreshToken: firstBody.refreshToken }),
+      },
+      context.env,
+    );
+    expect(refreshed.status).toBe(200);
+    expect(await refreshed.json()).toMatchObject({
+      accessToken: expect.any(String),
+      refreshToken: expect.any(String),
+    });
+
+    const second = await context.app.request(
+      "/auth/wechat/session",
+      { method: "POST", headers: jsonHeaders, body: JSON.stringify({ code: "second-code" }) },
+      context.env,
+    );
+    const secondBody = await second.json<any>();
+    expect(secondBody.user.id).toBe(firstBody.user.id);
+    expect(context.db.rows.users).toHaveLength(1);
+    expect(context.db.rows.books).toHaveLength(1);
   });
 });

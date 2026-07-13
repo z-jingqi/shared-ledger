@@ -1,10 +1,43 @@
-const api = require("../../services/api");
+import { request, upload } from "../../services/api";
+import { ensure, requireLogin } from "../../services/session";
+import { errorMessage } from "../../utils/error";
+
+type ImportFilter = "all" | "processing" | "success" | "failed";
+
+interface ImportJob {
+  id: string;
+  status: string;
+  fileName?: string;
+  errorMessage?: string;
+}
+
+interface ImportUsage extends Record<string, unknown> {
+  imageOcr: { remaining: number };
+}
+
+interface ImportData {
+  filter: ImportFilter;
+  jobs: ImportJob[];
+  visibleJobs: ImportJob[];
+  loading: boolean;
+  uploading: boolean;
+  remaining: number;
+}
 
 Page({
-  data: { filter: "all", jobs: [], visibleJobs: [], loading: true, uploading: false, remaining: 0 },
+  data: {
+    filter: "all",
+    jobs: [],
+    visibleJobs: [],
+    loading: true,
+    uploading: false,
+    remaining: 0,
+  } as ImportData,
 
-  onShow() {
-    const user = getApp().globalData.user;
+  async onShow() {
+    const state = await requireLogin("/pages/imports/index");
+    if (!state) return;
+    const user = state.user;
     if (!user || user.plan !== "pro") {
       wx.showToast({ title: "当前套餐不显示图片识别入口", icon: "none" });
       setTimeout(() => wx.navigateBack(), 500);
@@ -14,13 +47,13 @@ Page({
   },
 
   async loadJobs() {
-    const book = getApp().globalData.activeBook;
+    const { activeBook: book } = await ensure();
     if (!book) return;
     this.setData({ loading: true });
     try {
       const [jobResult, usageResult] = await Promise.all([
-        api.request({ path: `/books/${book.id}/imports` }),
-        api.request({ path: "/me/import-usage" }),
+        request<{ imports: ImportJob[] }>({ path: `/books/${book.id}/imports` }),
+        request<ImportUsage>({ path: "/me/import-usage" }),
       ]);
       this.setData({
         jobs: jobResult.imports || [],
@@ -30,11 +63,11 @@ Page({
       this.applyFilter();
     } catch (error) {
       this.setData({ loading: false });
-      wx.showToast({ title: error.message || "任务加载失败", icon: "none" });
+      wx.showToast({ title: errorMessage(error, "任务加载失败"), icon: "none" });
     }
   },
 
-  onFilter(event) {
+  onFilter(event: DatasetEvent<{ filter: ImportFilter }>) {
     this.setData({ filter: event.currentTarget.dataset.filter });
     this.applyFilter();
   },
@@ -48,7 +81,7 @@ Page({
           ? this.data.jobs
           : filter === "processing"
             ? this.data.jobs.filter((job) => ![...terminal.success, ...terminal.failed].includes(job.status))
-            : this.data.jobs.filter((job) => terminal[filter].includes(job.status)),
+            : this.data.jobs.filter((job) => terminal[filter as "success" | "failed"].includes(job.status)),
     });
   },
 
@@ -65,12 +98,13 @@ Page({
     });
   },
 
-  async uploadFiles(files) {
-    const book = getApp().globalData.activeBook;
+  async uploadFiles(files: WechatMiniprogram.MediaFile[]) {
+    const { activeBook: book } = await ensure();
+    if (!book) return;
     this.setData({ uploading: true });
     try {
       for (const file of files) {
-        await api.upload({
+        await upload({
           path: `/books/${book.id}/imports`,
           filePath: file.tempFilePath,
           formData: { autoConfirm: "false" },
@@ -79,7 +113,7 @@ Page({
       wx.showToast({ title: "已开始识别", icon: "success" });
       await this.loadJobs();
     } catch (error) {
-      wx.showToast({ title: error.message || "上传失败", icon: "none" });
+      wx.showToast({ title: errorMessage(error, "上传失败"), icon: "none" });
     } finally {
       this.setData({ uploading: false });
     }

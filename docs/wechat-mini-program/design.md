@@ -44,7 +44,7 @@
 
 ## 3. 技术选型
 
-使用微信原生小程序运行时创建 `apps/mini-program`，页面直接由 WXML、WXSS、JavaScript 和 JSON 组成。
+使用微信原生小程序运行时创建 `apps/mini-program`，页面直接由 WXML、WXSS、TypeScript 和 JSON 组成。
 
 选择原因：
 
@@ -62,7 +62,7 @@ apps/
   mini-program/
     project.config.json        # 微信开发者工具项目配置
     miniprogram/
-      app.js
+      app.ts
       app.json
       app.wxss
       custom-tab-bar/
@@ -82,11 +82,11 @@ apps/
         members/
         ai/
       services/
-        api.js
-        session.js
+        api.ts
+        session.ts
       utils/
-        format.js
-        transactions.js
+        format.ts
+        transactions.ts
     scripts/validate.mjs
     test/
 packages/
@@ -194,12 +194,11 @@ packages/
   -> 登录已有用户，或进入创建/绑定账户流程
 ```
 
-新增后端接口：
+后端接口：
 
-- `POST /auth/wechat/session`：消费一次性 code，返回登录结果或需要绑定状态。
-- `POST /auth/wechat/register`：为新微信身份创建用户、free 订阅、默认账本和默认分类。
-- `POST /auth/wechat/link/password`：用户验证现有账号密码后绑定微信身份。
-- `DELETE /me/auth-identities/wechat`：在至少保留一种可登录身份的前提下解绑。
+- `POST /auth/wechat/session`：消费一次性 code；首次登录创建用户、free 订阅、默认账本和默认分类，再返回 access/refresh token。
+- `POST /auth/refresh`：接收轮换 refresh token，返回新的 access/refresh token。
+- `POST /auth/logout`：撤销当前小程序 access/refresh token。
 
 规则：
 
@@ -213,7 +212,7 @@ packages/
 浏览器 cookie 不适合作为小程序唯一认证方式。API 需要同时支持 Web cookie 与小程序 Bearer token：
 
 - access token：短期有效，放在 `Authorization: Bearer <token>`。
-- refresh token：轮换并存储在小程序本地安全存储；服务端仍可撤销。
+- refresh token：轮换并存储在小程序本地存储；服务端保存哈希并可撤销。
 - 收到 401 时进行一次互斥 refresh，并重放原请求；refresh 失败才清理状态并进入登录页。
 - API client 统一附加 `bookId`、时区、request id 和客户端版本。
 - 不在日志中输出 access token、refresh token、微信 code 或 session key。
@@ -303,6 +302,7 @@ packages/
 
 ```text
 pnpm --filter @shared-ledger/mini-program check
+pnpm --filter @shared-ledger/mini-program typecheck
 pnpm --filter @shared-ledger/mini-program test
 ```
 

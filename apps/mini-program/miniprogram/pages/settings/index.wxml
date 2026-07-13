@@ -1,8 +1,13 @@
 <view class="screen">
-  <page-header title="我的" book-name="{{book.name}}" book-mark="{{bookMark}}" bind:booktap="onBookTap" />
+  <page-header title="我的" book-name="{{book.name || ''}}" book-mark="{{bookMark}}" bind:booktap="onBookTap" />
   <scroll-view class="settings-scroll" scroll-y enhanced show-scrollbar="{{false}}">
     <view class="page-content settings-content">
       <view wx:if="{{loading}}" class="surface skeleton profile-skeleton"></view>
+      <view wx:elif="{{guest}}" class="surface settings-guest">
+        <view class="avatar">游</view>
+        <view><text>游客预览</text><text>登录后管理账本、分类、成员和账户资料</text></view>
+        <button bindtap="onLogin">去登录</button>
+      </view>
       <block wx:else>
         <button class="surface profile-card" bindtap="onProfile">
           <view class="avatar">{{profileInitial}}</view>

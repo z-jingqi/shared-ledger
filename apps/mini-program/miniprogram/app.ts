@@ -1,8 +1,9 @@
-const session = require("./services/session");
+import { apiOrigin } from "./config/environment";
+import { restore } from "./services/session";
 
 App({
   globalData: {
-    apiOrigin: "https://dev.leger.aleph-cat.com/api",
+    apiOrigin: apiOrigin(),
     user: null,
     books: [],
     activeBook: null,
@@ -11,7 +12,7 @@ App({
 
   onLaunch() {
     this.measureChrome();
-    session.restore().catch(() => undefined);
+    restore().catch(() => undefined);
   },
 
   measureChrome() {

@@ -30,6 +30,8 @@ export type Env = {
   APP_ENV?: string;
   WEB_ORIGIN?: string;
   AUTH_COOKIE_SECRET?: string;
+  WECHAT_MINI_APP_ID?: string;
+  WECHAT_MINI_APP_SECRET?: string;
 };
 export type LedgerUser = {
   id: string;

@@ -127,3 +127,30 @@
 .transaction-list {
   overflow: hidden;
 }
+.guest-state {
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+  padding: 40rpx 34rpx;
+  color: #737d8d;
+  line-height: 1.6;
+}
+
+.guest-title {
+  color: #111827;
+  font-size: 34rpx;
+  font-weight: 800;
+}
+
+.guest-state button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 84rpx;
+  margin-top: 8rpx;
+  border-radius: 22rpx;
+  background: #ff681c;
+  color: #fff;
+  font-size: 27rpx;
+  font-weight: 750;
+}

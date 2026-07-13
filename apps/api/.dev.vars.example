@@ -1,5 +1,6 @@
 # Local-only secrets. Copy to .dev.vars; do not commit the copy.
 GOOGLE_VISION_API_KEY=
+WECHAT_MINI_APP_SECRET=
 
 # Default local AI provider. Browser clients still call only shared-ledger API.
 AI_PROVIDER=openrouter

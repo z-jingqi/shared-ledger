@@ -19,8 +19,14 @@ function testUser(context: any, store?: MemoryLedgerStore) {
 }
 
 export async function currentUser(context: any, store?: MemoryLedgerStore): Promise<LedgerUser | null> {
-  if (context.env?.DB) return findSessionUser(context.env.DB, getCookie(context, "ledger_session"));
+  if (context.env?.DB) return findSessionUser(context.env.DB, requestAccessToken(context));
   return testUser(context, store);
+}
+
+export function requestAccessToken(context: any) {
+  const authorization = context.req.header("authorization");
+  const bearer = authorization?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
+  return bearer || getCookie(context, "ledger_session");
 }
 
 export async function requireUser(context: any, store?: MemoryLedgerStore) {

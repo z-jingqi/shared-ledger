@@ -10,6 +10,39 @@
   height: 210rpx;
 }
 
+.settings-guest {
+  display: flex;
+  align-items: center;
+  gap: 22rpx;
+  min-height: 160rpx;
+  padding: 28rpx;
+}
+
+.settings-guest > view:nth-child(2) {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10rpx;
+  color: #7b8595;
+  font-size: 23rpx;
+}
+
+.settings-guest > view:nth-child(2) > text:first-child {
+  color: #111827;
+  font-size: 30rpx;
+  font-weight: 800;
+}
+
+.settings-guest button {
+  flex: none;
+  padding: 16rpx 22rpx;
+  border-radius: 18rpx;
+  background: #ff681c;
+  color: #fff;
+  font-size: 24rpx;
+  font-weight: 750;
+}
+
 .profile-card {
   display: flex;
   align-items: center;

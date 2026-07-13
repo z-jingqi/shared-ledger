@@ -6,6 +6,9 @@
     "check": "node scripts/validate.mjs",
     "lint": "node scripts/validate.mjs",
     "test": "node --test test/*.test.mjs",
-    "typecheck": "node scripts/validate.mjs"
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "miniprogram-api-typings": "^5.2.1"
   }
 }

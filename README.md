@@ -115,6 +115,7 @@ shared-ledger 现在只支持图片导入：jpg/jpeg/png/gif/webp/tif/tiff/bmp/r
 - Queue binding：`IMPORT_PIPELINE_QUEUE` 指向 `shared-ledger-import-pipeline-{preview|prod}`，consumer `max_batch_size=1`、`max_concurrency=1`、`max_retries=3`
 - Secret：`GOOGLE_VISION_API_KEY`
 - OpenRouter Secret：`OPENROUTER_API_KEY`
+- 微信小程序 Secret：`WECHAT_MINI_APP_SECRET`（AppID 为 `wx1d840b80e978929d`）
 - OpenAI：`OPENAI_API_KEY`、`OPENAI_MODEL`
 - Workers AI：`WORKERS_AI_BASE_URL`、`WORKERS_AI_API_TOKEN`、`WORKERS_AI_MODEL`
 

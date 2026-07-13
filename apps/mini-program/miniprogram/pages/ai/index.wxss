@@ -95,7 +95,6 @@
   line-height: 1.45;
 }
 
-.attach-button,
 .send-button {
   display: flex;
   flex: none;

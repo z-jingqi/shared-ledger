@@ -78,6 +78,12 @@ importers:
         specifier: ^4.24.3
         version: 4.103.0(@cloudflare/workers-types@4.20260621.1)
 
+  apps/mini-program:
+    devDependencies:
+      miniprogram-api-typings:
+        specifier: ^5.2.1
+        version: 5.2.1
+
   apps/web:
     dependencies:
       "@hookform/resolvers":
@@ -5627,6 +5633,12 @@ packages:
       }
     engines: { node: ">=16 || 14 >=14.17" }
 
+  miniprogram-api-typings@5.2.1:
+    resolution:
+      {
+        integrity: sha512-fbB2hapWx/vaXN4olDJEIS+OOkCjHlHLX0WG74XUJqhm0VJ8dpleBdgagHATjEpcbcH2z7AV8PjpwYp9dylfYA==,
+      }
+
   ms@2.1.3:
     resolution:
       {
@@ -10387,6 +10399,8 @@ snapshots:
       brace-expansion: 2.1.1
 
   minipass@7.1.3: {}
+
+  miniprogram-api-typings@5.2.1: {}
 
   ms@2.1.3: {}
 

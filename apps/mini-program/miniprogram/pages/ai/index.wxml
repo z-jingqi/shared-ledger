@@ -8,7 +8,6 @@
     </view>
   </scroll-view>
   <view class="composer">
-    <button class="attach-button">＋</button>
     <textarea value="{{input}}" auto-height maxlength="2000" placeholder="输入消息…" bindinput="onInput" />
     <button class="send-button" disabled="{{!input || sending}}" bindtap="onSend">↑</button>
   </view>

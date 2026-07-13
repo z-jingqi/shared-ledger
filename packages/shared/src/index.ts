@@ -96,6 +96,9 @@ export const loginSchema = z.object({
   identifier: z.string().trim().min(1),
   password: z.string().min(1).max(128),
 });
+export const wechatSessionSchema = z.object({
+  code: z.string().trim().min(1).max(256),
+});
 export const updateProfileSchema = z.object({
   name: z.string().trim().min(1).max(60),
   email: z.string().trim().email().optional().or(z.literal("")),

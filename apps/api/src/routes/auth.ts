@@ -4,6 +4,7 @@ import {
   registerSchema,
   subscriptionContactSchema,
   updateProfileSchema,
+  wechatSessionSchema,
 } from "@shared-ledger/shared";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { Hono } from "hono";
@@ -13,7 +14,8 @@ import {
   changeUserPassword,
   createPasswordAccount,
   createSessionPair,
-  findSessionUser,
+  createWechatAccount,
+  exchangeWechatCode,
   refreshSession,
   revokeRefreshToken,
   revokeSession,
@@ -21,7 +23,7 @@ import {
   updateUserProfile,
   upgradeSubscription,
 } from "../services/auth";
-import { currentUser } from "../services/access";
+import { currentUser, requestAccessToken } from "../services/access";
 import type { MemoryLedgerStore } from "../store";
 import type { Env } from "../types";
 
@@ -103,21 +105,51 @@ export function registerAuthRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryL
     );
     return user ? context.json({ user }) : jsonError(context, "账号或密码错误", 401);
   });
+  app.post("/auth/wechat/session", async (context) => {
+    if (!context.env.DB) return jsonError(context, "微信登录需要 D1 运行时", 503);
+    if (!context.env.WECHAT_MINI_APP_ID || !context.env.WECHAT_MINI_APP_SECRET) {
+      return jsonError(context, "微信登录尚未配置", 503);
+    }
+    const body = await parseJson(context, wechatSessionSchema);
+    if (!body) return jsonError(context, "微信登录凭证不合法");
+    try {
+      const identity = await exchangeWechatCode(
+        context.env.WECHAT_MINI_APP_ID,
+        context.env.WECHAT_MINI_APP_SECRET,
+        body.code,
+      );
+      const user = await createWechatAccount(context.env.DB, identity.openId);
+      const tokens = await createSessionPair(context.env.DB, user.id);
+      setAuthCookies(context, tokens);
+      return context.json({ user, ...tokens });
+    } catch (error) {
+      return jsonError(context, error instanceof Error ? error.message : "微信登录失败", 401);
+    }
+  });
   app.post("/auth/logout", async (context) => {
-    if (context.env.DB) await revokeSession(context.env.DB, getCookie(context, "ledger_session"));
-    if (context.env.DB) await revokeRefreshToken(context.env.DB, getCookie(context, "ledger_refresh"));
+    const body = await context.req.json().catch(() => ({}));
+    if (context.env.DB) await revokeSession(context.env.DB, requestAccessToken(context));
+    if (context.env.DB) {
+      await revokeRefreshToken(
+        context.env.DB,
+        typeof body.refreshToken === "string" ? body.refreshToken : getCookie(context, "ledger_refresh"),
+      );
+    }
     clearAuthCookies(context);
     return context.body(null, 204);
   });
   app.post("/auth/refresh", async (context) => {
     if (!context.env.DB) return jsonError(context, "认证需要 D1 运行时", 503);
-    const tokens = await refreshSession(context.env.DB, getCookie(context, "ledger_refresh"));
+    const body = await context.req.json().catch(() => ({}));
+    const refreshToken =
+      typeof body.refreshToken === "string" ? body.refreshToken : getCookie(context, "ledger_refresh");
+    const tokens = await refreshSession(context.env.DB, refreshToken);
     if (!tokens) {
       clearAuthCookies(context);
       return jsonError(context, "登录已过期，请重新登录", 401);
     }
     setAuthCookies(context, tokens);
-    return context.body(null, 204);
+    return typeof body.refreshToken === "string" ? context.json(tokens) : context.body(null, 204);
   });
   app.get("/auth/me", async (context) => {
     const user = await currentUser(context, store);
@@ -198,7 +230,7 @@ export function registerAuthRoutes(app: Hono<{ Bindings: Env }>, store?: MemoryL
 
   app.post("/subscriptions/pro", async (context) => {
     if (!context.env.DB) return jsonError(context, "订阅功能需要 D1 运行时", 503);
-    const user = await findSessionUser(context.env.DB, getCookie(context, "ledger_session"));
+    const user = await currentUser(context, store);
     if (!user) return jsonError(context, "未登录", 401);
     const body = await context.req.json().catch(() => ({}));
     const parsed = subscriptionContactSchema.safeParse(body);

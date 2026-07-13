@@ -1,6 +1,10 @@
+interface RowProperties {
+  item: LedgerTransaction;
+}
+
 Component({
   properties: {
-    item: { type: Object, value: {} },
+    item: { type: Object, value: {} as LedgerTransaction },
   },
   methods: {
     onTap() {

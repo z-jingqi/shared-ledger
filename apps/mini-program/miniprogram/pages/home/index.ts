@@ -1,11 +1,33 @@
-const api = require("../../services/api");
-const session = require("../../services/session");
-const { currency } = require("../../utils/format");
-const { currentMonth, transactionView } = require("../../utils/transactions");
+import { request } from "../../services/api";
+import { chooseActiveBook, optionalSession, requireLogin } from "../../services/session";
+import { errorStatus } from "../../utils/error";
+import { currency } from "../../utils/format";
+import { currentMonth, transactionView, type TransactionView } from "../../utils/transactions";
+
+interface ImportJob {
+  id: string;
+  status: string;
+}
+
+interface HomeData {
+  loading: boolean;
+  guest: boolean;
+  book: LedgerBook | null;
+  monthLabel: string;
+  total: string;
+  expense: string;
+  income: string;
+  count: number;
+  recent: TransactionView[];
+  pendingCount: number;
+  taskCount: number;
+  bookMark: string;
+}
 
 Page({
   data: {
     loading: true,
+    guest: false,
     book: null,
     monthLabel: "本月记账",
     total: "¥0.00",
@@ -16,7 +38,7 @@ Page({
     pendingCount: 0,
     taskCount: 0,
     bookMark: "账",
-  },
+  } as HomeData,
 
   onShow() {
     const tabBar = this.getTabBar && this.getTabBar();
@@ -27,15 +49,21 @@ Page({
   async loadPage() {
     this.setData({ loading: true });
     try {
-      if (!getApp().globalData.activeBook) await session.restore();
-      const book = getApp().globalData.activeBook;
+      const state = await optionalSession();
+      if (!state) {
+        this.setData({ loading: false, guest: true, book: null, recent: [] });
+        return;
+      }
+      const { activeBook: book } = state;
       if (!book) {
         this.setData({ loading: false, book: null });
         return;
       }
       const [transactionResult, importResult] = await Promise.all([
-        api.request({ path: `/books/${book.id}/transactions` }),
-        api.request({ path: `/books/${book.id}/imports` }).catch(() => ({ imports: [] })),
+        request<{ transactions: LedgerTransaction[] }>({ path: `/books/${book.id}/transactions` }),
+        request<{ imports: ImportJob[] }>({ path: `/books/${book.id}/imports` }).catch(() => ({
+          imports: [],
+        })),
       ]);
       const all = transactionResult.transactions || [];
       const month = currentMonth(all);
@@ -48,6 +76,7 @@ Page({
       const jobs = importResult.imports || [];
       this.setData({
         loading: false,
+        guest: false,
         book,
         bookMark: book.name ? book.name.slice(0, 1) : "账",
         monthLabel: `${new Date().getMonth() + 1}月记账`,
@@ -60,31 +89,23 @@ Page({
         taskCount: jobs.filter((job) => !["completed", "failed", "cancelled"].includes(job.status)).length,
       });
     } catch (error) {
-      if (error.statusCode === 401) {
-        wx.reLaunch({ url: "/pages/login/index" });
-        return;
-      }
+      if (errorStatus(error) === 401) this.setData({ guest: true, book: null });
       this.setData({ loading: false });
     }
   },
 
-  onBookTap() {
-    const books = getApp().globalData.books || [];
-    if (!books.length) return;
-    wx.showActionSheet({
-      itemList: books.map((book) => book.name),
-      success: ({ tapIndex }) => {
-        session.setActiveBook(books[tapIndex].id);
-        this.loadPage();
-      },
-    });
+  async onBookTap() {
+    if (!(await requireLogin("/pages/home/index"))) return;
+    const selected = await chooseActiveBook();
+    if (selected) this.loadPage();
   },
 
-  onAiTap() {
+  async onAiTap() {
+    if (!(await requireLogin("/pages/ai/index"))) return;
     wx.navigateTo({ url: "/pages/ai/index" });
   },
 
-  onDetail(event) {
+  onDetail(event: WechatMiniprogram.CustomEvent<{ id: string }>) {
     wx.navigateTo({ url: `/pages/transaction-detail/index?id=${event.detail.id}` });
   },
 
@@ -92,11 +113,17 @@ Page({
     wx.switchTab({ url: "/pages/records/index" });
   },
 
-  onManualRecord() {
+  async onManualRecord() {
+    if (!(await requireLogin("/pages/record-form/index"))) return;
     wx.navigateTo({ url: "/pages/record-form/index" });
   },
 
-  onTasks() {
+  async onTasks() {
+    if (!(await requireLogin("/pages/imports/index"))) return;
     wx.navigateTo({ url: "/pages/imports/index" });
+  },
+
+  onLogin() {
+    wx.navigateTo({ url: "/pages/login/index?redirect=%2Fpages%2Fhome%2Findex" });
   },
 });

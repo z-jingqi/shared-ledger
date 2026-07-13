@@ -19,7 +19,7 @@ const nativeTags = new Set([
 ]);
 
 for (const page of app.pages) {
-  for (const extension of ["js", "json", "wxml", "wxss"]) {
+  for (const extension of ["ts", "json", "wxml", "wxss"]) {
     const path = join(rootPath, `${page}.${extension}`);
     if (!existsSync(path)) failures.push(`缺少页面文件：${relative(rootPath, path)}`);
   }
@@ -36,13 +36,12 @@ for (const path of walk(rootPath)) {
     }
   }
   if (extension === "js") {
-    try {
-      new Function(source);
-    } catch (error) {
-      failures.push(`${relative(rootPath, path)} JavaScript 无效：${error.message}`);
-    }
+    failures.push(`${relative(rootPath, path)} 仍是 JavaScript，请迁移为 TypeScript`);
   }
-  if (["js", "wxml", "wxss"].includes(extension) && /\b(Taro|React|react-router|WebView)\b/.test(source)) {
+  if (
+    ["ts", "js", "wxml", "wxss"].includes(extension) &&
+    /\b(Taro|React|react-router|WebView)\b/.test(source)
+  ) {
     failures.push(`${relative(rootPath, path)} 引入了非原生运行时`);
   }
   if (extension === "wxml" && /\{\{[^}]*\.[A-Za-z_$][\w$]*\s*\(/.test(source)) {

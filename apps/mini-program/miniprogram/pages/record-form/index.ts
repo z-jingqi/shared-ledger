@@ -1,32 +1,57 @@
-const api = require("../../services/api");
-const { ymd } = require("../../utils/format");
+import { request } from "../../services/api";
+import { ensure, requireLogin } from "../../services/session";
+import { errorMessage } from "../../utils/error";
+import { ymd } from "../../utils/format";
+
+interface RecordFormData {
+  editingId: string;
+  type: LedgerTransactionType;
+  amount: string;
+  note: string;
+  date: string;
+  categorySource: LedgerCategory[];
+  categories: LedgerCategory[];
+  categoryId: string;
+  saving: boolean;
+  title: string;
+  items: LedgerTransactionItem[];
+  keys: string[];
+}
 
 Page({
   data: {
+    editingId: "",
     type: "expense",
     amount: "0",
     note: "",
     date: ymd(new Date()),
     categories: [],
+    categorySource: [],
     categoryId: "",
     saving: false,
     title: "记一笔",
     items: [],
     keys: ["1", "2", "3", "⌫", "4", "5", "6", "+", "7", "8", "9", ".", "0", "00"],
-  },
+  } as RecordFormData,
 
-  onLoad(options) {
-    this.editingId = options.id || "";
-    if (this.editingId) {
-      this.setData({ title: "编辑记录" });
-      this.loadTransaction();
+  async onLoad(options: Record<string, string | undefined>) {
+    const editingId = options.id || "";
+    const redirect = editingId
+      ? `/pages/record-form/index?id=${encodeURIComponent(editingId)}`
+      : "/pages/record-form/index";
+    if (!(await requireLogin(redirect))) return;
+    this.setData({ editingId, title: editingId ? "编辑记录" : "记一笔" });
+    if (editingId) {
+      void this.loadTransaction();
     }
-    this.loadCategories();
+    void this.loadCategories();
   },
 
   async loadTransaction() {
     try {
-      const result = await api.request({ path: `/transactions/${this.editingId}` });
+      const result = await request<{ transaction: LedgerTransaction }>({
+        path: `/transactions/${this.data.editingId}`,
+      });
       const transaction = result.transaction;
       this.setData({
         type: transaction.type,
@@ -38,21 +63,21 @@ Page({
       });
       this.applyType();
     } catch (error) {
-      wx.showToast({ title: error.message || "记录加载失败", icon: "none" });
+      wx.showToast({ title: errorMessage(error, "记录加载失败"), icon: "none" });
     }
   },
 
   async loadCategories() {
     try {
-      const result = await api.request({ path: "/me/categories" });
+      const result = await request<{ categories: LedgerCategory[] }>({ path: "/me/categories" });
       this.setData({ categorySource: result.categories || [] });
       this.applyType();
     } catch (error) {
-      wx.showToast({ title: error.message || "分类加载失败", icon: "none" });
+      wx.showToast({ title: errorMessage(error, "分类加载失败"), icon: "none" });
     }
   },
 
-  onType(event) {
+  onType(event: DatasetEvent<{ type: LedgerTransactionType }>) {
     this.setData({ type: event.currentTarget.dataset.type, categoryId: "" });
     this.applyType();
   },
@@ -63,11 +88,11 @@ Page({
     });
   },
 
-  onCategory(event) {
+  onCategory(event: DatasetEvent<{ id: string }>) {
     this.setData({ categoryId: event.currentTarget.dataset.id });
   },
 
-  onKey(event) {
+  onKey(event: DatasetEvent<{ key: string }>) {
     const key = event.currentTarget.dataset.key;
     let amount = this.data.amount;
     if (key === "⌫") amount = amount.length > 1 ? amount.slice(0, -1) : "0";
@@ -82,12 +107,12 @@ Page({
     this.setData({ amount });
   },
 
-  onNote(event) {
+  onNote(event: InputEvent) {
     this.setData({ note: event.detail.value });
   },
 
-  onDate(event) {
-    this.setData({ date: event.detail.value });
+  onDate(event: WechatMiniprogram.PickerChange) {
+    this.setData({ date: String(event.detail.value) });
   },
 
   onAddItem() {
@@ -115,7 +140,7 @@ Page({
     });
   },
 
-  onRemoveItem(event) {
+  onRemoveItem(event: DatasetEvent<{ index: string | number }>) {
     const items = this.data.items.filter((_, index) => index !== Number(event.currentTarget.dataset.index));
     const amount = items.length
       ? items.reduce((sum, item) => sum + Number(item.amount), 0).toFixed(2)
@@ -124,7 +149,7 @@ Page({
   },
 
   async onSave() {
-    const book = getApp().globalData.activeBook;
+    const { activeBook: book } = await ensure();
     const amount = Number(this.data.amount);
     if (!book || !amount) {
       wx.showToast({ title: "请输入金额", icon: "none" });
@@ -132,9 +157,9 @@ Page({
     }
     this.setData({ saving: true });
     try {
-      await api.request({
-        path: this.editingId ? `/transactions/${this.editingId}` : `/books/${book.id}/transactions`,
-        method: this.editingId ? "PATCH" : "POST",
+      await request({
+        path: this.data.editingId ? `/transactions/${this.data.editingId}` : `/books/${book.id}/transactions`,
+        method: this.data.editingId ? "PATCH" : "POST",
         header: { "Content-Type": "application/json" },
         data: {
           type: this.data.type,
@@ -153,7 +178,7 @@ Page({
       wx.showToast({ title: "已保存", icon: "success" });
       setTimeout(() => wx.navigateBack(), 500);
     } catch (error) {
-      wx.showToast({ title: error.message || "保存失败", icon: "none" });
+      wx.showToast({ title: errorMessage(error, "保存失败"), icon: "none" });
     } finally {
       this.setData({ saving: false });
     }

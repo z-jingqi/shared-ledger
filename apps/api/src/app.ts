@@ -23,7 +23,7 @@ export function createApp(store?: MemoryLedgerStore) {
       origin: (origin, context) => origin || context.env?.WEB_ORIGIN || "*",
       credentials: true,
       exposeHeaders: ["Content-Disposition"],
-      allowHeaders: ["Content-Type", "X-User-Id", "X-Plan"],
+      allowHeaders: ["Authorization", "Content-Type", "X-User-Id", "X-Plan"],
       allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     }),
   );

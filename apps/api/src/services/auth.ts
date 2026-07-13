@@ -195,6 +195,107 @@ export async function createPasswordAccount(db: D1Database, input: { name: strin
   return { id: userId, name: username, email: "", plan: "free" as const };
 }
 
+export async function findWechatUser(db: D1Database, openId: string) {
+  const row = await db
+    .prepare(
+      `SELECT u.id, u.name, u.email, u.avatar_url AS avatarUrl, u.phone, s.plan
+       FROM auth_identities i
+       JOIN users u ON u.id = i.user_id
+       LEFT JOIN subscriptions s ON s.user_id = u.id AND s.status = 'active' AND s.deleted_at IS NULL
+       WHERE i.provider = 'wechat' AND i.provider_account_id = ?
+         AND i.deleted_at IS NULL AND u.deleted_at IS NULL
+       ORDER BY s.created_at DESC
+       LIMIT 1`,
+    )
+    .bind(openId)
+    .first<UserRow>();
+  return row ? toLedgerUser(row) : null;
+}
+
+export async function createWechatAccount(db: D1Database, openId: string) {
+  const existing = await findWechatUser(db, openId);
+  if (existing) return existing;
+
+  const now = new Date().toISOString();
+  const userId = `user_${crypto.randomUUID()}`;
+  const bookId = `book_${crypto.randomUUID()}`;
+  const username = `微信用户${userId.replaceAll("-", "").slice(-8)}`;
+  const statements: D1PreparedStatement[] = [
+    db
+      .prepare(
+        "INSERT INTO users (id,name,email,phone,password_hash,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+      )
+      .bind(userId, username, null, null, "", userId, userId, now, now),
+    db
+      .prepare(
+        "INSERT INTO auth_identities (id,user_id,provider,provider_account_id,password_hash,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+      )
+      .bind(`identity_${crypto.randomUUID()}`, userId, "wechat", openId, null, userId, userId, now, now),
+    db
+      .prepare(
+        "INSERT INTO subscriptions (id,user_id,plan,status,started_at,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+      )
+      .bind(`subscription_${crypto.randomUUID()}`, userId, "free", "active", now, userId, userId, now, now),
+    db
+      .prepare(
+        "INSERT INTO books (id,name,currency,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
+      )
+      .bind(bookId, `${username}的账本`, "CNY", userId, userId, now, now),
+    db
+      .prepare(
+        "INSERT INTO book_members (id,book_id,user_id,role,joined_at,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+      )
+      .bind(`member_${crypto.randomUUID()}`, bookId, userId, "creator", now, userId, userId, now, now),
+  ];
+  defaultCategories.forEach((category, index) => {
+    statements.push(
+      db
+        .prepare(
+          "INSERT INTO categories (id,user_id,name,type,icon,color,sort_order,created_by_user_id,updated_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        )
+        .bind(
+          `category_${crypto.randomUUID()}`,
+          userId,
+          category.name,
+          category.type,
+          category.icon,
+          category.color,
+          index + 1,
+          userId,
+          userId,
+          now,
+          now,
+        ),
+    );
+  });
+  await db.batch(statements);
+  return { id: userId, name: username, email: "", plan: "free" as const };
+}
+
+export async function exchangeWechatCode(
+  appId: string,
+  appSecret: string,
+  code: string,
+  fetcher: typeof fetch = fetch,
+) {
+  const url = new URL("https://api.weixin.qq.com/sns/jscode2session");
+  url.searchParams.set("appid", appId);
+  url.searchParams.set("secret", appSecret);
+  url.searchParams.set("js_code", code);
+  url.searchParams.set("grant_type", "authorization_code");
+  const response = await fetcher(url, { method: "GET" });
+  if (!response.ok) throw new Error("微信登录服务暂时不可用");
+  const result = (await response.json()) as {
+    openid?: string;
+    unionid?: string;
+    session_key?: string;
+    errcode?: number;
+    errmsg?: string;
+  };
+  if (!result.openid || result.errcode) throw new Error("微信登录凭证无效，请重试");
+  return { openId: result.openid, unionId: result.unionid };
+}
+
 export async function authenticatePassword(db: D1Database, identifier: string, password: string) {
   const user = await findUser(
     db,

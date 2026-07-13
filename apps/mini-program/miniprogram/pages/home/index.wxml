@@ -1,6 +1,6 @@
 <view class="screen">
   <page-header
-    book-name="{{book.name}}"
+    book-name="{{book.name || ''}}"
     book-mark="{{bookMark}}"
     show-ai="{{true}}"
     bind:booktap="onBookTap"
@@ -10,6 +10,11 @@
     <view wx:if="{{loading}}" class="home-loading">
       <view class="surface skeleton hero-skeleton"></view>
       <view class="surface skeleton row-skeleton"></view>
+    </view>
+    <view wx:elif="{{guest}}" class="surface guest-state">
+      <text class="guest-title">登录后开始共同记账</text>
+      <text>你可以先浏览全部页面；登录后会同步真实账本并开放记账、AI 和协作功能。</text>
+      <button bindtap="onLogin">微信一键登录</button>
     </view>
     <block wx:elif="{{book}}">
       <view class="surface balance-card">
@@ -39,6 +44,6 @@
       </view>
       <view wx:else class="surface empty-state"><text>还没有记录</text><text>从中间的加号开始记一笔</text></view>
     </block>
-    <view wx:else class="surface empty-state"><text>还没有账本</text><text>请先在 Web 端创建一个账本</text></view>
+    <view wx:else class="surface empty-state"><text>还没有账本</text><text>登录后会自动创建默认账本</text></view>
   </view>
 </view>

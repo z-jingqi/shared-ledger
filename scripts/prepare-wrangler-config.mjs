@@ -27,6 +27,7 @@ const values = {
   __ZONE_NAME__: "aleph-cat.com",
   __AI_PROVIDER__: envValue(`AI_PROVIDER_${suffix}`) ?? "openrouter",
   __OPENROUTER_MODEL__: envValue(`OPENROUTER_MODEL_${suffix}`) ?? "deepseek/deepseek-v4-flash",
+  __WECHAT_MINI_APP_ID__: envValue(`WECHAT_MINI_APP_ID_${suffix}`) ?? "wx1d840b80e978929d",
   __D1_DATABASE_ID__: target === "api" ? await resolveD1DatabaseId() : "__D1_DATABASE_ID__",
   __R2_BUCKET__: envValue(`CLOUDFLARE_R2_BUCKET_${suffix}`) ?? `shared-ledger-files-${environment}`,
   __IMPORT_PIPELINE_QUEUE__:

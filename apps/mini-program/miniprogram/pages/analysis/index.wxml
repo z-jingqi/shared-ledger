@@ -1,6 +1,6 @@
 <view class="screen">
   <page-header
-    book-name="{{book.name}}"
+    book-name="{{book.name || ''}}"
     book-mark="{{bookMark}}"
     bind:booktap="onBookTap"
   />
@@ -11,6 +11,10 @@
   </view>
   <scroll-view class="analysis-scroll" scroll-y enhanced show-scrollbar="{{false}}">
     <view class="page-content analysis-content">
+      <view wx:if="{{guest}}" class="surface analysis-guest">
+        <view><text>当前为预览模式</text><text>登录后查看与你账本一致的分析数据</text></view>
+        <button bindtap="onLogin">去登录</button>
+      </view>
       <view wx:if="{{loading}}" class="surface skeleton chart-skeleton"></view>
       <block wx:else>
         <view class="summary-grid {{book.incomeEnabled ? '' : 'single'}}">

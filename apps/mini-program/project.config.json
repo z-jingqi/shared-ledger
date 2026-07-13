@@ -1,5 +1,5 @@
 {
-  "appid": "touristappid",
+  "appid": "wx1d840b80e978929d",
   "compileType": "miniprogram",
   "libVersion": "3.7.12",
   "miniprogramRoot": "miniprogram/",
@@ -8,7 +8,8 @@
     "es6": true,
     "minified": true,
     "postcss": true,
-    "urlCheck": true
+    "urlCheck": true,
+    "useCompilerPlugins": ["typescript"]
   },
   "simulatorType": "wechat",
   "srcMiniprogramRoot": "miniprogram/"

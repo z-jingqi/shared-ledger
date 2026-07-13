@@ -9,6 +9,7 @@
     "WEB_ORIGIN": "http://localhost:5175",
     "AI_PROVIDER": "openrouter",
     "OPENROUTER_MODEL": "deepseek/deepseek-v4-flash",
+    "WECHAT_MINI_APP_ID": "wx1d840b80e978929d",
   },
   "d1_databases": [
     {

@@ -5,7 +5,8 @@
   left: 24rpx;
   z-index: 100;
   display: grid;
-  grid-template-columns: 1fr 112rpx 1fr;
+  box-sizing: border-box;
+  grid-template-columns: minmax(0, 1fr) 112rpx minmax(0, 1fr);
   align-items: center;
   height: 106rpx;
   padding: 0 14rpx;
@@ -18,15 +19,21 @@
 .tab-group {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  min-width: 0;
 }
 
 .tab-item {
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
   align-items: center;
   justify-content: center;
   gap: 2rpx;
   height: 92rpx;
+  min-width: 0;
+  width: 100%;
+  margin: 0;
+  padding: 0;
   color: #98a1af;
   font-size: 20rpx;
 }
@@ -49,13 +56,15 @@
   width: 104rpx;
   height: 104rpx;
   margin: -32rpx auto 0;
+  padding: 0;
+  box-sizing: border-box;
   border-radius: 50%;
   background: #ff681c;
   color: #fff;
   box-shadow: 0 8rpx 18rpx rgba(255, 104, 28, 0.24);
 }
 
-.add-button text {
+.add-icon {
   font-size: 54rpx;
   font-weight: 300;
   line-height: 1;
