@@ -218,11 +218,11 @@ body,
 
 .ios-balance-hero {
   overflow: visible;
-  border: var(--clear-card-border);
+  border: 0;
   border-radius: var(--ios-radius-lg);
   padding: 15px 16px 14px;
-  background: #fff;
-  color: var(--ios-text);
+  background: linear-gradient(135deg, var(--ios-accent-2), var(--ios-accent));
+  color: #fff;
   box-shadow: var(--ios-shadow);
 }
 
@@ -231,18 +231,18 @@ body,
 }
 
 .ios-balance-month-select {
-  color: #4d5869;
+  color: rgba(255, 255, 255, 0.86);
   font-size: 13px;
   font-weight: 750;
 }
 
 .ios-balance-month-select svg {
-  color: #7f8997;
+  color: rgba(255, 255, 255, 0.86);
 }
 
 .ios-balance-hero > strong {
   margin-top: 8px;
-  color: var(--ios-text);
+  color: #fff;
   font-size: clamp(30px, 9vw, 38px);
   font-weight: 850;
   line-height: 1.05;
@@ -253,7 +253,7 @@ body,
 .ios-balance-hero > div {
   gap: 0;
   margin-top: 15px;
-  border-top: 1px solid #edf0f3;
+  border-top: 1px solid rgba(255, 255, 255, 0.22);
 }
 
 .ios-balance-hero p {
@@ -264,20 +264,20 @@ body,
 }
 
 .ios-balance-hero p + p {
-  border-left: 1px solid #edf0f3;
+  border-left: 1px solid rgba(255, 255, 255, 0.22);
   padding-right: 0;
   padding-left: 14px;
 }
 
 .ios-balance-hero small {
-  color: var(--ios-muted);
+  color: rgba(255, 255, 255, 0.78);
   font-size: 11px;
   opacity: 1;
 }
 
 .ios-balance-hero b {
   margin-top: 3px;
-  color: #313a49;
+  color: #fff;
   font-size: 15px;
   font-weight: 800;
   overflow-wrap: anywhere;
@@ -1471,8 +1471,6 @@ body,
 
 :is(
   .ios-reminder-row,
-  .ios-settings-row,
-  .ios-settings-info,
   .ios-book-list-row,
   .ios-book-switcher-list button,
   .ios-book-switcher-list a,
@@ -1503,8 +1501,6 @@ body,
 
 :is(
     .ios-reminder-row,
-    .ios-settings-row,
-    .ios-settings-info,
     .ios-book-list-row,
     .ios-category-row,
     .ios-import-job,
@@ -1528,7 +1524,6 @@ body,
 }
 
 .ios-record-line-details-card li > strong,
-.ios-settings-row > svg,
 .ios-book-list-row > svg,
 .ios-member-row > :last-child,
 .ios-invitation-row > :last-child {

@@ -915,11 +915,30 @@
   backdrop-filter: blur(20px);
 }
 
-.ai-message-index-panel strong {
-  padding: 0 4px 3px;
+.ai-message-index-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 2px 3px 4px;
+}
+
+.ai-message-index-panel header strong {
   color: #5b6473;
   font-size: 12px;
   font-weight: 950;
+}
+
+.ai-message-index-panel header button {
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  padding: 0;
+  background: transparent;
+  color: #9aa4b2;
+  justify-content: center;
 }
 
 .ai-message-index-panel button {

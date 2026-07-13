@@ -41,6 +41,7 @@ type AiSessionMessage = NonNullable<AiSessionResponse["session"]["messages"]>[nu
 
 type PendingAiConfirmation = {
   confirmationId: string;
+  messageId: string;
   title: string;
   description?: string;
   confirmLabel: string;
@@ -84,9 +85,14 @@ type AiChatAction =
   | { type: "stream-error"; assistantId: string; error: string }
   | { type: "stream-stop" }
   | { type: "confirmation-busy"; pending: PendingAiConfirmation }
-  | { type: "confirmation-clear" }
   | { type: "confirmation-failed"; pending: PendingAiConfirmation }
-  | { type: "confirmation-message"; message: AiRenderableMessage }
+  | {
+      type: "confirmation-resolved";
+      messageId: string;
+      confirmationId: string;
+      outcome: "confirmed" | "cancelled";
+      resultParts?: unknown[];
+    }
   | { type: "jump-visible"; visible: boolean }
   | { type: "index-reveal" }
   | { type: "index-toggle" }
@@ -179,12 +185,14 @@ function aiChatReducer(state: AiChatState, action: AiChatAction): AiChatState {
       return { ...state, isStreaming: false, thinkingAssistantId: undefined };
     case "confirmation-busy":
       return { ...state, pendingAiConfirmation: { ...action.pending, busy: true } };
-    case "confirmation-clear":
-      return { ...state, pendingAiConfirmation: undefined };
     case "confirmation-failed":
       return { ...state, pendingAiConfirmation: { ...action.pending, busy: false } };
-    case "confirmation-message":
-      return { ...state, messages: [...state.messages, action.message] };
+    case "confirmation-resolved":
+      return {
+        ...state,
+        messages: resolveConfirmationInMessage(state.messages, action),
+        pendingAiConfirmation: undefined,
+      };
     case "jump-visible":
       return { ...state, showJumpToBottom: action.visible };
     case "index-reveal":
@@ -212,6 +220,7 @@ function useAiChatController({ bookId, page, sessionId, onSessionActivity }: Omi
   const messagesRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | undefined>(undefined);
   const indexHideTimerRef = useRef<number | undefined>(undefined);
+  const indexOpenRef = useRef(false);
   const userScrollIntentRef = useRef(false);
   const autoScrollRef = useRef(true);
   const previewUrlsRef = useRef<Set<string> | null>(null);
@@ -230,6 +239,7 @@ function useAiChatController({ bookId, page, sessionId, onSessionActivity }: Omi
     showJumpToBottom,
     thinkingAssistantId,
   } = state;
+  indexOpenRef.current = indexOpen;
   const busy = isStreaming || loadingSession;
   const canUseImageRecognition = user?.plan === "pro";
 
@@ -313,7 +323,8 @@ function useAiChatController({ bookId, page, sessionId, onSessionActivity }: Omi
   const handleMessagesScroll = () => {
     const container = messagesRef.current;
     if (!container) return;
-    if (userScrollIntentRef.current) revealMessageIndex();
+    const scrollable = container.scrollHeight > container.clientHeight + 1;
+    if (scrollable && userScrollIntentRef.current) revealMessageIndex();
     const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
     const nearBottom = distanceToBottom < 72;
     autoScrollRef.current = nearBottom;
@@ -322,7 +333,6 @@ function useAiChatController({ bookId, page, sessionId, onSessionActivity }: Omi
 
   const handleUserScrollIntent = () => {
     userScrollIntentRef.current = true;
-    revealMessageIndex();
   };
 
   const revealMessageIndex = () => {
@@ -330,9 +340,16 @@ function useAiChatController({ bookId, page, sessionId, onSessionActivity }: Omi
     dispatch({ type: "index-reveal" });
     if (indexHideTimerRef.current) window.clearTimeout(indexHideTimerRef.current);
     indexHideTimerRef.current = window.setTimeout(() => {
+      if (indexOpenRef.current) return;
       userScrollIntentRef.current = false;
       dispatch({ type: "index-hide" });
     }, 3000);
+  };
+
+  const closeMessageIndex = () => {
+    if (indexHideTimerRef.current) window.clearTimeout(indexHideTimerRef.current);
+    userScrollIntentRef.current = false;
+    dispatch({ type: "index-hide" });
   };
 
   const scrollMessagesToBottom = (behavior: ScrollBehavior = "smooth") => {
@@ -412,7 +429,7 @@ function useAiChatController({ bookId, page, sessionId, onSessionActivity }: Omi
         },
       });
       const assistantMessage = assistantMessageFromResponse(result, assistantId);
-      const pending = findPendingAiConfirmation(responseParts(result));
+      const pending = findPendingAiConfirmation(responseParts(result), assistantMessage.id);
       dispatch({ type: "stream-finished", assistantId, assistantMessage, pending });
       onSessionActivity?.({ title: aiSessionTitle([...messages, userMessage]), hasMessages: true });
       if (bookId) invalidateLedgerData({ bookId, scopes: ["all"] });
@@ -446,13 +463,13 @@ function useAiChatController({ bookId, page, sessionId, onSessionActivity }: Omi
       const result = await api<AiChatResponse>(`/ai/confirmations/${pending.confirmationId}/confirm`, {
         method: "POST",
       });
-      dispatch({ type: "confirmation-clear" });
-      const parts = responseParts(result);
-      if (parts.length)
-        dispatch({
-          type: "confirmation-message",
-          message: assistantMessageFromResponse(result, `ai_confirmed_${crypto.randomUUID()}`),
-        });
+      dispatch({
+        type: "confirmation-resolved",
+        messageId: pending.messageId,
+        confirmationId: pending.confirmationId,
+        outcome: "confirmed",
+        resultParts: responseParts(result),
+      });
       if (bookId) invalidateLedgerData({ bookId, scopes: ["all"] });
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "确认操作失败";
@@ -464,7 +481,12 @@ function useAiChatController({ bookId, page, sessionId, onSessionActivity }: Omi
   const cancelPendingAiAction = async () => {
     const pending = pendingAiConfirmation;
     if (!pending) return;
-    dispatch({ type: "confirmation-clear" });
+    dispatch({
+      type: "confirmation-resolved",
+      messageId: pending.messageId,
+      confirmationId: pending.confirmationId,
+      outcome: "cancelled",
+    });
     try {
       await api(`/ai/confirmations/${pending.confirmationId}/cancel`, { method: "POST" });
     } catch (cause) {
@@ -484,6 +506,7 @@ function useAiChatController({ bookId, page, sessionId, onSessionActivity }: Omi
     cancelPendingAiAction,
     canUseImageRecognition,
     clearAttachments,
+    closeMessageIndex,
     confirmPendingAiAction,
     fileInputRef,
     handleMessagesScroll,
@@ -518,6 +541,7 @@ export function AiChat({ compact = false, ...controllerProps }: AiChatProps) {
         isStreaming={controller.isStreaming}
         messages={controller.messages}
         messagesRef={controller.messagesRef}
+        onCloseIndex={controller.closeMessageIndex}
         onMessagesScroll={controller.handleMessagesScroll}
         onScrollBottom={() => controller.scrollMessagesToBottom()}
         onScrollToMessage={controller.scrollToMessage}
@@ -681,6 +705,36 @@ function finalizeAssistantMessage(
   return upsertAssistantMessage(messages, assistantMessage);
 }
 
+function resolveConfirmationInMessage(
+  messages: AiRenderableMessage[],
+  action: {
+    messageId: string;
+    confirmationId: string;
+    outcome: "confirmed" | "cancelled";
+    resultParts?: unknown[];
+  },
+): AiRenderableMessage[] {
+  return messages.map((message) => {
+    if (message.id !== action.messageId) return message;
+    const resolvedParts = (message.parts ?? []).flatMap((rawPart) => {
+      const part = normalizeAiPart(rawPart);
+      if (part?.type === "tool-status" && (part.status === "pending" || part.status === "running")) {
+        return [
+          {
+            ...part,
+            status: "success",
+            label: action.outcome === "confirmed" ? "已确认" : "已取消",
+            message: undefined,
+          },
+        ];
+      }
+      if (part?.type === "confirmation" && part.confirmationId === action.confirmationId) return [];
+      return [rawPart];
+    });
+    return { ...message, parts: [...resolvedParts, ...(action.resultParts ?? [])] };
+  });
+}
+
 function hasRenderableMessageContent(message: AiRenderableMessage) {
   return (message.parts ?? [])
     .map((part) => normalizeAiPart(part))
@@ -757,7 +811,7 @@ function parseSseEvent(raw: string): { name: string; data: Record<string, unknow
   }
 }
 
-function findPendingAiConfirmation(parts: unknown[]): PendingAiConfirmation | undefined {
+function findPendingAiConfirmation(parts: unknown[], messageId: string): PendingAiConfirmation | undefined {
   const confirmation = parts
     .map(normalizeAiPart)
     .find((part): part is Extract<AiStructuredPart, { type: "confirmation" }> =>
@@ -767,6 +821,7 @@ function findPendingAiConfirmation(parts: unknown[]): PendingAiConfirmation | un
   const parsedExpiresAt = confirmation.expiresAt ? Date.parse(confirmation.expiresAt) : Number.NaN;
   return {
     confirmationId: confirmation.confirmationId,
+    messageId,
     title: confirmation.title ?? "需要确认",
     ...(confirmation.message ? { description: confirmation.message } : {}),
     confirmLabel: confirmation.confirmLabel ?? "确认",

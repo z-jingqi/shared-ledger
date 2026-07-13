@@ -1,4 +1,4 @@
-import { ArrowDownIcon, ListNumbersIcon, SparkleIcon } from "@phosphor-icons/react";
+import { ArrowDownIcon, ListNumbersIcon, SparkleIcon, XIcon } from "@phosphor-icons/react";
 import type { RefObject } from "react";
 import { normalizeAiPart, type AiRenderableMessage, type AiStructuredPart } from "../../features/ai/types";
 import {
@@ -26,6 +26,7 @@ export function AiMessageList({
   isStreaming,
   messages,
   messagesRef,
+  onCloseIndex,
   onMessagesScroll,
   onScrollBottom,
   onScrollToMessage,
@@ -40,6 +41,7 @@ export function AiMessageList({
   isStreaming: boolean;
   messages: AiRenderableMessage[];
   messagesRef: RefObject<HTMLDivElement | null>;
+  onCloseIndex: () => void;
   onMessagesScroll: () => void;
   onScrollBottom: () => void;
   onScrollToMessage: (messageId: string) => void;
@@ -59,7 +61,12 @@ export function AiMessageList({
           </button>
           {indexOpen && (
             <div className="ai-message-index-panel" role="menu" aria-label="当前会话目录">
-              <strong>当前会话</strong>
+              <header>
+                <strong>当前会话</strong>
+                <button type="button" aria-label="关闭会话目录" onClick={onCloseIndex}>
+                  <XIcon size={16} weight="bold" />
+                </button>
+              </header>
               {userMessageIndex.map((item, index) => (
                 <button
                   type="button"

@@ -3154,13 +3154,17 @@ a {
 }
 .ai-pending-actions {
   display: flex;
+  flex-shrink: 0;
   gap: 8px;
 }
 .ai-pending-actions .ui-button {
+  width: auto;
   min-height: 34px;
+  flex-shrink: 0;
   border-radius: 12px;
   padding-inline: 14px;
   font-size: 13px;
+  white-space: nowrap;
 }
 .ai-pending-progress {
   grid-column: 1 / -1;

@@ -1302,14 +1302,65 @@ describe("shared ledger mobile UI", () => {
     expect(container.querySelector(".ai-message time")).toBeNull();
 
     const index = container.querySelector(".ai-message-index");
+    const messagesEl = container.querySelector(".ai-messages")!;
     expect(index).not.toHaveClass("visible");
+
+    // A tap alone (no real scroll, no scrollable content) must not reveal the index.
+    fireEvent.pointerDown(messagesEl);
+    fireEvent.wheel(messagesEl);
+    expect(index).not.toHaveClass("visible");
+
+    Object.defineProperty(messagesEl, "scrollHeight", { configurable: true, value: 800 });
+    Object.defineProperty(messagesEl, "clientHeight", { configurable: true, value: 400 });
+
+    // A wheel gesture alone (before any real scroll event) must not reveal it either.
+    fireEvent.wheel(messagesEl);
+    expect(index).not.toHaveClass("visible");
+
     vi.useFakeTimers();
-    fireEvent.wheel(container.querySelector(".ai-messages")!);
+    fireEvent.scroll(messagesEl);
     expect(index).toHaveClass("visible");
+    act(() => vi.advanceTimersByTime(2999));
+    expect(index).toHaveClass("visible");
+    fireEvent.wheel(messagesEl);
+    fireEvent.scroll(messagesEl);
     act(() => vi.advanceTimersByTime(2999));
     expect(index).toHaveClass("visible");
     act(() => vi.advanceTimersByTime(2));
     expect(index).not.toHaveClass("visible");
+    vi.useRealTimers();
+  });
+  it("keeps the message outline open past the auto-hide timeout until explicitly closed", async () => {
+    const user = userEvent.setup();
+    plan = "pro";
+    seedAiSession([
+      { id: "user_message", role: "user", parts: [{ type: "text", text: "今年大于100的支出" }] },
+      { id: "assistant_message", role: "assistant", parts: [{ type: "text", text: "已筛选出 12 笔记录。" }] },
+    ]);
+    const { container } = render(<App />);
+    await user.click(await screen.findByLabelText("打开 AI 助手"));
+    await screen.findByRole("heading", { name: "测试会话" });
+
+    const index = container.querySelector(".ai-message-index");
+    const messagesEl = container.querySelector(".ai-messages")!;
+    Object.defineProperty(messagesEl, "scrollHeight", { configurable: true, value: 800 });
+    Object.defineProperty(messagesEl, "clientHeight", { configurable: true, value: 400 });
+
+    vi.useFakeTimers();
+    fireEvent.wheel(messagesEl);
+    fireEvent.scroll(messagesEl);
+    expect(index).toHaveClass("visible");
+
+    fireEvent.click(screen.getByRole("button", { name: "打开会话目录" }));
+    expect(screen.getByRole("menu", { name: "当前会话目录" })).toBeInTheDocument();
+
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(index).toHaveClass("visible");
+    expect(screen.getByRole("menu", { name: "当前会话目录" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭会话目录" }));
+    expect(index).not.toHaveClass("visible");
+    expect(screen.queryByRole("menu", { name: "当前会话目录" })).not.toBeInTheDocument();
     vi.useRealTimers();
   });
   it("renders AI navigation parts as page-name cards instead of raw URLs", async () => {
@@ -1367,7 +1418,7 @@ describe("shared ledger mobile UI", () => {
   it("moves generic AI confirmations to the composer confirmation bar and renders confirm response parts", async () => {
     const user = userEvent.setup();
     plan = "pro";
-    render(<App />);
+    const { container } = render(<App />);
 
     await user.click(await screen.findByLabelText("打开 AI 助手"));
     await user.type(await screen.findByPlaceholderText("输入消息..."), "确认动作");
@@ -1377,6 +1428,12 @@ describe("shared ledger mobile UI", () => {
     expect(within(confirmation).getByText("确认结算本月账本")).toBeInTheDocument();
     expect(within(confirmation).getByRole("button", { name: "确认结算" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "确认" })).not.toBeInTheDocument();
+    expect(container.querySelector(".ai-tool-status-shimmer")).toBeInTheDocument();
+    const pendingMessageId = container
+      .querySelector(".ai-confirmation-card")
+      ?.closest("[data-ai-message-id]")
+      ?.getAttribute("data-ai-message-id");
+    expect(pendingMessageId).toBeTruthy();
 
     await user.click(within(confirmation).getByRole("button", { name: "确认结算" }));
     await waitFor(() =>
@@ -1386,6 +1443,15 @@ describe("shared ledger mobile UI", () => {
     );
     expect(await screen.findByText("结算已确认")).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "打开分析" })).toBeInTheDocument();
+
+    // The result is folded into the original message in place, not appended as a new bubble.
+    const resolvedMessages = container.querySelectorAll(`[data-ai-message-id="${pendingMessageId}"]`);
+    expect(resolvedMessages).toHaveLength(1);
+    const resolvedMessage = resolvedMessages[0] as HTMLElement;
+    expect(within(resolvedMessage).getByText("结算已确认")).toBeInTheDocument();
+    expect(within(resolvedMessage).getByRole("button", { name: "打开分析" })).toBeInTheDocument();
+    expect(resolvedMessage.querySelector(".ai-tool-status-shimmer")).not.toBeInTheDocument();
+    expect(screen.queryByText("确认结算本月账本")).not.toBeInTheDocument();
   });
   it("shows image attachment previews inside the AI composer and removes them", async () => {
     const user = userEvent.setup();

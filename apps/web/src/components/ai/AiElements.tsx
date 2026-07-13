@@ -54,7 +54,6 @@ export function AiConversation({
     <div
       className="ai-messages"
       aria-live="polite"
-      onPointerDown={onUserScrollIntent}
       onScroll={onScroll}
       onTouchMove={onUserScrollIntent}
       onWheel={onUserScrollIntent}
