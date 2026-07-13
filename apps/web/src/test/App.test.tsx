@@ -1646,7 +1646,7 @@ describe("shared ledger mobile UI", () => {
     expect(screen.queryByLabelText("打开 AI 助手")).not.toBeInTheDocument();
     expect(screen.queryByText("想看更细的原因？")).not.toBeInTheDocument();
     expect(container.querySelector(".ios-ai-analysis-card")).toBeNull();
-    const aiAnalysisLink = await screen.findByRole("button", { name: /用 AI 做更多分析/ });
+    const aiAnalysisLink = await screen.findByRole("button", { name: /AI 分析/ });
     expect(aiAnalysisLink.closest(".ios-analysis-ai-action")).toBeInTheDocument();
 
     await user.click(aiAnalysisLink);

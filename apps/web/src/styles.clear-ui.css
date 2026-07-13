@@ -1355,17 +1355,14 @@ body,
 
 .ios-ai-session-sheet,
 .ios-ai-session-row,
-.ios-ai-session-search,
 .ios-ai-session-new {
   border-color: var(--ios-line);
   background: #fff;
   box-shadow: none;
 }
 
-.ios-ai-session-row.active,
-.ios-ai-session-new {
+.ios-ai-session-row.active {
   border-color: #ffd2bd;
-  background: #fff4ed;
 }
 
 /* Authentication */

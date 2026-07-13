@@ -1,21 +1,9 @@
 import { ListIcon, XIcon } from "@phosphor-icons/react";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useReducer,
-  useRef,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type MouseEvent,
-} from "react";
+import { useCallback, useEffect, useMemo, useReducer } from "react";
 import { Navigate } from "react-router-dom";
 import { toast } from "sonner";
 import { AiChat } from "../components/ai/AiChat";
-import {
-  AiSessionDirectory,
-  type AiSession,
-  type SessionMenuPosition,
-} from "../components/ai/AiSessionDirectory";
+import { AiSessionDirectory, type AiSession } from "../components/ai/AiSessionDirectory";
 import { IosSheet } from "../components/ios/IosDesign";
 import { useActiveBook } from "../hooks/useActiveBook";
 import { api } from "../lib";
@@ -23,11 +11,6 @@ import { api } from "../lib";
 type AiSheetState = {
   activeSessionId?: string;
   loading: boolean;
-  menuPosition?: SessionMenuPosition;
-  menuSessionId?: string;
-  renameValue: string;
-  renamingSessionId?: string;
-  sessionQuery: string;
   sessions: AiSession[];
   showSessions: boolean;
 };
@@ -40,23 +23,11 @@ type AiSheetAction =
   | { type: "select-session"; sessionId: string }
   | { type: "show-sessions" }
   | { type: "close-session-sheet" }
-  | { type: "close-menu" }
-  | { type: "open-menu"; sessionId: string; position: SessionMenuPosition }
-  | { type: "begin-rename"; session: AiSession }
-  | { type: "rename-value"; value: string }
-  | { type: "rename-cancel" }
-  | { type: "rename-saved"; session: AiSession }
-  | { type: "delete-session"; sessionId: string }
-  | { type: "search"; value: string };
+  | { type: "delete-session"; sessionId: string };
 
 const initialAiSheetState: AiSheetState = {
   activeSessionId: undefined,
   loading: true,
-  menuPosition: undefined,
-  menuSessionId: undefined,
-  renameValue: "",
-  renamingSessionId: undefined,
-  sessionQuery: "",
   sessions: [],
   showSessions: false,
 };
@@ -78,8 +49,6 @@ function aiSheetReducer(state: AiSheetState, action: AiSheetAction): AiSheetStat
       return {
         ...state,
         activeSessionId: action.session.id,
-        menuPosition: undefined,
-        menuSessionId: undefined,
         sessions: [
           action.session,
           ...state.sessions.filter((session) => session.id !== action.session.id),
@@ -101,55 +70,19 @@ function aiSheetReducer(state: AiSheetState, action: AiSheetAction): AiSheetStat
         ),
       };
     case "select-session":
-      return {
-        ...state,
-        activeSessionId: action.sessionId,
-        menuPosition: undefined,
-        menuSessionId: undefined,
-        showSessions: false,
-      };
+      return { ...state, activeSessionId: action.sessionId, showSessions: false };
     case "show-sessions":
       return { ...state, showSessions: true };
     case "close-session-sheet":
-      return { ...state, menuPosition: undefined, menuSessionId: undefined, showSessions: false };
-    case "close-menu":
-      return { ...state, menuPosition: undefined, menuSessionId: undefined };
-    case "open-menu":
-      return { ...state, menuPosition: action.position, menuSessionId: action.sessionId };
-    case "begin-rename":
-      return {
-        ...state,
-        menuPosition: undefined,
-        menuSessionId: undefined,
-        renamingSessionId: action.session.id,
-        renameValue: action.session.title,
-      };
-    case "rename-value":
-      return { ...state, renameValue: action.value };
-    case "rename-cancel":
-      return { ...state, renamingSessionId: undefined, renameValue: "" };
-    case "rename-saved":
-      return {
-        ...state,
-        renameValue: "",
-        renamingSessionId: undefined,
-        sessions: state.sessions.map((session) =>
-          session.id === action.session.id ? action.session : session,
-        ),
-      };
+      return { ...state, showSessions: false };
     case "delete-session": {
       const sessions = state.sessions.filter((session) => session.id !== action.sessionId);
       return {
         ...state,
         activeSessionId: state.activeSessionId === action.sessionId ? sessions[0]?.id : state.activeSessionId,
-        menuPosition: undefined,
-        menuSessionId: undefined,
-        renamingSessionId: undefined,
         sessions,
       };
     }
-    case "search":
-      return { ...state, sessionQuery: action.value };
   }
 }
 
@@ -160,20 +93,10 @@ export function AiPage() {
 
 export function AiSheet({ onClose }: { onClose: () => void }) {
   const { book } = useActiveBook();
-  const sessionSheetRef = useRef<HTMLElement | null>(null);
   const [state, dispatch] = useReducer(aiSheetReducer, initialAiSheetState);
   const activeSession = useMemo(
     () => state.sessions.find((session) => session.id === state.activeSessionId) ?? state.sessions[0],
     [state.activeSessionId, state.sessions],
-  );
-  const visibleSessions = useMemo(() => {
-    const query = state.sessionQuery.trim().toLowerCase();
-    if (!query) return state.sessions;
-    return state.sessions.filter((session) => session.title.toLowerCase().includes(query));
-  }, [state.sessionQuery, state.sessions]);
-  const menuSession = useMemo(
-    () => state.sessions.find((session) => session.id === state.menuSessionId),
-    [state.menuSessionId, state.sessions],
   );
 
   useEffect(() => {
@@ -222,38 +145,16 @@ export function AiSheet({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const clearCurrentSession = async () => {
-    if (!activeSession) return;
-    await deleteSession(activeSession.id, true);
-    await startNewSession();
-  };
-
   const updateSessionActivity = useCallback((detail: { title?: string; hasMessages?: boolean }) => {
     dispatch({ type: "session-activity", title: detail.title, hasMessages: detail.hasMessages });
   }, []);
 
-  const saveRenameSession = async () => {
-    const title = state.renameValue.trim();
-    if (!state.renamingSessionId || !title) return;
-    try {
-      const result = await api<{ session: AiSession }>(`/ai/sessions/${state.renamingSessionId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ title: title.slice(0, 40) }),
-      });
-      dispatch({ type: "rename-saved", session: result.session });
-    } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "重命名失败", {
-        duration: 3000,
-        closeButton: true,
-      });
-    }
-  };
-
-  const deleteSession = async (sessionId: string, silent = false) => {
+  const deleteSession = async (sessionId: string) => {
     try {
       await api(`/ai/sessions/${sessionId}`, { method: "DELETE" });
       dispatch({ type: "delete-session", sessionId });
-      if (!silent) toast.success("会话已删除", { duration: 2200, closeButton: true });
+      toast.success("会话已删除", { duration: 2200, closeButton: true });
+      if (state.sessions.length <= 1) await startNewSession();
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : "删除会话失败", {
         duration: 3000,
@@ -262,58 +163,7 @@ export function AiSheet({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const toggleSessionMenu = (sessionId: string, event: MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
-    if (state.menuSessionId === sessionId) {
-      dispatch({ type: "close-menu" });
-      return;
-    }
-    const sheetRect = sessionSheetRef.current?.getBoundingClientRect();
-    const buttonRect = event.currentTarget.getBoundingClientRect();
-    if (sheetRect) {
-      const menuHeight = 124;
-      const top = Math.min(
-        Math.max(buttonRect.top - sheetRect.top + 18, 74),
-        Math.max(sheetRect.height - menuHeight - 72, 74),
-      );
-      dispatch({
-        type: "open-menu",
-        sessionId,
-        position: {
-          top,
-          right: Math.max(sheetRect.right - buttonRect.right + 2, 16),
-        },
-      });
-    } else {
-      dispatch({ type: "open-menu", sessionId, position: { top: 120, right: 18 } });
-    }
-  };
-
-  useEffect(() => {
-    if (!state.menuSessionId) return undefined;
-    const closeOnOutsidePointer = (event: PointerEvent) => {
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-      if (target.closest(".ios-ai-session-menu")) return;
-      if (target.closest("[data-ai-session-menu-trigger='true']")) return;
-      dispatch({ type: "close-menu" });
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") dispatch({ type: "close-menu" });
-    };
-    document.addEventListener("pointerdown", closeOnOutsidePointer, true);
-    document.addEventListener("keydown", closeOnEscape, true);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
-      document.removeEventListener("keydown", closeOnEscape, true);
-    };
-  }, [state.menuSessionId]);
-
   const sheetTitle = truncateTitle(activeSession?.title || "新会话");
-  const saveRenameOnEnter = (event: ReactKeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Enter") void saveRenameSession();
-    if (event.key === "Escape") dispatch({ type: "rename-cancel" });
-  };
 
   return (
     <IosSheet
@@ -343,26 +193,11 @@ export function AiSheet({ onClose }: { onClose: () => void }) {
       {state.showSessions && (
         <AiSessionDirectory
           activeSessionId={activeSession?.id}
-          menuPosition={state.menuPosition}
-          menuSession={menuSession}
-          menuSessionId={state.menuSessionId}
-          onBeginRename={(session) => dispatch({ type: "begin-rename", session })}
-          onClearCurrent={() => void clearCurrentSession()}
           onClose={() => dispatch({ type: "close-session-sheet" })}
           onDelete={(sessionId) => void deleteSession(sessionId)}
           onNewSession={() => void startNewSession()}
-          onRenameKeyDown={saveRenameOnEnter}
-          onRenameValueChange={(value) => dispatch({ type: "rename-value", value })}
-          onSaveRename={() => void saveRenameSession()}
-          onScroll={() => dispatch({ type: "close-menu" })}
-          onSearchChange={(value) => dispatch({ type: "search", value })}
           onSelectSession={(sessionId) => dispatch({ type: "select-session", sessionId })}
-          onToggleMenu={toggleSessionMenu}
-          renameValue={state.renameValue}
-          renamingSessionId={state.renamingSessionId}
-          searchValue={state.sessionQuery}
-          sheetRef={sessionSheetRef}
-          visibleSessions={visibleSessions}
+          sessions={state.sessions}
         />
       )}
       {state.loading ? (

@@ -111,7 +111,7 @@ export function AnalysisPage() {
           <button className="ios-analysis-ai-action" type="button" onClick={() => openSheet({ type: "ai" })}>
             <SparkleIcon size={18} weight="fill" />
             <span>
-              <b>用 AI 做更多分析</b>
+              <b>AI 分析</b>
               <small>按分类、成员和趋势继续拆解</small>
             </span>
             <CaretRightIcon size={17} />

@@ -51,7 +51,6 @@ export function BookHomePage() {
   const income = sum(monthTransactions, "income");
   const expense = sum(monthTransactions, "expense");
   const todayExpense = sum(todayTransactions, "expense");
-  const averageExpense = monthTransactions.length ? expense / monthTransactions.length : 0;
   const importJobs = mergeLocalImportPlaceholders(book?.id, user?.id, imports?.imports ?? []);
   const processing = importJobs.filter(isProcessingJob);
   const duplicateReviews = importJobs.filter((job) => job.status === "duplicate_review");
@@ -100,31 +99,18 @@ export function BookHomePage() {
             <CaretDownIcon size={14} weight="bold" aria-hidden />
           </button>
           <strong>{yuan(incomeEnabled ? income - expense : expense, displayBook.currency)}</strong>
-          <div>
-            {incomeEnabled ? (
-              <>
-                <p>
-                  <small>收入</small>
-                  <b>{yuan(income, displayBook.currency)}</b>
-                </p>
-                <p>
-                  <small>支出</small>
-                  <b>{yuan(expense, displayBook.currency)}</b>
-                </p>
-              </>
-            ) : (
-              <>
-                <p>
-                  <small>记录</small>
-                  <b>{monthTransactions.length} 笔</b>
-                </p>
-                <p>
-                  <small>笔均</small>
-                  <b>{yuan(averageExpense, displayBook.currency)}</b>
-                </p>
-              </>
-            )}
-          </div>
+          {incomeEnabled ? (
+            <div>
+              <p>
+                <small>收入</small>
+                <b>{yuan(income, displayBook.currency)}</b>
+              </p>
+              <p>
+                <small>支出</small>
+                <b>{yuan(expense, displayBook.currency)}</b>
+              </p>
+            </div>
+          ) : null}
         </section>
 
         <IosCard className="ios-today-card">
